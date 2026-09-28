@@ -256,26 +256,44 @@ def test_fallback_curriculum_forms_try_inline_then_add_tags(form_type):
     "form_type",
     [
         # Previously verified (2026-04-23), re-confirmed 2026-06-27
-        "US_CASE", "US_CASE_2021",
-        "TEACH", "TEACH_2021",
-        "QIAT", "QIAT_2021",
-        "STAT", "STAT_2021",
-        "LAT", "LAT_2021",
+        "US_CASE",
+        "TEACH",
+        "QIAT",
+        "STAT",
+        "LAT",
         # Newly verified 2026-06-27 (kzTreeElsAll≥1, sloListItems≥4, kcCBs≥3)
-        "ACAT", "ACAT_2021",
-        "JCF", "JCF_2021",
-        "SDL", "SDL_2021",
-        "ESLE_ASSESS", "ESLE_2021",
-        "TEACH_OBS", "TEACH_OBS_2021",
-        "TEACH_CONFID", "TEACH_CONFID_2021",
-        "EDU_ACT", "EDU_ACT_2021",
-        "FORMAL_COURSE", "FORMAL_COURSE_2021",
+        "ACAT",
+        "JCF",
+        "SDL",
+        "ESLE_ASSESS",
+        "TEACH_OBS",
+        "TEACH_CONFID",
+        "EDU_ACT",
+        "FORMAL_COURSE",
         "DOPS_ACCS",  # ACCS-specific inline form
     ],
 )
 def test_verified_inline_tree_forms_do_not_use_tag_fallback(form_type):
     assert _uses_tag_based_curriculum(form_type) is False
     assert _can_fallback_to_tag_based_curriculum(form_type) is False
+
+
+@pytest.mark.parametrize(
+    "form_type",
+    [
+        "US_CASE_2021", "TEACH_2021", "QIAT_2021", "STAT_2021", "LAT_2021",
+        "ACAT_2021", "JCF_2021", "SDL_2021", "ESLE_2021", "TEACH_OBS_2021",
+        "TEACH_CONFID_2021", "EDU_ACT_2021", "FORMAL_COURSE_2021",
+    ],
+)
+def test_2021_variants_try_inline_then_add_tags(form_type):
+    """The inline evidence is for the base forms; the 2021 pages differ.
+
+    Live 2026-09-28, DOPS_2021, TEACH_2021 and FORMAL_COURSE_2021 rendered no
+    inline tree, only Add Tags, so a 2021 inline miss must reach Add Tags.
+    """
+    assert _uses_tag_based_curriculum(form_type) is False
+    assert _can_fallback_to_tag_based_curriculum(form_type) is True
 
 
 def test_schema_flag_overrides_default_set(monkeypatch):
@@ -530,3 +548,60 @@ async def test_reflect_log_intermediate_ticks_kcs_and_reports(monkeypatch):
     assert captured["kc_targets"] == kcs
     # KC result is surfaced, not silently discarded.
     assert any("curriculum_links" in f for f in result["filled"])
+
+
+@pytest.mark.asyncio
+async def test_2021_variant_of_verified_inline_form_falls_back_to_tag_modal(monkeypatch):
+    """TEACH_2021 has no inline tree live (2026-09-28), unlike TEACH itself."""
+    page = MagicMock()
+    in_form_fill = AsyncMock(return_value=([], ["SLO expand failed: Higher SLO9:"]))
+    tag_fill = AsyncMock(return_value=(["SLO9 KC2"], []))
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_links", in_form_fill)
+    monkeypatch.setattr(kaizen_form_filer, "_fill_curriculum_tags", tag_fill)
+
+    ticked, errors = await _fill_curriculum_for_form(
+        page, "TEACH_2021", ["SLO9"], ["SLO9 KC2"], "Higher"
+    )
+
+    assert ticked == ["SLO9 KC2"]
+    assert errors == []
+    in_form_fill.assert_awaited_once()
+    tag_fill.assert_awaited_once()
+    # The base form keeps its verified inline-only route.
+    assert kaizen_form_filer._can_fallback_to_tag_based_curriculum("TEACH") is False
+
+
+@pytest.mark.asyncio
+async def test_tag_modal_unfolds_2021_root_before_2025_update(monkeypatch):
+    """The 2021 forms' tag tree opens on a folded "2021 EM Curriculum" root."""
+    clicked = []
+
+    async def evaluate(script, arg=None):
+        if script is kaizen_form_filer.EXPAND_TAG_TREE_LINK_JS:
+            clicked.append(arg)
+            if arg == "2021 EM Curriculum (2025 Update)":
+                return clicked.count(arg) > 1  # only visible once the root is open
+            return arg in ("2021 EM Curriculum", "Specialty Learning Outcomes - Higher")
+        if script is kaizen_form_filer.TICK_KC_JS:
+            return {"found": True, "checked": True}
+        return {}
+
+    page = MagicMock()
+    page.evaluate = AsyncMock(side_effect=evaluate)
+    monkeypatch.setattr(kaizen_form_filer, "_click_first_visible", AsyncMock(return_value=True))
+    monkeypatch.setattr(kaizen_form_filer, "_await_curriculum_tree", AsyncMock(return_value=True))
+    monkeypatch.setattr(kaizen_form_filer, "_read_tag_count", AsyncMock(return_value=1))
+    monkeypatch.setattr(kaizen_form_filer.asyncio, "sleep", AsyncMock())
+
+    ticked, _ = await kaizen_form_filer._fill_curriculum_tags(
+        page, ["SLO3"], ["SLO3 KC2"], "Higher"
+    )
+
+    assert clicked[:4] == [
+        "2021 EM Curriculum (2025 Update)",
+        "2021 EM Curriculum",
+        "2021 EM Curriculum (2025 Update)",
+        "Specialty Learning Outcomes - Higher",
+    ]
+    assert "Specialty Learning Outcomes" not in clicked  # stage node found first
+    assert ticked == ["SLO3 KC2"]

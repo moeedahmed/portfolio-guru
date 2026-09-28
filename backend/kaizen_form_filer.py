@@ -1826,6 +1826,22 @@ EXPAND_TAG_TREE_LINK_JS = """(wantedText) => {
         return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
     }
     var wanted = normalise(wantedText);
+    // kz-tree renders each expandable node as an anchor. Prefer the anchor
+    // whose own text is the closest match: the broad scan below meets outer
+    // containers first in document order, "clicks" one of them, reports
+    // success and leaves the tree folded.
+    var best = null;
+    var anchors = document.querySelectorAll('a');
+    for (var a = 0; a < anchors.length; a++) {
+        var at = normalise(anchors[a].textContent || '');
+        if (at && at.indexOf(wanted) !== -1 && (!best || at.length < best.len)) {
+            best = { el: anchors[a], len: at.length };
+        }
+    }
+    if (best) {
+        best.el.click();
+        return true;
+    }
     var nodes = document.querySelectorAll('a, button, [ng-click], .tree-node, .ng-binding, span, div');
     for (var i = 0; i < nodes.length; i++) {
         var text = normalise(nodes[i].textContent || '');
@@ -3036,6 +3052,11 @@ def _can_fallback_to_tag_based_curriculum(form_type: str) -> bool:
     """
     base = _curriculum_base_form_type(form_type)
     schema = _curriculum_schema_for_form(form_type)
+    # The inline-tree evidence was taken on the base forms. The *_2021 pages
+    # are different Kaizen forms and, live on 2026-09-28, DOPS_2021, TEACH_2021
+    # and FORMAL_COURSE_2021 showed no inline tree at all, only Add Tags.
+    if canonical_form_type(form_type) in _FORM_FIELD_MAP_VARIANT_BASES:
+        return _has_curriculum_fields(schema)
     if "tag_based_curriculum" in schema:
         return bool(schema["tag_based_curriculum"])
     if base in FORMS_WITH_VERIFIED_INLINE_CURRICULUM_TREE:
@@ -3109,21 +3130,6 @@ async def _fill_curriculum_tags(
 
     await asyncio.sleep(1)
 
-    for label in (
-        "2021 EM Curriculum (2025 Update)",
-        "Specialty Learning Outcomes",
-    ):
-        expanded = await page.evaluate(EXPAND_TAG_TREE_LINK_JS, label)
-        if expanded:
-            await asyncio.sleep(1)
-
-    slos = set()
-    for source in (slo_codes, kc_targets):
-        for entry in source:
-            m = re.search(r"SLO\s*(\d+)", str(entry), re.IGNORECASE)
-            if m:
-                slos.add(f"SLO{m.group(1)}")
-
     stage_prefix = "Higher"
     if stage_label:
         for stage in ("Higher", "Intermediate", "ACCS", "PEM"):
@@ -3131,6 +3137,28 @@ async def _fill_curriculum_tags(
                 stage_prefix = stage
                 break
 
+    # The *_2021 forms' tag tree opens on a folded "2021 EM Curriculum" root
+    # (live probe 2026-09-28: "1373 items 2021 EM Curriculum", no SLOs), so the
+    # 2025 Update collection is only reachable after that root is unfolded.
+    if not await page.evaluate(EXPAND_TAG_TREE_LINK_JS, "2021 EM Curriculum (2025 Update)"):
+        if await page.evaluate(EXPAND_TAG_TREE_LINK_JS, "2021 EM Curriculum"):
+            await asyncio.sleep(1)
+            await page.evaluate(EXPAND_TAG_TREE_LINK_JS, "2021 EM Curriculum (2025 Update)")
+    await asyncio.sleep(1)
+    for label in (
+        f"Specialty Learning Outcomes - {stage_prefix}",
+        "Specialty Learning Outcomes",
+    ):
+        if await page.evaluate(EXPAND_TAG_TREE_LINK_JS, label):
+            await asyncio.sleep(1)
+            break
+
+    slos = set()
+    for source in (slo_codes, kc_targets):
+        for entry in source:
+            m = re.search(r"SLO\s*(\d+)", str(entry), re.IGNORECASE)
+            if m:
+                slos.add(f"SLO{m.group(1)}")
 
     await _await_curriculum_tree(page)
     for slo in sorted(slos):
