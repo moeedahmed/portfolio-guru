@@ -88,11 +88,12 @@ class KaizenProvider:
             ws = _resolve_cdp_ws(env)
             if ws:
                 env["BU_CDP_WS"] = ws
-            cmd = [BROWSER_HARNESS, "-c"]
-            cmd.append("exec(open('" + tmp_path.replace("'", "'\\''") + "').read())")
+            # browser-harness reads its script from stdin (``-c`` was removed).
+            script = "exec(open(" + repr(tmp_path) + ").read())"
             try:
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=timeout, env=env
+                    [BROWSER_HARNESS], input=script,
+                    capture_output=True, text=True, timeout=timeout, env=env
                 )
             except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
                 raise KaizenInfrastructureError(f"browser-harness invocation failed: {exc}") from exc
@@ -196,7 +197,8 @@ print(json.dumps({{"title": t, "body_preview": b[:{KAIZEN_DASHBOARD_BODY_PREVIEW
 
         try:
             result = subprocess.run(
-                [BROWSER_HARNESS, "-c", 'import os,json;exec(open("' + script + '").read())'],
+                [BROWSER_HARNESS],
+                input="import os,json;exec(open(" + repr(script) + ").read())",
                 capture_output=True, text=True, timeout=60, env=env
             )
             if result.returncode != 0:

@@ -5272,31 +5272,28 @@ class TestVoiceProfileTwoPathFlow:
         assert 'Settings' in (sim.get_last_text() or '')
 
     @pytest.mark.asyncio
-    async def test_kaizen_path_opens_sample_size_choice_with_read_only_copy(self):
+    async def test_kaizen_path_reads_recent_entries_straight_away(self):
+        """Kaizen entries goes straight to the read: no sample-size picker."""
         from bot import AWAIT_VOICE_EXAMPLES, voice_collect_example
+        from voice_sampler import SampleWindow, SamplerResult, SamplerStatus
 
         sim = BotSimulator()
         update = sim._make_callback_update('VOICE|path_kaizen')
         context = sim._make_context()
 
-        result = await voice_collect_example(update, context)
+        fake_result = SamplerResult(status=SamplerStatus.NO_SAMPLES, window=SampleWindow.RECENT_10)
+        with patch('voice_sampler.sample_kaizen_entries',
+                   new_callable=AsyncMock, return_value=fake_result) as sampler:
+            result = await voice_collect_example(update, context)
 
+        sampler.assert_awaited_once_with(update.effective_user.id)
         assert result == AWAIT_VOICE_EXAMPLES
-        text = sim.get_last_text() or ''
-        # The sample-size screen must carry the lightweight safety wording, so
-        # the Kaizen button itself acts as the user's choice/action.
-        assert 'Pick a sample size' in text
-        assert 'read-only' in text.lower()
-        assert 'no creating' in text.lower()
-        assert 'submitting' in text.lower()
-
+        texts = ' '.join(str(text) for _, text, _ in sim.messages_sent)
+        assert 'Reading your recent Kaizen entries' in texts
+        assert 'Pick a sample size' not in texts
         buttons = sim.get_last_buttons()
-        assert ('✅ I consent — pick sample', 'VOICE|kaizen_consent') not in buttons
-        assert ('📋 Recent 10', 'VOICE|kaizen_sample|recent_10') in buttons
-        assert ('📅 6 months', 'VOICE|kaizen_sample|last_6m') in buttons
-        assert ('📅 12 months', 'VOICE|kaizen_sample|last_12m') in buttons
-        assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
-        assert context.user_data.get('voice_kaizen_path_started') is True
+        assert not any('kaizen_sample' in data for _label, data in buttons)
+        assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
 
     @pytest.mark.asyncio
     async def test_kaizen_sample_requires_path_choice_first(self):
@@ -5315,7 +5312,7 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         text = (sim.get_last_text() or '').lower()
-        assert 'sample option is no longer active' in text
+        assert 'no longer active' in text
 
     @pytest.mark.asyncio
     async def test_kaizen_sample_invokes_sampler_without_live_browser(self):
@@ -5576,63 +5573,163 @@ class TestVoiceProfileTwoPathFlow:
 
     @pytest.mark.asyncio
     async def test_voice_sampler_uses_mocked_read_only_runner(self):
-        """Normal tests must not touch live Kaizen; the runner is mockable."""
-        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+        """Normal tests must not touch live Kaizen; the reader is mockable."""
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
 
         with patch(
-            'voice_sampler._run_browser_harness',
+            'voice_sampler._read_as_user',
+            new_callable=AsyncMock,
             return_value={'status': 'ok', 'samples': ['Reflective example text']},
-        ) as runner:
-            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+        ) as reader:
+            result = await sample_kaizen_entries(123)
 
-        runner.assert_called_once()
+        reader.assert_awaited_once_with(123, 10)
         assert result.status == SamplerStatus.OK
         assert result.samples == ['Reflective example text']
 
+    @staticmethod
+    def _patch_kaizen_bootstrap(*, cached, credentials, login=True):
+        """Patch the per-user browser bootstrap the sampler borrows from kaizen_sync."""
+        from contextlib import ExitStack
+
+        page = MagicMock()
+        page.context = MagicMock()
+        stack = ExitStack()
+        mocks = {
+            'open': stack.enter_context(patch('kaizen_sync._open_kaizen_session_page',
+                                              new_callable=AsyncMock, return_value=(page, MagicMock()))),
+            'cached': stack.enter_context(patch('kaizen_sync._restore_cached_session',
+                                                new_callable=AsyncMock, return_value=cached)),
+            'creds': stack.enter_context(patch('kaizen_sync._load_user_credentials',
+                                               return_value=credentials)),
+            'login': stack.enter_context(patch('kaizen_sync._login_kaizen_page',
+                                               new_callable=AsyncMock, return_value=login)),
+            'persist': stack.enter_context(patch('kaizen_sync._persist_session_state',
+                                                 new_callable=AsyncMock)),
+            'close': stack.enter_context(patch('kaizen_sync._close_session', new_callable=AsyncMock)),
+            'read': stack.enter_context(patch('voice_sampler._read_entries', new_callable=AsyncMock,
+                                              return_value={'status': 'ok', 'samples': ['Mine']})),
+        }
+        return stack, mocks
+
     @pytest.mark.asyncio
-    async def test_voice_sampler_auto_reconnects_when_session_expired(self):
-        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+    async def test_voice_sampler_reads_with_kept_session_as_the_user(self):
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
 
-        with patch(
-            'voice_sampler._run_browser_harness',
-            side_effect=[
-                {'status': 'not_available', 'reason': 'login_required', 'samples': []},
-                {'status': 'ok', 'samples': ['Recovered reflective example']},
-            ],
-        ) as runner, patch(
-            'voice_sampler._restore_kaizen_session',
-            return_value={'ok': True},
-        ) as restore:
-            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+        stack, m = self._patch_kaizen_bootstrap(cached=True, credentials=None)
+        with stack:
+            result = await sample_kaizen_entries(123)
 
-        assert runner.call_count == 2
-        restore.assert_called_once_with(123)
+        m['cached'].assert_awaited_once()
+        assert m['cached'].await_args.args[1] == 123
+        m['login'].assert_not_awaited()
+        m['close'].assert_awaited_once()
         assert result.status == SamplerStatus.OK
-        assert result.samples == ['Recovered reflective example']
+        assert result.samples == ['Mine']
 
     @pytest.mark.asyncio
-    async def test_voice_sampler_only_shows_reconnect_after_auto_reconnect_fails(self):
-        from voice_sampler import SampleWindow, SamplerStatus, sample_kaizen_entries
+    async def test_voice_sampler_falls_back_to_saved_password(self):
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
 
-        with patch(
-            'voice_sampler._run_browser_harness',
-            return_value={'status': 'not_available', 'reason': 'login_required', 'samples': []},
-        ) as runner, patch(
-            'voice_sampler._restore_kaizen_session',
-            return_value={'ok': False, 'reason': 'credentials_rejected'},
-        ):
-            result = await sample_kaizen_entries(123, SampleWindow.RECENT_10)
+        stack, m = self._patch_kaizen_bootstrap(cached=False, credentials=('doc@example.test', 'pw'))
+        with stack:
+            result = await sample_kaizen_entries(123)
 
-        runner.assert_called_once()
+        m['login'].assert_awaited_once()
+        m['persist'].assert_awaited_once()
+        assert result.status == SamplerStatus.OK
+
+    @pytest.mark.asyncio
+    async def test_voice_sampler_asks_passwordless_user_to_reconnect_when_session_ended(self):
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
+
+        stack, m = self._patch_kaizen_bootstrap(cached=False, credentials=None)
+        with stack, patch('kaizen_connection.is_passwordless', return_value=True):
+            result = await sample_kaizen_entries(123)
+
+        m['read'].assert_not_awaited()
+        m['close'].assert_awaited_once()
+        assert result.status == SamplerStatus.NOT_AVAILABLE
+        assert result.reason == 'session_expired'
+        assert 'Reconnect Kaizen' in result.message
+
+    @pytest.mark.asyncio
+    async def test_voice_sampler_reports_rejected_password(self):
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
+
+        stack, m = self._patch_kaizen_bootstrap(cached=False, credentials=('a', 'b'), login=False)
+        with stack:
+            result = await sample_kaizen_entries(123)
+
+        m['read'].assert_not_awaited()
         assert result.status == SamplerStatus.NOT_AVAILABLE
         assert result.reason == 'credentials_rejected'
         assert 'Reconnect Kaizen' in result.message
 
-    def test_voice_sampler_browser_script_is_read_only(self):
-        from voice_sampler import _browser_script
+    def test_voice_sampler_keeps_prose_and_drops_curriculum_boilerplate(self):
+        from voice_sampler import _sample_from_fields
 
-        script = _browser_script(10).lower()
-        forbidden = ['submit(', '.click(', 'delete', 'save as draft', 'send to assessor', 'set_react_value', 'fill_input']
+        prose = 'I assessed a patient with chest pain and escalated early. ' * 3
+        sample = _sample_from_fields([
+            {'label': 'Case to be discussed', 'value': prose},
+            {'label': '', 'value': '2021 EM Curriculum (2025 Update) - Please select the relevant Key Capabilities only. ' * 2},
+            {'label': 'Date of event', 'value': '26 Sept, 2026'},
+            {'label': 'Attach files', 'value': 'x' * 200},
+        ])
+        assert sample == prose.strip()
+
+    @pytest.mark.asyncio
+    async def test_voice_sampler_prefers_finished_entries_over_drafts(self):
+        from voice_sampler import _read_entries
+
+        prose = 'A reflective paragraph written by the doctor about the shift. ' * 2
+        rows = [
+            {'href': 'https://kaizenep.com/events/view-section/d1', 'title': 'CBD'},
+            {'href': 'https://kaizenep.com/events/view/admin', 'title': 'Add a Supervisor'},
+            {'href': 'https://kaizenep.com/events/view/f1', 'title': 'Teaching'},
+            {'href': 'https://kaizenep.com/events/view/f2', 'title': 'ESLE'},
+            {'href': 'https://kaizenep.com/events/view/f3', 'title': 'Meeting'},
+        ]
+        details = {
+            'd1': {'draft': True, 'fields': [{'label': 'Case', 'value': 'DRAFT ' + prose}]},
+            'f1': {'draft': False, 'fields': [{'label': 'Outcomes', 'value': 'F1 ' + prose}]},
+            'f2': {'draft': False, 'fields': [{'label': 'Reflection', 'value': 'F2 ' + prose}]},
+            'f3': {'draft': False, 'fields': [{'label': 'Notes', 'value': 'F3 ' + prose}]},
+        }
+        page = MagicMock()
+        page.url = 'https://kaizenep.com/events/list/All'
+        visited = []
+
+        async def goto(url, **_kw):
+            visited.append(url)
+            page.url = url
+
+        async def evaluate(script):
+            if 'event-inner' in script:
+                return rows
+            return details[page.url.rsplit('/', 1)[-1]]
+
+        page.goto = goto
+        page.evaluate = evaluate
+        page.wait_for_load_state = AsyncMock()
+        with patch('voice_sampler.asyncio.sleep', new_callable=AsyncMock):
+            payload = await _read_entries(page, 10)
+
+        assert payload['status'] == 'ok'
+        assert [s[:2] for s in payload['samples']] == ['F1', 'F2', 'F3']
+        assert not any(url.endswith('/admin') for url in visited)
+
+    def test_voice_sampler_browser_script_is_read_only(self):
+        import inspect
+        import voice_sampler
+
+        script = "\n".join([
+            voice_sampler._ROWS_JS,
+            voice_sampler._DETAIL_JS,
+            inspect.getsource(voice_sampler._read_entries),
+            inspect.getsource(voice_sampler._open_readonly),
+        ]).lower()
+        forbidden = ['submit(', '.click(', '.fill(', '.type(', 'delete', 'save as draft', 'send to assessor', 'set_react_value', 'fill_input']
         offenders = [needle for needle in forbidden if needle in script]
         assert not offenders, "voice sampler script must stay read-only: " + ", ".join(offenders)
 
