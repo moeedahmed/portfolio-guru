@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = 'a79d078e9374d0eec3e3f969d019b7e206373ef19d3e563e0d06f8060adf4e39'
+PRODUCER_DIGEST = '82d51fdeece9e4ed104b59da76f4d31a3fe54ea08fea89e272f4d781b2b9f72d'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

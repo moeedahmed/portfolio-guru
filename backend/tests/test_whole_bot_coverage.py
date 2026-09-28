@@ -557,8 +557,10 @@ async def test_voice_sample_window_observes_empty_provider_result(scenario, monk
     update = make_callback_update("VOICE|kaizen_sample|" + window)
     _prepare_update(update, app.bot)
     await app.process_update(update)
-    sample.assert_awaited_once_with(TEST_USER.id, parse_window(window))
-    assert not errors and any("couldn't find any entries" in t for t in collector.texts)
+    # Every legacy sample-size button now runs the one recent-entries read.
+    assert parse_window(window) is not None
+    sample.assert_awaited_once_with(TEST_USER.id)
+    assert not errors and any("couldn't find any written entries" in t for t in collector.texts)
 
 
 @pytest.mark.asyncio
