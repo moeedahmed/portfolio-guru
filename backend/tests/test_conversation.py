@@ -123,7 +123,6 @@ class TestKeyboardBuilding:
             _refresh_portfolio_confirm_keyboard,
             _refresh_portfolio_result_keyboard,
             _voice_choice_keyboard,
-            _voice_kaizen_sample_keyboard,
             _voice_post_activation_keyboard,
             _voice_rebuild_keyboard,
         )
@@ -154,7 +153,6 @@ class TestKeyboardBuilding:
             _build_pathway_keyboard(from_settings=True),
             _voice_choice_keyboard(),
             _voice_rebuild_keyboard(),
-            _voice_kaizen_sample_keyboard(),
             _voice_post_activation_keyboard(),
             _build_consent_keyboard(123),
         ]
