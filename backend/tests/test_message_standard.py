@@ -74,6 +74,9 @@ CONSTANT_KINDS = {
     "_IMAGE_STILL_READING_TEXT": "confirmation",
     "_KAIZEN_PASSWORD_ROUTE_PROMPT": "prompt",
     "_KAIZEN_USERNAME_PRIVACY_NOTE": "confirmation",
+    # Privacy notice (legal text): its own checks live in test_privacy_notice.py.
+    "_PRIVACY_SUMMARY_TEXT": "exempt",
+    "_PRIVACY_DETAILS_TEXT": "exempt",
     "_KAIZEN_USERNAME_PROMPT": "prompt",
     "_PASSWORDLESS_CHECK_FAILED_TEXT": "error",
     "_PASSWORDLESS_CONNECTED_AGAIN_TEXT": "confirmation",

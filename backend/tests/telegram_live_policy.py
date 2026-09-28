@@ -16,7 +16,7 @@ ACTION|health ACTION|health_limited ACTION|health_back_to_report ACTION|settings
 ACTION|portfolio_defaults ACTION|change_level ACTION|change_pathway ACTION|change_curriculum
 ACTION|delete ACTION|refresh_portfolio ACTION|health_review_setup ACTION|back_to_menu
 ACTION|back_to_missing ACTION|continue_thin ACTION|retry_recommend ACTION|retry_template
-ACTION|same_case_another ACTION|voice INFO|what INFO|stored INFO|stored_after_delete
+ACTION|same_case_another ACTION|voice INFO|what INFO|stored INFO|stored_after_delete INFO|privacy_details INFO|privacy_summary
 ACTION|back_to_delete_clear FORM|best FORM|show_all FORM|back FORM|disabled GATHER|done
 CANCEL|doc_intent CANCEL|draft CANCEL|edit CANCEL|form CASE|new CASE|improve
 AMEND|cancel AMEND|cancel_choice AMEND|start_new AMEND|update_current
