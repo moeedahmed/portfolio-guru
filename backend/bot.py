@@ -3897,6 +3897,7 @@ _KAIZEN_SYNC_STATUS_LABELS = {
     "drift": "needs mapping check",
     "auth_required": "needs reconnecting",
     "failed": "last sync failed",
+    "timed_out": "part read, tap to continue",
 }
 
 
@@ -4187,8 +4188,8 @@ async def _show_health_landing(query, context, user_id: int, *, notice: str = ""
         )
         return
 
-    async def show_scanning():
-        await _safe_edit_text(query.message, "📊 Scanning your Kaizen portfolio…")
+    async def show_scanning(items_read=None):
+        await _safe_edit_text(query.message, _health_scanning_text(items_read))
 
     async def send_progress():
         await _safe_edit_text(query.message, "🔍 Analysing your portfolio…")
@@ -4688,9 +4689,14 @@ def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
         ])
+    retry_button = (
+        InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|health")
+        if status == "timed_out"
+        else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health")
+    )
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health"),
+            retry_button,
             InlineKeyboardButton("📊 Limited view", callback_data="ACTION|health_limited"),
         ],
     ])
@@ -4708,7 +4714,9 @@ def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")])
     else:
         rows.append([
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
+            InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|refresh_portfolio")
+            if status == "timed_out"
+            else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
             InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
         ])
     return InlineKeyboardMarkup(rows)
@@ -4752,6 +4760,14 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
             "🔗 Kaizen needs reconnecting\n\n"
             "I could not refresh your portfolio because the Kaizen session needs a fresh login.\n\n"
             "Next: reconnect Kaizen, then come back to Sync Kaizen evidence."
+        )
+
+    if run_status == "timed_out":
+        items_read = rows_written + getattr(result, "rows_refreshed", 0)
+        return (
+            "⏳ Your Kaizen scan needs another pass\n\n"
+            f"I read {items_read} items and saved them. Nothing was changed in Kaizen.\n\n"
+            "Tap Continue scan to carry on from where I stopped."
         )
 
     if run_status == "drift":
@@ -9383,9 +9399,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
-        async def show_scanning():
+        async def show_scanning(items_read=None):
             try:
-                await query.message.edit_text("📊 Scanning your Kaizen portfolio…")
+                await query.message.edit_text(_health_scanning_text(items_read))
             except Exception:
                 pass
 
@@ -9637,17 +9653,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Kaizen portfolio refresh failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id)
 
         status = await _safe_kaizen_sync_status(user_id)
         result_text = _format_refresh_portfolio_result(result, status)
@@ -9685,17 +9691,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Kaizen portfolio refresh before health failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id)
 
         if getattr(result, "status", "failed") not in {"ok", "partial"}:
             status = await _safe_kaizen_sync_status(user_id)
@@ -10769,6 +10765,64 @@ async def _run_health_analysis(
     )
 
 
+# An interactive Kaizen scan runs inside the doctor's per-user update lock, so
+# every other tap waits until it ends. After /reset the index is empty and the
+# first scan opens every Kaizen item one by one, which can take most of an hour
+# for a large portfolio. Each interactive pass is therefore time-boxed: rows
+# saved so far are kept and the next pass carries on from where it stopped.
+HEALTH_SCAN_TIME_BUDGET_S = 6 * 60
+# Backstop for a pass that stalls inside a single browser step.
+HEALTH_SCAN_HARD_LIMIT_S = HEALTH_SCAN_TIME_BUDGET_S + 2 * 60
+HEALTH_SCAN_PROGRESS_EVERY_S = 20
+
+
+def _health_scanning_text(items_read: int | None = None) -> str:
+    if not items_read:
+        return "📊 Scanning your Kaizen portfolio…"
+    return (
+        "📊 Scanning your Kaizen portfolio…\n"
+        f"{items_read} items read so far."
+    )
+
+
+async def _run_interactive_kaizen_scan(user_id: int, show_progress=None):
+    """Run one time-boxed Kaizen scan for a doctor who is waiting on it.
+
+    Never raises: a failure becomes ``status="failed"`` and a pass that
+    overruns even the hard limit becomes ``status="timed_out"``, so callers
+    always reach a message with a way forward instead of sitting on
+    "Scanning…" forever.
+    """
+    loop = asyncio.get_running_loop()
+    last_update = loop.time()
+
+    async def on_progress(result) -> None:
+        nonlocal last_update
+        if show_progress is None or loop.time() - last_update < HEALTH_SCAN_PROGRESS_EVERY_S:
+            return
+        last_update = loop.time()
+        await show_progress(result.rows_written + result.rows_refreshed)
+
+    failed = SimpleNamespace(rows_seen=0, rows_written=0, rows_drifted=0, notes=[])
+    try:
+        return await asyncio.wait_for(
+            sync_kaizen_portfolio_index_for_user(
+                user_id,
+                time_budget_s=HEALTH_SCAN_TIME_BUDGET_S,
+                on_progress=on_progress,
+            ),
+            timeout=HEALTH_SCAN_HARD_LIMIT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Interactive Kaizen scan hit its hard time limit for %s", user_id)
+        failed.status = "timed_out"
+        return failed
+    except Exception as exc:
+        logger.warning("Interactive Kaizen scan failed: %s", exc, exc_info=True)
+        failed.status = "failed"
+        return failed
+
+
 async def _run_health_with_optional_kaizen_sync(
     *,
     user_id: int,
@@ -10800,17 +10854,7 @@ async def _run_health_with_optional_kaizen_sync(
     """
     if await _health_needs_kaizen_refresh(user_id):
         await show_scanning()
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Autonomous /health Kaizen scan failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id, show_progress=show_scanning)
 
         sync_run_status = getattr(result, "status", "failed")
         if sync_run_status not in {"ok", "partial"}:
@@ -11179,6 +11223,7 @@ def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str:
         "drift": "stopped because the source changed unexpectedly",
         "auth_required": "needs Kaizen reconnection",
         "running": "is still running",
+        "timed_out": "stopped at its time limit before reading everything",
     }
     if status in unsuccessful:
         return (
@@ -11566,8 +11611,8 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await _safe_edit_text(msg, text)
 
-    async def show_scanning():
-        await _set_progress_text("📊 Scanning your Kaizen portfolio…")
+    async def show_scanning(items_read=None):
+        await _set_progress_text(_health_scanning_text(items_read))
 
     async def send_progress():
         await _set_progress_text("📊 Analysing your portfolio...")

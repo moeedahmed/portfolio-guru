@@ -40,6 +40,7 @@ IndexRunStatus = Literal[
     "drift",
     "auth_required",
     "failed",
+    "timed_out",
 ]
 
 

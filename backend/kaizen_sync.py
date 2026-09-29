@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any, Awaitable, Callable, Iterable, Optional
 from urllib.parse import quote, urljoin
 
 from kaizen_index import (
@@ -65,6 +65,10 @@ class KaizenAuthRequired(RuntimeError):
 
 class KaizenSyncDrift(RuntimeError):
     """A Kaizen surface did not match the expected read-only shape."""
+
+
+class _ScanTimeBudgetReached(Exception):
+    """The caller's time budget ran out between rows; saved rows are kept."""
 
 
 @dataclass
@@ -480,6 +484,8 @@ async def sync_kaizen_portfolio_index(
     include_activities: bool = True,
     row_limit_per_category: int | None = None,
     full_refresh: bool = False,
+    time_budget_s: float | None = None,
+    on_progress: Callable[[KaizenSyncResult], Awaitable[None]] | None = None,
 ) -> KaizenSyncResult:
     """Run one read-only sync into ``evidence_items`` using an existing page.
 
@@ -492,9 +498,28 @@ async def sync_kaizen_portfolio_index(
 
     The page must already be authenticated. This function only navigates to
     Kaizen read surfaces and reads DOM state.
+
+    ``time_budget_s`` bounds one pass: once it runs out, the run stops between
+    rows with status ``timed_out``. Rows already saved stay saved, so the next
+    incremental pass skips them and carries on from where this one stopped.
+    ``on_progress`` is awaited after each saved or refreshed row.
     """
     run_id = await start_index_run(user_id)
     result = KaizenSyncResult(run_id=run_id, status="running")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + time_budget_s if time_budget_s else None
+
+    def _check_budget() -> None:
+        if deadline is not None and loop.time() >= deadline:
+            raise _ScanTimeBudgetReached()
+
+    async def _report_progress() -> None:
+        if on_progress is None:
+            return
+        try:
+            await on_progress(result)
+        except Exception:
+            pass
     seen_ids: set[str] = set()
     prior_states: dict[str, str | None] = {}
     if not full_refresh:
@@ -507,6 +532,7 @@ async def sync_kaizen_portfolio_index(
 
     try:
         for category in categories:
+            _check_budget()
             try:
                 await _goto_readonly(page, _category_url(category))
                 settled = await _expand_readonly_listing(page)
@@ -536,23 +562,27 @@ async def sync_kaizen_portfolio_index(
                             user_id, row_key, row.state, row.section_states
                         ):
                             result.rows_refreshed += 1
+                            await _report_progress()
                             continue
+                    _check_budget()
                     try:
                         evidence = await extract_event_detail(page, row, user_id=user_id)
                         await upsert_evidence_item(evidence)
                         result.rows_written += 1
+                        await _report_progress()
                     except KaizenAuthRequired:
                         raise
                     except Exception as exc:
                         result.rows_drifted += 1
                         result.notes.append(f"{category}: detail drift for {row_key}: {exc}")
-            except KaizenAuthRequired:
+            except (KaizenAuthRequired, _ScanTimeBudgetReached):
                 raise
             except Exception as exc:
                 result.rows_drifted += 1
                 result.notes.append(f"{category}: list drift: {exc}")
 
         if include_activities:
+            _check_budget()
             try:
                 await _goto_readonly(page, f"{KAIZEN_BASE_URL}/activities")
                 drafts = await extract_activity_drafts(page, limit=row_limit_per_category)
@@ -562,18 +592,20 @@ async def sync_kaizen_portfolio_index(
                     if not row_key or row_key in seen_ids:
                         continue
                     seen_ids.add(row_key)
+                    _check_budget()
                     try:
                         evidence = await extract_event_detail(page, row, user_id=user_id)
                         evidence.surface = "draft"
                         evidence.state = evidence.state or "draft"
                         await upsert_evidence_item(evidence)
                         result.rows_written += 1
+                        await _report_progress()
                     except KaizenAuthRequired:
                         raise
                     except Exception as exc:
                         result.rows_drifted += 1
                         result.notes.append(f"Activities: draft drift for {row_key}: {exc}")
-            except KaizenAuthRequired:
+            except (KaizenAuthRequired, _ScanTimeBudgetReached):
                 raise
             except Exception as exc:
                 result.rows_drifted += 1
@@ -592,6 +624,18 @@ async def sync_kaizen_portfolio_index(
             rows_written=result.rows_written,
             rows_drifted=result.rows_drifted,
             notes="; ".join(result.notes)[:2000] if result.notes else None,
+        )
+        return result
+    except _ScanTimeBudgetReached:
+        result.status = "timed_out"
+        result.notes.append("time budget reached; saved rows are kept for the next pass")
+        await finish_index_run(
+            run_id,
+            "timed_out",
+            rows_seen=result.rows_seen,
+            rows_written=result.rows_written,
+            rows_drifted=result.rows_drifted,
+            notes="; ".join(result.notes)[:2000],
         )
         return result
     except KaizenAuthRequired as exc:
@@ -714,6 +758,8 @@ async def sync_kaizen_portfolio_index_for_user(
     categories: Iterable[str] = PORTFOLIO_HEALTH_TIMELINE_CATEGORIES,
     include_activities: bool = True,
     row_limit_per_category: int | None = None,
+    time_budget_s: float | None = None,
+    on_progress: Callable[[KaizenSyncResult], Awaitable[None]] | None = None,
 ) -> KaizenSyncResult:
     """Open an authenticated Kaizen page and run the read-only index sync.
 
@@ -784,6 +830,8 @@ async def sync_kaizen_portfolio_index_for_user(
             categories=categories,
             include_activities=include_activities,
             row_limit_per_category=row_limit_per_category,
+            time_budget_s=time_budget_s,
+            on_progress=on_progress,
         )
     finally:
         await _close_session(context, pw)
