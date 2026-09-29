@@ -229,23 +229,15 @@ def test_health_keyboards_are_contextual_in_every_view():
         ("ℹ️ About", "ACTION|health_view|about"),
     ]]
 
-    # The one-time route question gets its own rows under the text asking it
-    # (guess alone, alternatives paired). The everyday rows below it are the
-    # same set the doctor sees once the route is answered.
-    route_rows = _keyboard_rows(
+    # The route is set once at Kaizen connect and changed in Settings, so
+    # Health never shows route buttons, whatever the report stored.
+    assert _keyboard_rows(
         bot._health_view_keyboard(
             "priorities",
             queue_totals={"draft": 7, "awaiting": 20},
             needs_review_month=True,
-            route_guess="training_arcp",
         )
-    )
-    assert route_rows == [
-        [("✅ Trainee", "ACTION|health_route_set|training_arcp")],
-        [
-            ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
-            ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
-        ],
+    ) == [
         [
             ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
             ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
@@ -255,13 +247,6 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("ℹ️ About", "ACTION|health_view|about"),
         ],
     ]
-    assert route_rows[2:] == _keyboard_rows(
-        bot._health_view_keyboard(
-            "priorities",
-            queue_totals={"draft": 7, "awaiting": 20},
-            needs_review_month=True,
-        )
-    )
     # Trainees and Portfolio Pathway doctors get the SLO map back as a
     # drill-down; the everyday actions stay in pairs.
     slo_rows = _keyboard_rows(
@@ -285,7 +270,7 @@ def test_health_keyboards_are_contextual_in_every_view():
     ]
     # No row is crowded: at most two buttons, and paired labels stay short
     # enough to show in full on a phone.
-    for row in route_rows + slo_rows:
+    for row in slo_rows:
         assert len(row) <= 2
         if len(row) == 2:
             assert all(len(text) <= 21 for text, _data in row), row
@@ -812,14 +797,10 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
     assert "Partial scan: Portfolio Guru filings only" in text
     keyboard = sent["reply_markup"]
     assert isinstance(keyboard, bot.InlineKeyboardMarkup)
-    # A doctor who has never confirmed their route is asked once, in one tap.
-    assert "Is this you?" in text
+    # An unconfirmed route gets a one-line pointer to Settings, never buttons.
+    assert "Is this you?" not in text
+    assert "Change it in /settings → Portfolio defaults." in text
     assert _keyboard_rows(keyboard) == [
-        [("✅ Trainee", "ACTION|health_route_set|training_arcp")],
-        [
-            ("📁 Portfolio Pathway", "ACTION|health_route_set|cesr_portfolio"),
-            ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
-        ],
         [
             ("📅 Review month", "ACTION|health_review_setup"),
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
@@ -2196,7 +2177,14 @@ def test_reconnecting_keeps_a_confirmed_non_trainee_route(isolated_health_store,
     assert bot._autoset_health_pathway_from_role(4245, "sas") == Pathway.appraisal_only
     assert health_profile_store.get_health_profile(4245).pathway == Pathway.appraisal_only
 
-    # Moving into training is a real change: take it, and ask again.
+    # Moving into training is a real change: take it. A Kaizen trainee role
+    # is definite, so Health does not need to ask about it.
     assert bot._autoset_health_pathway_from_role(4245, "hst") == Pathway.training_arcp
+    stored = health_profile_store.get_health_profile(4245)
+    assert not bot._route_needs_confirm(stored, datetime.now(UTC).date())
+
+    # Back out of training: Kaizen can't tell Portfolio Pathway from
+    # appraisal only, so that guess stays unconfirmed (a Settings hint).
+    assert bot._autoset_health_pathway_from_role(4245, "sas") == Pathway.cesr_portfolio
     stored = health_profile_store.get_health_profile(4245)
     assert bot._route_needs_confirm(stored, datetime.now(UTC).date())

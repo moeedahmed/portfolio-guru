@@ -4017,7 +4017,6 @@ def _health_view_keyboard(
     queue: str | None = None,
     queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
-    route_guess: str | None = None,
     slo_map: bool = False,
 ) -> InlineKeyboardMarkup:
     """Show only the controls that are useful from the current Health view.
@@ -4029,18 +4028,12 @@ def _health_view_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
 
     if view == "priorities":
-        route_rows: list[list[InlineKeyboardButton]] = []
-        if route_guess:
-            try:
-                route_rows = _route_confirm_rows(Pathway(route_guess))
-            except ValueError:
-                pass
         totals = queue_totals or {}
         draft_total = int(totals.get("draft", 0))
         awaiting_total = int(totals.get("awaiting", 0))
         # Everyday actions go two per row so every label shows in full on a
-        # phone, and they are the same whether or not the route question
-        # is showing above them.
+        # phone. The route is set once at Kaizen connect and changed in
+        # Settings, so it never adds buttons here (Moeed, 2026-09-29).
         everyday: list[InlineKeyboardButton] = []
         if draft_total:
             everyday.append(InlineKeyboardButton(
@@ -4063,9 +4056,6 @@ def _health_view_keyboard(
         everyday.append(InlineKeyboardButton(
             "ℹ️ About", callback_data="ACTION|health_view|about"
         ))
-        # The one-time route answer sits right under the question that asks
-        # it, above the everyday actions.
-        rows.extend(route_rows)
         rows.extend(everyday[index:index + 2] for index in range(0, len(everyday), 2))
 
     elif view == "actions" and queue_totals is not None:
@@ -4447,39 +4437,11 @@ def _save_confirmed_route(user_id: int, pathway: Pathway) -> None:
     )
 
 
-def _route_confirm_line(pathway: Pathway) -> str:
-    if pathway == Pathway.training_arcp:
-        return "🧭 *Is this you?* This looks like a training portfolio. Tap your route once."
+def _route_hint_line(pathway: Pathway) -> str:
     return (
-        "🧭 *Is this you?* Are you preparing a Portfolio Pathway application, "
-        "or just keeping up with appraisal? Tap once."
+        f"🧭 Route: *{_pathway_label(pathway)}*, guessed from Kaizen. "
+        "Change it in /settings → Portfolio defaults."
     )
-
-
-def _route_confirm_rows(pathway: Pathway) -> list[list[InlineKeyboardButton]]:
-    """One tap sets the route and goes straight to its deadline month."""
-    def data(route: Pathway) -> str:
-        return f"ACTION|health_route_set|{route.value}"
-
-    # (as the guess, as an alternative) for each route; the guess leads.
-    buttons = {
-        Pathway.training_arcp: (
-            InlineKeyboardButton("✅ Trainee", callback_data=data(Pathway.training_arcp)),
-            InlineKeyboardButton("🎓 Trainee", callback_data=data(Pathway.training_arcp)),
-        ),
-        Pathway.cesr_portfolio: (
-            InlineKeyboardButton("✅ Portfolio Pathway", callback_data=data(Pathway.cesr_portfolio)),
-            InlineKeyboardButton("📁 Portfolio Pathway", callback_data=data(Pathway.cesr_portfolio)),
-        ),
-        Pathway.appraisal_only: (
-            InlineKeyboardButton("✅ Appraisal only", callback_data=data(Pathway.appraisal_only)),
-            InlineKeyboardButton("🗂 Appraisal only", callback_data=data(Pathway.appraisal_only)),
-        ),
-    }
-    # The guess gets its own row; the two alternatives share the next one.
-    return [[buttons[pathway][0]], [
-        pair[1] for route, pair in buttons.items() if route != pathway
-    ]]
 
 
 def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup:
@@ -4562,7 +4524,6 @@ def _store_health_report_context(
     action_queue_pages: dict[str, list[str]],
     action_queue_totals: dict[str, int],
     needs_review_month: bool,
-    route_guess: str | None = None,
     slo_map: bool = False,
 ) -> None:
     """Remember the rendered views so the navigation buttons have something to show.
@@ -4582,7 +4543,6 @@ def _store_health_report_context(
         "action_queue_totals": action_queue_totals,
         "queue_page": {"draft": 0, "awaiting": 0},
         "needs_review_month": needs_review_month,
-        "route_guess": route_guess,
         "slo_map": slo_map,
     }
 
@@ -4637,7 +4597,6 @@ def _health_view_payload(
             "priorities",
             queue_totals=queue_totals,
             needs_review_month=bool(report.get("needs_review_month")),
-            route_guess=report.get("route_guess"),
             slo_map=bool(report.get("slo_map")) and "curriculum" in views,
         )
 
@@ -10672,11 +10631,8 @@ async def _run_health_analysis(
             partial_scan=scan_is_partial,
             scan_is_fresh=scan_is_fresh,
         )
-    route_guess = (
-        profile.pathway.value if _route_needs_confirm(profile, today) else None
-    )
-    if route_guess:
-        priorities_text = f"{priorities_text}\n\n{_route_confirm_line(profile.pathway)}"
+    if _route_needs_confirm(profile, today):
+        priorities_text = f"{priorities_text}\n\n{_route_hint_line(profile.pathway)}"
     await send_progress()
     evidence_basis = _format_health_evidence_context(
         source=evidence_source,
@@ -10730,7 +10686,6 @@ async def _run_health_analysis(
             action_queue_pages=action_queue_pages,
             action_queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
-            route_guess=route_guess,
             slo_map=slo_map,
         )
     await send_result(
@@ -10739,7 +10694,6 @@ async def _run_health_analysis(
             "priorities",
             queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
-            route_guess=route_guess,
             slo_map=slo_map,
         ),
     )
@@ -10932,6 +10886,11 @@ def _autoset_health_pathway_from_role(user_id: int, detected_role: str) -> Pathw
         if (existing.pathway == Pathway.training_arcp) == (pathway == Pathway.training_arcp):
             return existing.pathway
         config.pop(ROUTE_CONFIRMED_KEY, None)
+    if pathway == Pathway.training_arcp:
+        # A Kaizen trainee role is definite, so the route is settled at
+        # connect and /health never asks. Kaizen can't tell Portfolio Pathway
+        # from appraisal only; those doctors get a hint to set it in Settings.
+        config[ROUTE_CONFIRMED_KEY] = now.date().isoformat()
     profile = HealthProfile(
         user_id=str(user_id),
         pathway=pathway,
