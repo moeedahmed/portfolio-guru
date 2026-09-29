@@ -3137,6 +3137,18 @@ def _restore_last_filed_case_context(context) -> bool:
     return True
 
 
+def _has_paused_case(context, user_id: int) -> bool:
+    """True when _resume_paused_flow has setup, a case or a draft to bring back."""
+    user_data = context.user_data
+    return bool(
+        _setup_needs_finishing(user_id)
+        or _load_draft(context)
+        or _load_pending_draft(context)
+        or (user_data.get("case_text") or "").strip()
+        or (user_data.get("last_filed_case_text") or "").strip()
+    )
+
+
 async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str) -> int:
     """Recover a paused case by sending a fresh latest message for the current step."""
     user_id = update.effective_user.id
@@ -4024,8 +4036,8 @@ def _health_view_keyboard(
         draft_total = int(totals.get("draft", 0))
         awaiting_total = int(totals.get("awaiting", 0))
         # Everyday actions go two per row so every label shows in full on a
-        # phone. Tapping a route already opens the month picker, so the
-        # month button waits until the route question has been answered.
+        # phone, and they are the same whether or not the route question
+        # is showing above them.
         everyday: list[InlineKeyboardButton] = []
         if draft_total:
             everyday.append(InlineKeyboardButton(
@@ -4037,7 +4049,7 @@ def _health_view_keyboard(
                 f"⏳ Awaiting ({awaiting_total})",
                 callback_data="ACTION|health_queue|awaiting|0",
             ))
-        if needs_review_month and not route_rows:
+        if needs_review_month:
             everyday.append(InlineKeyboardButton(
                 "📅 Review month", callback_data="ACTION|health_review_setup"
             ))
@@ -4156,6 +4168,52 @@ _HEALTH_REPORT_EXPIRED = (
     "That health report is no longer in memory for this chat.\n\n"
     "Tap Refresh health to run a new read-only scan."
 )
+
+
+async def _show_health_landing(query, context, user_id: int, *, notice: str = "") -> None:
+    """Rebuild the Health landing on this message, led by ``notice``.
+
+    Used after a route or month is saved (the stored landing was rendered
+    without it) and when a Health button's stored report is gone, so the
+    doctor lands back on Health rather than a dead end.
+    """
+    if not (_kaizen_connected(user_id) and await _health_gate_check(user_id)):
+        text = f"{notice}Tap Refresh health to see your report." if notice else _HEALTH_REPORT_EXPIRED
+        await _safe_edit_text(
+            query.message,
+            text,
+            parse_mode="Markdown",
+            reply_markup=_health_refresh_route_keyboard(),
+        )
+        return
+
+    async def show_scanning():
+        await _safe_edit_text(query.message, "📊 Scanning your Kaizen portfolio…")
+
+    async def send_progress():
+        await _safe_edit_text(query.message, "🔍 Analysing your portfolio…")
+
+    async def send_result(text, reply_markup):
+        await _safe_edit_text(
+            query.message, f"{notice}{text}", parse_mode="Markdown", reply_markup=reply_markup
+        )
+
+    async def show_recovery(text, reply_markup):
+        await _safe_edit_text(query.message, text, reply_markup=reply_markup)
+
+    async def fail_fn(text):
+        await _safe_edit_text(query.message, text, reply_markup=_health_refresh_route_keyboard())
+
+    await _run_health_with_optional_kaizen_sync(
+        user_id=user_id,
+        chat=query.message.chat,
+        show_scanning=show_scanning,
+        send_progress=send_progress,
+        send_result=send_result,
+        fail_fn=fail_fn,
+        show_recovery=show_recovery,
+        context_store=context,
+    )
 
 # Persisted Telegram callbacks can outlive a release. Do not replay text from
 # older Health presentations whose claims no longer match the current filter.
@@ -4436,7 +4494,7 @@ def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup
         ))
     rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
     rows.append([
-        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")
+        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -4451,7 +4509,7 @@ def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMa
         [InlineKeyboardButton(
             "📅 Choose another month", callback_data="ACTION|health_review_setup"
         )],
-        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")],
     ])
 
 
@@ -9411,11 +9469,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         payload = _health_view_payload(context, view, page=page, queue=queue)
         if payload is None:
-            await _safe_edit_text(
-                query.message,
-                _HEALTH_REPORT_EXPIRED,
-                reply_markup=_health_refresh_route_keyboard(),
-            )
+            await _show_health_landing(query, context, user_id)
             return ConversationHandler.END
 
         if view == "action_queue" and queue:
@@ -9449,19 +9503,25 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return ConversationHandler.END
 
-    elif action == "health_review_setup" or action.startswith("health_route_set|"):
-        intro = ""
-        if action.startswith("health_route_set|"):
-            try:
-                chosen = Pathway(action.rsplit("|", 1)[-1])
-            except ValueError:
-                await _safe_edit_text(
-                    query.message, "⚠️ That option is no longer valid. Use /pathway."
-                )
-                return ConversationHandler.END
-            _save_confirmed_route(user_id, chosen)
-            _track_funnel_event(context, "health_route_confirmed", update_last=False)
-            intro = f"✅ Route set: *{_pathway_label(chosen)}*.\n\n"
+    elif action.startswith("health_route_set|"):
+        # Answering "Is this you?" saves the route and puts Health back; the
+        # month is its own everyday button, not a surprise calendar.
+        try:
+            chosen = Pathway(action.rsplit("|", 1)[-1])
+        except ValueError:
+            await _safe_edit_text(
+                query.message, "⚠️ That option is no longer valid. Use /pathway."
+            )
+            return ConversationHandler.END
+        _save_confirmed_route(user_id, chosen)
+        _track_funnel_event(context, "health_route_confirmed", update_last=False)
+        await _show_health_landing(
+            query, context, user_id,
+            notice=f"✅ Route saved: *{_pathway_label(chosen)}*.\n\n",
+        )
+        return ConversationHandler.END
+
+    elif action == "health_review_setup":
         profile_now = _get_or_default_health_profile(user_id)
         current = _stored_review_date(profile_now)
         shown = current.strftime("%B %Y") if current else "not set"
@@ -9473,7 +9533,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await _safe_edit_text(
             query.message,
-            f"{intro}📅 *{deadline[:1].upper()}{deadline[1:]} month*"
+            f"📅 *{deadline[:1].upper()}{deadline[1:]} month*"
             f"\n\nCurrently: {shown}\n\n"
             f"Choose the month of your next {deadline}. Selecting a month "
             "only previews it; nothing changes until you tap Confirm.\n\n"
@@ -9522,19 +9582,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             "health_review_month_confirmed",
             update_last=False,
         )
-        await _safe_edit_text(
-            query.message,
-            f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
-            "Refresh Health to see your deadline and checklist for it.",
-            parse_mode="Markdown",
-            # The stored landing was rendered without this month, so a
-            # refresh is the only route that shows the new deadline.
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "🔄 Refresh health",
-                    callback_data="ACTION|health",
-                )
-            ]]),
+        # The stored landing was rendered without this month, so Health is
+        # rebuilt to show the new deadline.
+        await _show_health_landing(
+            query, context, user_id,
+            notice=f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n",
         )
         return ConversationHandler.END
 
@@ -18572,11 +18624,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                     ]),
                 )
                 return
-            await _resume_paused_flow(
-                update,
-                context,
-                "That earlier button is no longer active.",
-            )
+            # A tap that waited behind a long job (a Kaizen scan) arrives too
+            # old to answer. Only a case in progress has anything to resume:
+            # otherwise resuming told the doctor a draft had expired and wiped
+            # the Health report their buttons still pointed at.
+            if not callback_data.startswith(("INFO|", "ACTION|health")) and _has_paused_case(
+                context, update.effective_user.id
+            ):
+                await _resume_paused_flow(
+                    update,
+                    context,
+                    "That earlier button is no longer active.",
+                )
         return
 
     # Conflict error from dual bot instances — silent, self-resolving

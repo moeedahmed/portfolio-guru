@@ -1533,7 +1533,7 @@ async def test_review_month_button_opens_picker_and_changes_nothing(monkeypatch)
         callback.startswith("ACTION|health_review_select|")
         for _label, callback in sim.get_last_buttons()
     )
-    assert ('🔙 Cancel', "ACTION|health_view|more") in sim.get_last_buttons()
+    assert ('🔙 Cancel', "ACTION|health_view|priorities") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
