@@ -2859,6 +2859,7 @@ _PASSWORDLESS_LINK_ENDED_TEXT = (
     "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
 )
 _PASSWORDLESS_CONNECTED_AGAIN_TEXT = "✅ Kaizen connected again."
+_PASSWORDLESS_SIGNED_IN_TEXT = "🔒 Signed in on Kaizen's page."
 # How often the bot asks the sign-in page whether the doctor has finished.
 _PASSWORDLESS_WATCH_SECONDS = 3
 # Kaizen can still be saving the session just after the link's own expiry.
@@ -8263,8 +8264,14 @@ async def _confirm_passwordless_connection(context, watch: dict) -> None:
         # account's local evidence exactly as an account switch does.
         await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
     kaizen_connection.mark_passwordless(user_id)
+    # The sign-in message settles as a short record and the next step comes as
+    # a NEW message (2026-09-29). Rewriting the old connect message (often the
+    # /reset reply) into "Kaizen connected" and then "Consent recorded" made
+    # the chat read out of order, and an edit doesn't notify the doctor coming
+    # back from the browser.
     if watch.get("message_id"):
-        context.user_data["_flow_anchor_setup"] = (watch["chat_id"], watch["message_id"])
+        await _edit_watched_message(context, watch, _PASSWORDLESS_SIGNED_IN_TEXT)
+    _flow_done(context, "setup")
     await _finish_setup_after_connect(_watch_update(context, watch), context, login_ok)
 
 
@@ -18027,7 +18034,8 @@ async def _privacy_summary(user_id: int, context) -> str:
 # retention, rights, erasure, complaints); test_privacy_notice.py pins them.
 # Keep in step with docs/legal/privacy-policy.md and the consent wording.
 _PRIVACY_SUMMARY_TEXT = (
-    "• Who: EM Gurus runs Portfolio Guru and is responsible for your data.\n"
+    "• Who: EM Gurus runs Portfolio Guru and is responsible for your data "
+    "(portfolio@emgurus.com).\n"
     "• What: your case notes (health data), Kaizen login and account details.\n"
     "• Why: to draft your RCEM forms, only with your explicit consent.\n"
     "• Shared with: Google Gemini on Vertex AI, UK (London), to draft; "

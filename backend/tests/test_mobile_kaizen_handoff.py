@@ -199,6 +199,10 @@ def test_handoff_page_has_no_store_security_headers_and_mobile_controls():
     assert "fetch('/api/handoff/status'" in script.text
     stylesheet = TestClient(app).get("/handoff/app.css")
     assert "#loading[hidden]" in stylesheet.text
+    # The bar names the risr/advance branding doctors see on Kaizen's page,
+    # and the finished screen shows only the result and the way back.
+    assert "risr/advance" in response.text
+    assert ".done .why" in stylesheet.text
 
 
 @pytest.mark.parametrize(
