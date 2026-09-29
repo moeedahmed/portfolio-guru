@@ -284,7 +284,22 @@ fi
 # behind. Install is idempotent when the expected Chromium build is already
 # present, and prevents Kaizen filing from failing with the raw Playwright
 # "please run playwright install" message.
-"$PYTHON" -m playwright install chromium >/dev/null
+# Only install when the expected build is missing, and never block start-up on
+# it: install waits on a machine-wide cache lock, and on 2026-09-29 another
+# process's stuck install held that lock and kept the bot from starting.
+if "$PYTHON" - <<'PY' 2>/dev/null
+import os, sys
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    sys.exit(0 if os.path.exists(p.chromium.executable_path) else 1)
+PY
+then
+  :
+else
+  echo "Playwright Chromium missing; installing in the background (start-up continues)."
+  ( "$PYTHON" -m playwright install chromium >/dev/null 2>&1 \
+      || echo "WARN: background playwright install failed" >&2 ) &
+fi
 
 # Persistent browser for Kaizen filing (login once, reuse session)
 export KAIZEN_USE_CDP="${KAIZEN_USE_CDP:-1}"

@@ -1076,7 +1076,7 @@ HANDOFF_HTML = """<!doctype html>
 <body>
   <header class="topbar">
     <span class="lock" aria-hidden="true">🔒</span>
-    <span>This is Kaizen's real sign-in page, opened by <strong>Portfolio Guru</strong>. Your password is never stored.</span>
+    <span>This is Kaizen's real RCEM sign-in page (risr/advance), opened by <strong>Portfolio Guru</strong>. Your password is never stored.</span>
   </header>
   <main>
     <section id="stage" class="stage" aria-label="Kaizen's sign-in page, live">
@@ -1145,7 +1145,7 @@ button { min-height: 44px; border: 0; border-radius: 12px; padding: 0 13px; font
 .signin #signin:disabled { opacity: .55; }
 .why { width: min(100% - 24px, 496px); margin: 12px auto 0; color: #cfd8d3; font-size: 13px; line-height: 1.45; }
 .why summary { cursor: pointer; font-weight: 700; }
-.done .stage, .done .signin, .done .topbar { display: none; }
+.done .stage, .done .signin, .done .topbar, .done .why { display: none; }
 .done .status-card { margin-top: 28px; padding: 24px; }
 .back-to-telegram { display: block; margin-top: 14px; padding: 13px 16px; border-radius: 12px; background: #fff; color: #173f31; font-size: 15px; font-weight: 800; text-align: center; text-decoration: none; }
 .back-to-telegram[hidden] { display: none; }
@@ -1206,7 +1206,7 @@ HANDOFF_JS = r"""
       login: ['Sign in to Kaizen', 'Enter your Kaizen username and password.'],
       signing_in: ['Signing in…', 'Kaizen is checking your details.'],
       saving: ['Login confirmed', 'Keeping your Kaizen session…'],
-      complete: ['Kaizen connected', 'Portfolio Guru is confirming it in Telegram now.'],
+      complete: ['Kaizen connected', 'Go back to Telegram. Portfolio Guru will confirm there in a moment.'],
       failed: ['Connection stopped', message || 'Go back to Telegram for a new link.'],
       expired: ['Link expired', 'This link has been used or has expired. Go back to Telegram for a new one.'],
     };

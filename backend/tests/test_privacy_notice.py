@@ -16,6 +16,7 @@ import bot
 
 SUMMARY_FACTS = (
     "EM Gurus",  # who is responsible
+    "portfolio@emgurus.com",  # contact, on the first screen
     "health data",  # what data
     "Kaizen login",
     "explicit consent",  # why

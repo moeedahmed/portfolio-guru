@@ -816,3 +816,50 @@ async def test_state_since_holds_still_while_an_item_stays_stuck(sync_modules):
         )
 
     assert (await kaizen_index.list_evidence_items("84"))[0].state_since == first_seen_pending
+
+
+class SlowDetailKaizenPage(FakeKaizenPage):
+    """Each detail page takes a while to open, like a large real portfolio."""
+
+    async def goto(self, url, **kwargs):
+        if "/events/view" in url:
+            import asyncio
+
+            await asyncio.sleep(0.2)
+        await super().goto(url, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_time_budget_stops_the_scan_and_the_next_pass_carries_on(sync_modules):
+    """After /reset the first scan opens every item; one pass must not run
+    forever, and what it saved must not be read again on the next pass."""
+    kaizen_index, kaizen_sync = sync_modules
+    list_url = "https://kaizenep.com/events/list/Assessments"
+    rows, details = [], {}
+    for n in range(3):
+        href = f"/events/view-section/{n}{n}{n}{n}{n}{n}{n}{n}-1111-1111-1111-111111111111"
+        rows.append({"title": f"CBD {n}", "href": href, "section_states": [{"state": "complete", "label": "done"}]})
+        details[f"https://kaizenep.com{href}"] = _detail(state=None, url=f"https://kaizenep.com{href}")
+    page = SlowDetailKaizenPage(lists={list_url: rows}, details=details)
+    progress: list[int] = []
+
+    async def on_progress(result):
+        progress.append(result.rows_written)
+
+    first = await kaizen_sync.sync_kaizen_portfolio_index(
+        91, page, categories=("Assessments",), include_activities=False,
+        time_budget_s=0.3, on_progress=on_progress,
+    )
+
+    assert first.status == "timed_out"
+    assert first.rows_written == 2
+    assert progress == [1, 2]
+    status = await kaizen_index.get_kaizen_sync_status("91")
+    assert status.last_run.status == "timed_out"
+    assert status.last_run.finished_at
+
+    second = await kaizen_sync.sync_kaizen_portfolio_index(
+        91, page, categories=("Assessments",), include_activities=False
+    )
+    assert second.status == "ok"
+    assert (second.rows_written, second.rows_refreshed) == (1, 2)

@@ -230,8 +230,8 @@ def test_health_keyboards_are_contextual_in_every_view():
     ]]
 
     # The one-time route question gets its own rows under the text asking it
-    # (guess alone, alternatives paired). Tapping a route opens the month
-    # picker, so the month button waits until it is answered.
+    # (guess alone, alternatives paired). The everyday rows below it are the
+    # same set the doctor sees once the route is answered.
     route_rows = _keyboard_rows(
         bot._health_view_keyboard(
             "priorities",
@@ -250,8 +250,18 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
             ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
         ],
-        [("ℹ️ About", "ACTION|health_view|about")],
+        [
+            ("📅 Review month", "ACTION|health_review_setup"),
+            ("ℹ️ About", "ACTION|health_view|about"),
+        ],
     ]
+    assert route_rows[2:] == _keyboard_rows(
+        bot._health_view_keyboard(
+            "priorities",
+            queue_totals={"draft": 7, "awaiting": 20},
+            needs_review_month=True,
+        )
+    )
     # Trainees and Portfolio Pathway doctors get the SLO map back as a
     # drill-down; the everyday actions stay in pairs.
     slo_rows = _keyboard_rows(
@@ -424,7 +434,7 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         sim._make_callback_update("ACTION|health_review_setup"), context
     )
     assert saved == []
-    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
+    assert ("🔙 Cancel", "ACTION|health_view|priorities") in sim.get_last_buttons()
     month_callback = next(
         callback
         for _label, callback in sim.get_last_buttons()
@@ -438,13 +448,13 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         callback.startswith("ACTION|health_review_confirm|")
         for _label, callback in sim.get_last_buttons()
     )
-    assert ("🔙 Cancel", "ACTION|health_view|more") in sim.get_last_buttons()
+    assert ("🔙 Cancel", "ACTION|health_view|priorities") in sim.get_last_buttons()
 
     await bot.handle_action_button(
-        sim._make_callback_update("ACTION|health_view|more"), context
+        sim._make_callback_update("ACTION|health_view|priorities"), context
     )
     assert saved == []
-    assert sim.get_last_text() == "about"
+    assert sim.get_last_text() == "priorities"
     track.assert_any_call(
         context,
         "health_review_month_setup",
@@ -811,9 +821,10 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
             ("🗂 Appraisal only", "ACTION|health_route_set|appraisal_only"),
         ],
         [
+            ("📅 Review month", "ACTION|health_review_setup"),
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
-            ("ℹ️ About", "ACTION|health_view|about"),
         ],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
 
 
@@ -2099,9 +2110,21 @@ async def test_weekly_nudge_chart_renders_from_the_real_stats_shape(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_one_tap_route_choice_saves_it_and_asks_for_the_appraisal_month(isolated_health_store):
+async def test_one_tap_route_choice_saves_it_and_returns_to_health(isolated_health_store, monkeypatch):
+    """Answering "Is this you?" confirms the route on the Health screen, with
+    no surprise calendar: the month stays an everyday Health button."""
     import bot
     health_profile_store = isolated_health_store
+
+    async def rebuilt(**kwargs):
+        await kwargs["send_result"](
+            "📊 *Appraisal readiness*",
+            bot._health_view_keyboard("priorities", needs_review_month=True),
+        )
+
+    monkeypatch.setattr(bot, "_kaizen_connected", lambda _user_id: True)
+    monkeypatch.setattr(bot, "_health_gate_check", AsyncMock(return_value=True))
+    monkeypatch.setattr(bot, "_run_health_with_optional_kaizen_sync", rebuilt)
 
     sim = BotSimulator(user_id=4244)
     await bot.handle_action_button(
@@ -2113,9 +2136,38 @@ async def test_one_tap_route_choice_saves_it_and_asks_for_the_appraisal_month(is
     assert stored.pathway == Pathway.appraisal_only
     assert not bot._route_needs_confirm(stored, datetime.now(UTC).date())
     text = sim.get_last_text()
-    assert "Route set: *Appraisal only*" in text
-    assert "Choose the month of your next appraisal" in text
-    assert any(data.startswith("ACTION|health_review_select|") for _, data in sim.get_last_buttons())
+    assert text.startswith("✅ Route saved: *Appraisal only*.")
+    assert "📊 *Appraisal readiness*" in text
+    buttons = sim.get_last_buttons()
+    assert not any(data.startswith("ACTION|health_review_select|") for _, data in buttons)
+    assert ("📅 Review month", "ACTION|health_review_setup") in buttons
+
+
+@pytest.mark.asyncio
+async def test_health_button_with_no_stored_report_rebuilds_health(monkeypatch):
+    """Cancel from the month picker after the stored report was lost lands
+    back on Health, not on an "expired" screen."""
+    import bot
+
+    calls = []
+
+    async def rebuilt(**kwargs):
+        calls.append(kwargs)
+        await kwargs["send_result"]("📊 *ARCP readiness*", bot._health_view_keyboard("priorities"))
+
+    monkeypatch.setattr(bot, "_kaizen_connected", lambda _user_id: True)
+    monkeypatch.setattr(bot, "_health_gate_check", AsyncMock(return_value=True))
+    monkeypatch.setattr(bot, "_run_health_with_optional_kaizen_sync", rebuilt)
+
+    sim = BotSimulator(user_id=4245)
+    context = sim._make_context()
+    await bot.handle_action_button(
+        sim._make_callback_update("ACTION|health_view|priorities"), context
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["context_store"] is context
+    assert sim.get_last_text() == "📊 *ARCP readiness*"
 
 
 def test_trainee_is_asked_again_once_their_arcp_month_has_passed():

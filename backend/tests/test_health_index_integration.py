@@ -640,7 +640,9 @@ async def test_health_command_auto_scans_kaizen_when_index_is_missing(monkeypatc
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
-    sync.assert_awaited_once_with(4242)
+    sync.assert_awaited_once()
+
+    assert sync.await_args.args == (4242,)
     run_health.assert_awaited_once()
     texts = [text for _, text, _ in sim.messages_sent if text]
     assert any("Scanning your Kaizen portfolio" in text for text in texts)
@@ -676,7 +678,9 @@ async def test_confirm_refresh_for_health_runs_sync_then_health(monkeypatch):
         context,
     )
 
-    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once_with(4242)
+    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once()
+
+    assert bot.sync_kaizen_portfolio_index_for_user.await_args.args == (4242,)
     run_health.assert_awaited_once()
 
 
@@ -751,7 +755,9 @@ async def test_confirm_refresh_portfolio_runs_sync_and_shows_success(monkeypatch
         context,
     )
 
-    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once_with(4242)
+    bot.sync_kaizen_portfolio_index_for_user.assert_awaited_once()
+
+    assert bot.sync_kaizen_portfolio_index_for_user.await_args.args == (4242,)
     text = sim.get_last_text()
     assert "Kaizen evidence synced" in text
     assert "Read from Kaizen: 12 items" in text
@@ -865,7 +871,9 @@ async def test_health_command_auto_scans_kaizen_when_index_is_stale(monkeypatch)
 
     await bot.health_command(sim._make_text_update("/health"), context)
 
-    sync.assert_awaited_once_with(4242)
+    sync.assert_awaited_once()
+
+    assert sync.await_args.args == (4242,)
     run_health.assert_awaited_once()
 
 
@@ -1010,7 +1018,9 @@ async def test_inline_health_button_auto_scans_when_stale(monkeypatch):
         context,
     )
 
-    sync.assert_awaited_once_with(4242)
+    sync.assert_awaited_once()
+
+    assert sync.await_args.args == (4242,)
     run_health.assert_awaited_once()
 
     send_result = run_health.await_args.kwargs["send_result"]
@@ -1533,7 +1543,7 @@ async def test_review_month_button_opens_picker_and_changes_nothing(monkeypatch)
         callback.startswith("ACTION|health_review_select|")
         for _label, callback in sim.get_last_buttons()
     )
-    assert ('🔙 Cancel', "ACTION|health_view|more") in sim.get_last_buttons()
+    assert ('🔙 Cancel', "ACTION|health_view|priorities") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
@@ -1710,3 +1720,60 @@ def test_health_sync_recovery_keyboard_offers_reconnect_on_auth_required():
         for button in row
     ]
     assert buttons == [('🔗 Reconnect Kaizen', "ACTION|setup")]
+
+
+@pytest.mark.asyncio
+async def test_health_scan_that_never_finishes_stops_with_continue_button(monkeypatch):
+    """Moeed's /health sat on "Scanning…" for over 15 minutes after /reset. A
+    scan must end in a message with a way forward, never hang."""
+    import asyncio
+
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(bot, "HEALTH_SCAN_HARD_LIMIT_S", 0.05)
+
+    async def never_finishes(_user_id, **_kwargs):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", never_finishes)
+    run_health = AsyncMock()
+    monkeypatch.setattr(bot, "_run_health_analysis", run_health)
+
+    sim = BotSimulator(user_id=4242)
+    await bot.health_command(sim._make_text_update("/health"), sim._make_context())
+
+    run_health.assert_not_awaited()
+    text = sim.get_last_text()
+    assert "needs another pass" in text
+    assert "Continue scan" in text
+    assert sim.get_last_buttons() == [
+        ("🔄 Continue scan", "ACTION|health"),
+        ("📊 Limited view", "ACTION|health_limited"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_scan_shows_items_read_while_it_runs(monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user_tier", AsyncMock(return_value="pro_plus"))
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(bot, "HEALTH_SCAN_PROGRESS_EVERY_S", 0)
+
+    async def scan(_user_id, *, time_budget_s, on_progress):
+        assert time_budget_s == bot.HEALTH_SCAN_TIME_BUDGET_S
+        await on_progress(SimpleNamespace(rows_written=40, rows_refreshed=2))
+        return SimpleNamespace(status="ok", rows_seen=42, rows_written=40, rows_drifted=0, notes=[])
+
+    monkeypatch.setattr(bot, "sync_kaizen_portfolio_index_for_user", scan)
+    monkeypatch.setattr(bot, "_run_health_analysis", AsyncMock())
+
+    sim = BotSimulator(user_id=4242)
+    await bot.health_command(sim._make_text_update("/health"), sim._make_context())
+
+    texts = [text for _, text, _ in sim.messages_sent if text]
+    assert any("42 items read so far" in text for text in texts)

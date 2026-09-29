@@ -71,3 +71,58 @@ async def test_handler_error_payload_is_fixed_template(monkeypatch):
     assert fake_bot.sent == [(123, ops_alert.ALERT_TEMPLATES["handler_error"])]
     assert SENTINEL not in fake_bot.sent[0][1]
     assert "12345" not in fake_bot.sent[0][1]
+
+
+async def test_stale_health_tap_with_no_case_sends_nothing_and_keeps_health(monkeypatch):
+    """A tap that waited behind a long Kaizen scan must not announce an
+    expired draft or wipe the stored Health report."""
+    from unittest.mock import AsyncMock
+
+    from telegram.error import BadRequest
+
+    import bot
+
+    resume = AsyncMock()
+    monkeypatch.setattr(bot, "_resume_paused_flow", resume)
+    monkeypatch.setattr(bot, "_setup_needs_finishing", lambda _user_id: False)
+
+    user_data = {"last_health_report": {"version": 2}}
+    context = SimpleNamespace(
+        error=BadRequest("Query is too old and response timeout expired or query id is invalid"),
+        bot=object(),
+        user_data=user_data,
+    )
+    for data in ("INFO|what", "ACTION|health_view|about", "ACTION|settings"):
+        update = SimpleNamespace(
+            effective_message=SimpleNamespace(),
+            effective_user=SimpleNamespace(id=42),
+            callback_query=SimpleNamespace(data=data),
+        )
+        await bot.error_handler(update, context)
+
+    resume.assert_not_awaited()
+    assert user_data == {"last_health_report": {"version": 2}}
+
+
+async def test_stale_case_tap_still_resumes_the_open_case(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from telegram.error import BadRequest
+
+    import bot
+
+    resume = AsyncMock()
+    monkeypatch.setattr(bot, "_resume_paused_flow", resume)
+    context = SimpleNamespace(
+        error=BadRequest("Query is too old and response timeout expired or query id is invalid"),
+        bot=object(),
+        user_data={"case_text": "Synthetic chest pain case"},
+    )
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(),
+        effective_user=SimpleNamespace(id=42),
+        callback_query=SimpleNamespace(data="FORM|CBD"),
+    )
+    await bot.error_handler(update, context)
+
+    resume.assert_awaited_once()

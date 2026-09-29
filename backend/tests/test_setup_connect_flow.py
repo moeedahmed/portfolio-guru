@@ -165,9 +165,13 @@ async def test_bot_confirms_kaizen_connected_without_being_asked(harness, monkey
         await harness.app.shutdown()
 
     bot.kaizen_connection.mark_passwordless.assert_called_once_with(TEST_USER.id)
-    texts = [text for kind, text, _ in harness.outbox]
-    assert all(kind == "edit" for kind, _, _ in harness.outbox)
+    kinds = [kind for kind, _, _ in harness.outbox]
+    texts = [text for _, text, _ in harness.outbox]
     assert texts[0].startswith("✅ Signed in to Kaizen")
+    # The sign-in message settles without buttons, and the result arrives as a
+    # new message so the chat reads in order and the doctor is notified.
+    assert harness.outbox[1] == ("edit", bot._PASSWORDLESS_SIGNED_IN_TEXT, None)
+    assert kinds[-1] == "send"
     assert "Kaizen connected" in texts[-1] and "HST" in texts[-1]
     assert bot._PWL_WATCH_KEY not in harness.app.user_data[TEST_USER.id]
 

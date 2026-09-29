@@ -2861,6 +2861,7 @@ _PASSWORDLESS_LINK_ENDED_TEXT = (
     "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
 )
 _PASSWORDLESS_CONNECTED_AGAIN_TEXT = "✅ Kaizen connected again."
+_PASSWORDLESS_SIGNED_IN_TEXT = "🔒 Signed in on Kaizen's page."
 # How often the bot asks the sign-in page whether the doctor has finished.
 _PASSWORDLESS_WATCH_SECONDS = 3
 # Kaizen can still be saving the session just after the link's own expiry.
@@ -3136,6 +3137,18 @@ def _restore_last_filed_case_context(context) -> bool:
     if not context.user_data.get("excluded_form_types"):
         context.user_data["excluded_form_types"] = _filed_form_types_for_last_case(context)
     return True
+
+
+def _has_paused_case(context, user_id: int) -> bool:
+    """True when _resume_paused_flow has setup, a case or a draft to bring back."""
+    user_data = context.user_data
+    return bool(
+        _setup_needs_finishing(user_id)
+        or _load_draft(context)
+        or _load_pending_draft(context)
+        or (user_data.get("case_text") or "").strip()
+        or (user_data.get("last_filed_case_text") or "").strip()
+    )
 
 
 async def _resume_paused_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str) -> int:
@@ -3886,6 +3899,7 @@ _KAIZEN_SYNC_STATUS_LABELS = {
     "drift": "needs mapping check",
     "auth_required": "needs reconnecting",
     "failed": "last sync failed",
+    "timed_out": "part read, tap to continue",
 }
 
 
@@ -4025,8 +4039,8 @@ def _health_view_keyboard(
         draft_total = int(totals.get("draft", 0))
         awaiting_total = int(totals.get("awaiting", 0))
         # Everyday actions go two per row so every label shows in full on a
-        # phone. Tapping a route already opens the month picker, so the
-        # month button waits until the route question has been answered.
+        # phone, and they are the same whether or not the route question
+        # is showing above them.
         everyday: list[InlineKeyboardButton] = []
         if draft_total:
             everyday.append(InlineKeyboardButton(
@@ -4038,7 +4052,7 @@ def _health_view_keyboard(
                 f"⏳ Awaiting ({awaiting_total})",
                 callback_data="ACTION|health_queue|awaiting|0",
             ))
-        if needs_review_month and not route_rows:
+        if needs_review_month:
             everyday.append(InlineKeyboardButton(
                 "📅 Review month", callback_data="ACTION|health_review_setup"
             ))
@@ -4157,6 +4171,52 @@ _HEALTH_REPORT_EXPIRED = (
     "That health report is no longer in memory for this chat.\n\n"
     "Tap Refresh health to run a new read-only scan."
 )
+
+
+async def _show_health_landing(query, context, user_id: int, *, notice: str = "") -> None:
+    """Rebuild the Health landing on this message, led by ``notice``.
+
+    Used after a route or month is saved (the stored landing was rendered
+    without it) and when a Health button's stored report is gone, so the
+    doctor lands back on Health rather than a dead end.
+    """
+    if not (_kaizen_connected(user_id) and await _health_gate_check(user_id)):
+        text = f"{notice}Tap Refresh health to see your report." if notice else _HEALTH_REPORT_EXPIRED
+        await _safe_edit_text(
+            query.message,
+            text,
+            parse_mode="Markdown",
+            reply_markup=_health_refresh_route_keyboard(),
+        )
+        return
+
+    async def show_scanning(items_read=None):
+        await _safe_edit_text(query.message, _health_scanning_text(items_read))
+
+    async def send_progress():
+        await _safe_edit_text(query.message, "🔍 Analysing your portfolio…")
+
+    async def send_result(text, reply_markup):
+        await _safe_edit_text(
+            query.message, f"{notice}{text}", parse_mode="Markdown", reply_markup=reply_markup
+        )
+
+    async def show_recovery(text, reply_markup):
+        await _safe_edit_text(query.message, text, reply_markup=reply_markup)
+
+    async def fail_fn(text):
+        await _safe_edit_text(query.message, text, reply_markup=_health_refresh_route_keyboard())
+
+    await _run_health_with_optional_kaizen_sync(
+        user_id=user_id,
+        chat=query.message.chat,
+        show_scanning=show_scanning,
+        send_progress=send_progress,
+        send_result=send_result,
+        fail_fn=fail_fn,
+        show_recovery=show_recovery,
+        context_store=context,
+    )
 
 # Persisted Telegram callbacks can outlive a release. Do not replay text from
 # older Health presentations whose claims no longer match the current filter.
@@ -4437,7 +4497,7 @@ def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup
         ))
     rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
     rows.append([
-        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")
+        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -4452,7 +4512,7 @@ def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMa
         [InlineKeyboardButton(
             "📅 Choose another month", callback_data="ACTION|health_review_setup"
         )],
-        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|more")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")],
     ])
 
 
@@ -4631,9 +4691,14 @@ def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
         ])
+    retry_button = (
+        InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|health")
+        if status == "timed_out"
+        else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health")
+    )
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health"),
+            retry_button,
             InlineKeyboardButton("📊 Limited view", callback_data="ACTION|health_limited"),
         ],
     ])
@@ -4651,7 +4716,9 @@ def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")])
     else:
         rows.append([
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
+            InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|refresh_portfolio")
+            if status == "timed_out"
+            else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
             InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
         ])
     return InlineKeyboardMarkup(rows)
@@ -4695,6 +4762,14 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
             "🔗 Kaizen needs reconnecting\n\n"
             "I could not refresh your portfolio because the Kaizen session needs a fresh login.\n\n"
             "Next: reconnect Kaizen, then come back to Sync Kaizen evidence."
+        )
+
+    if run_status == "timed_out":
+        items_read = rows_written + getattr(result, "rows_refreshed", 0)
+        return (
+            "⏳ Your Kaizen scan needs another pass\n\n"
+            f"I read {items_read} items and saved them. Nothing was changed in Kaizen.\n\n"
+            "Tap Continue scan to carry on from where I stopped."
         )
 
     if run_status == "drift":
@@ -8265,8 +8340,14 @@ async def _confirm_passwordless_connection(context, watch: dict) -> None:
         # account's local evidence exactly as an account switch does.
         await _clear_local_portfolio_account_data(user_id, reason="kaizen_account_switch")
     kaizen_connection.mark_passwordless(user_id)
+    # The sign-in message settles as a short record and the next step comes as
+    # a NEW message (2026-09-29). Rewriting the old connect message (often the
+    # /reset reply) into "Kaizen connected" and then "Consent recorded" made
+    # the chat read out of order, and an edit doesn't notify the doctor coming
+    # back from the browser.
     if watch.get("message_id"):
-        context.user_data["_flow_anchor_setup"] = (watch["chat_id"], watch["message_id"])
+        await _edit_watched_message(context, watch, _PASSWORDLESS_SIGNED_IN_TEXT)
+    _flow_done(context, "setup")
     await _finish_setup_after_connect(_watch_update(context, watch), context, login_ok)
 
 
@@ -9320,9 +9401,9 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return ConversationHandler.END
 
-        async def show_scanning():
+        async def show_scanning(items_read=None):
             try:
-                await query.message.edit_text("📊 Scanning your Kaizen portfolio…")
+                await query.message.edit_text(_health_scanning_text(items_read))
             except Exception:
                 pass
 
@@ -9406,11 +9487,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
         payload = _health_view_payload(context, view, page=page, queue=queue)
         if payload is None:
-            await _safe_edit_text(
-                query.message,
-                _HEALTH_REPORT_EXPIRED,
-                reply_markup=_health_refresh_route_keyboard(),
-            )
+            await _show_health_landing(query, context, user_id)
             return ConversationHandler.END
 
         if view == "action_queue" and queue:
@@ -9444,19 +9521,25 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return ConversationHandler.END
 
-    elif action == "health_review_setup" or action.startswith("health_route_set|"):
-        intro = ""
-        if action.startswith("health_route_set|"):
-            try:
-                chosen = Pathway(action.rsplit("|", 1)[-1])
-            except ValueError:
-                await _safe_edit_text(
-                    query.message, "⚠️ That option is no longer valid. Use /pathway."
-                )
-                return ConversationHandler.END
-            _save_confirmed_route(user_id, chosen)
-            _track_funnel_event(context, "health_route_confirmed", update_last=False)
-            intro = f"✅ Route set: *{_pathway_label(chosen)}*.\n\n"
+    elif action.startswith("health_route_set|"):
+        # Answering "Is this you?" saves the route and puts Health back; the
+        # month is its own everyday button, not a surprise calendar.
+        try:
+            chosen = Pathway(action.rsplit("|", 1)[-1])
+        except ValueError:
+            await _safe_edit_text(
+                query.message, "⚠️ That option is no longer valid. Use /pathway."
+            )
+            return ConversationHandler.END
+        _save_confirmed_route(user_id, chosen)
+        _track_funnel_event(context, "health_route_confirmed", update_last=False)
+        await _show_health_landing(
+            query, context, user_id,
+            notice=f"✅ Route saved: *{_pathway_label(chosen)}*.\n\n",
+        )
+        return ConversationHandler.END
+
+    elif action == "health_review_setup":
         profile_now = _get_or_default_health_profile(user_id)
         current = _stored_review_date(profile_now)
         shown = current.strftime("%B %Y") if current else "not set"
@@ -9468,7 +9551,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await _safe_edit_text(
             query.message,
-            f"{intro}📅 *{deadline[:1].upper()}{deadline[1:]} month*"
+            f"📅 *{deadline[:1].upper()}{deadline[1:]} month*"
             f"\n\nCurrently: {shown}\n\n"
             f"Choose the month of your next {deadline}. Selecting a month "
             "only previews it; nothing changes until you tap Confirm.\n\n"
@@ -9517,19 +9600,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             "health_review_month_confirmed",
             update_last=False,
         )
-        await _safe_edit_text(
-            query.message,
-            f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n"
-            "Refresh Health to see your deadline and checklist for it.",
-            parse_mode="Markdown",
-            # The stored landing was rendered without this month, so a
-            # refresh is the only route that shows the new deadline.
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "🔄 Refresh health",
-                    callback_data="ACTION|health",
-                )
-            ]]),
+        # The stored landing was rendered without this month, so Health is
+        # rebuilt to show the new deadline.
+        await _show_health_landing(
+            query, context, user_id,
+            notice=f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n",
         )
         return ConversationHandler.END
 
@@ -9580,17 +9655,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Kaizen portfolio refresh failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id)
 
         status = await _safe_kaizen_sync_status(user_id)
         result_text = _format_refresh_portfolio_result(result, status)
@@ -9628,17 +9693,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Kaizen portfolio refresh before health failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id)
 
         if getattr(result, "status", "failed") not in {"ok", "partial"}:
             status = await _safe_kaizen_sync_status(user_id)
@@ -10690,6 +10745,64 @@ async def _run_health_analysis(
     )
 
 
+# An interactive Kaizen scan runs inside the doctor's per-user update lock, so
+# every other tap waits until it ends. After /reset the index is empty and the
+# first scan opens every Kaizen item one by one, which can take most of an hour
+# for a large portfolio. Each interactive pass is therefore time-boxed: rows
+# saved so far are kept and the next pass carries on from where it stopped.
+HEALTH_SCAN_TIME_BUDGET_S = 6 * 60
+# Backstop for a pass that stalls inside a single browser step.
+HEALTH_SCAN_HARD_LIMIT_S = HEALTH_SCAN_TIME_BUDGET_S + 2 * 60
+HEALTH_SCAN_PROGRESS_EVERY_S = 20
+
+
+def _health_scanning_text(items_read: int | None = None) -> str:
+    if not items_read:
+        return "📊 Scanning your Kaizen portfolio…"
+    return (
+        "📊 Scanning your Kaizen portfolio…\n"
+        f"{items_read} items read so far."
+    )
+
+
+async def _run_interactive_kaizen_scan(user_id: int, show_progress=None):
+    """Run one time-boxed Kaizen scan for a doctor who is waiting on it.
+
+    Never raises: a failure becomes ``status="failed"`` and a pass that
+    overruns even the hard limit becomes ``status="timed_out"``, so callers
+    always reach a message with a way forward instead of sitting on
+    "Scanning…" forever.
+    """
+    loop = asyncio.get_running_loop()
+    last_update = loop.time()
+
+    async def on_progress(result) -> None:
+        nonlocal last_update
+        if show_progress is None or loop.time() - last_update < HEALTH_SCAN_PROGRESS_EVERY_S:
+            return
+        last_update = loop.time()
+        await show_progress(result.rows_written + result.rows_refreshed)
+
+    failed = SimpleNamespace(rows_seen=0, rows_written=0, rows_drifted=0, notes=[])
+    try:
+        return await asyncio.wait_for(
+            sync_kaizen_portfolio_index_for_user(
+                user_id,
+                time_budget_s=HEALTH_SCAN_TIME_BUDGET_S,
+                on_progress=on_progress,
+            ),
+            timeout=HEALTH_SCAN_HARD_LIMIT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Interactive Kaizen scan hit its hard time limit for %s", user_id)
+        failed.status = "timed_out"
+        return failed
+    except Exception as exc:
+        logger.warning("Interactive Kaizen scan failed: %s", exc, exc_info=True)
+        failed.status = "failed"
+        return failed
+
+
 async def _run_health_with_optional_kaizen_sync(
     *,
     user_id: int,
@@ -10721,17 +10834,7 @@ async def _run_health_with_optional_kaizen_sync(
     """
     if await _health_needs_kaizen_refresh(user_id):
         await show_scanning()
-        try:
-            result = await sync_kaizen_portfolio_index_for_user(user_id)
-        except Exception as exc:
-            logger.warning("Autonomous /health Kaizen scan failed: %s", exc, exc_info=True)
-            result = SimpleNamespace(
-                status="failed",
-                rows_seen=0,
-                rows_written=0,
-                rows_drifted=0,
-                notes=[],
-            )
+        result = await _run_interactive_kaizen_scan(user_id, show_progress=show_scanning)
 
         sync_run_status = getattr(result, "status", "failed")
         if sync_run_status not in {"ok", "partial"}:
@@ -11100,6 +11203,7 @@ def _health_last_scanned_line(sync_status: KaizenSyncStatus | None) -> str:
         "drift": "stopped because the source changed unexpectedly",
         "auth_required": "needs Kaizen reconnection",
         "running": "is still running",
+        "timed_out": "stopped at its time limit before reading everything",
     }
     if status in unsuccessful:
         return (
@@ -11487,8 +11591,8 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await _safe_edit_text(msg, text)
 
-    async def show_scanning():
-        await _set_progress_text("📊 Scanning your Kaizen portfolio…")
+    async def show_scanning(items_read=None):
+        await _set_progress_text(_health_scanning_text(items_read))
 
     async def send_progress():
         await _set_progress_text("📊 Analysing your portfolio...")
@@ -18009,7 +18113,8 @@ async def _privacy_summary(user_id: int, context) -> str:
 # retention, rights, erasure, complaints); test_privacy_notice.py pins them.
 # Keep in step with docs/legal/privacy-policy.md and the consent wording.
 _PRIVACY_SUMMARY_TEXT = (
-    "• Who: EM Gurus runs Portfolio Guru and is responsible for your data.\n"
+    "• Who: EM Gurus runs Portfolio Guru and is responsible for your data "
+    "(portfolio@emgurus.com).\n"
     "• What: your case notes (health data), Kaizen login and account details.\n"
     "• Why: to draft your RCEM forms, only with your explicit consent.\n"
     "• Shared with: Google Gemini on Vertex AI, UK (London), to draft; "
@@ -18546,11 +18651,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                     ]),
                 )
                 return
-            await _resume_paused_flow(
-                update,
-                context,
-                "That earlier button is no longer active.",
-            )
+            # A tap that waited behind a long job (a Kaizen scan) arrives too
+            # old to answer. Only a case in progress has anything to resume:
+            # otherwise resuming told the doctor a draft had expired and wiped
+            # the Health report their buttons still pointed at.
+            if not callback_data.startswith(("INFO|", "ACTION|health")) and _has_paused_case(
+                context, update.effective_user.id
+            ):
+                await _resume_paused_flow(
+                    update,
+                    context,
+                    "That earlier button is no longer active.",
+                )
         return
 
     # Conflict error from dual bot instances — silent, self-resolving
