@@ -6,10 +6,8 @@ mocked Stripe SDK boundaries:
 * `POST /webhook/stripe` runs `handle_webhook_event`, which writes to the
   bot's SQLite `user_profiles` table via `set_user_tier`. We assert the
   tier actually flips.
-* `POST /api/create-checkout-session` is the route the hub calls. It
-  authenticates a Supabase JWT, resolves the linked telegram_user_id from
-  Supabase, and returns a Stripe Checkout URL. We mock both Supabase and
-  Stripe and assert the URL is returned and the right tier is requested.
+* `POST /api/create-checkout-session` rejects authenticated Hub users with
+  410: web checkout is retired. It must not query the mirror or call Stripe.
 
 The point of these tests is to give a green CI signal for the path
 without needing live Stripe credentials or a public tunnel. Live Stripe
@@ -183,110 +181,21 @@ def test_create_checkout_session_requires_bearer(client):
     assert resp.status_code == 401
 
 
-def test_create_checkout_session_returns_url(client, monkeypatch):
-    """End-to-end: valid JWT + linked user -> Stripe URL returned to caller."""
-    import asyncio
-
-    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
-
-    # Make the linked user known in the bot's SQLite store so set_user_tier
-    # can find the customer later (not strictly required for this test, but
-    # mirrors the production flow).
-    asyncio.run(usage.set_user_tier(42, "free"))
-
-    # Mock Supabase auth: any token resolves to a fixed emgurus_user_id.
-    class _FakeAuthResp:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"id": "emgurus-uuid-42"}
-
-    class _FakeHttpx:
-        def __init__(self, *a, **kw): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def get(self, *a, **kw): return _FakeAuthResp()
-
-    import httpx as _httpx
-    monkeypatch.setattr(_httpx, "Client", _FakeHttpx)
-
-    # Mock the Supabase mirror's portfolio_users lookup.
-    class _FakeQuery:
-        def __init__(self): self.data = [{"telegram_user_id": 42}]
-        def select(self, *a, **kw): return self
-        def eq(self, *a, **kw): return self
-        def limit(self, *a, **kw): return self
-        def execute(self): return self
-
-    class _FakeSb:
-        def table(self, _name): return _FakeQuery()
-
+@pytest.mark.parametrize("hub_user_id", ["previously-linked", "never-linked"])
+def test_create_checkout_session_is_retired(client, monkeypatch, hub_user_id):
+    from unittest.mock import AsyncMock, Mock
     import supabase_sync
-    monkeypatch.setattr(supabase_sync, "_supabase", lambda: _FakeSb())
-
-    captured = {}
-
-    class _FakeSession:
-        url = "https://stripe.test/checkout/cs_test_abc"
-
-    def _create(**kwargs):
-        captured.update(kwargs)
-        return _FakeSession()
-
-    monkeypatch.setattr(stripe_handler.stripe.checkout.Session, "create", _create)
-
+    monkeypatch.setattr(webhook_server, "_verify_supabase_token", lambda _: hub_user_id)
+    mirror = Mock(side_effect=AssertionError("Must not query Supabase"))
+    checkout = AsyncMock(side_effect=AssertionError("Must not create checkout"))
+    monkeypatch.setattr(supabase_sync, "_supabase", mirror)
+    monkeypatch.setattr(webhook_server, "create_checkout_session", checkout)
     resp = client.post(
         "/api/create-checkout-session",
-        headers={"Authorization": "Bearer jwt.test.token"},
+        headers={"Authorization": "Bearer fake-token"},
         json={"tier": "pro_plus"},
     )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"url": "https://stripe.test/checkout/cs_test_abc"}
-    # The Unlimited price ID is what was offered to Stripe.
-    assert captured["line_items"][0]["price"] == "price_unlimited_test"
-    assert captured["metadata"] == {"telegram_user_id": "42"}
-    # The success URL is the hub's dashboard, not the bot.
-    assert "emgurus.com/portfolio/dashboard" in captured["success_url"]
-
-
-def test_create_checkout_session_blocks_when_unlinked(client, monkeypatch):
-    """Unlinked emgurus users get a 409 with the link-first message."""
-    class _FakeAuthResp:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"id": "emgurus-uuid-unlinked"}
-
-    class _FakeHttpx:
-        def __init__(self, *a, **kw): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def get(self, *a, **kw): return _FakeAuthResp()
-
-    import httpx as _httpx
-    monkeypatch.setattr(_httpx, "Client", _FakeHttpx)
-
-    class _FakeQuery:
-        def __init__(self): self.data = []
-        def select(self, *a, **kw): return self
-        def eq(self, *a, **kw): return self
-        def limit(self, *a, **kw): return self
-        def execute(self): return self
-
-    class _FakeSb:
-        def table(self, _name): return _FakeQuery()
-
-    import supabase_sync
-    monkeypatch.setattr(supabase_sync, "_supabase", lambda: _FakeSb())
-
-    resp = client.post(
-        "/api/create-checkout-session",
-        headers={"Authorization": "Bearer jwt.test.token"},
-        json={"tier": "pro_plus"},
-    )
-
-    assert resp.status_code == 409
-    assert "Link your Telegram" in resp.json()["detail"]
+    assert resp.status_code == 410
+    assert resp.json()["detail"] == "Web checkout has been retired; upgrade in the Telegram bot."
+    mirror.assert_not_called()
+    checkout.assert_not_called()

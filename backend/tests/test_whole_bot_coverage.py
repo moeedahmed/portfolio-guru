@@ -38,7 +38,7 @@ COMMAND_EXPECTATIONS = {
     "bulk": "Bulk filing is coming soon", "cancel": "Cancelled", "chase": "coming soon",
     "curriculum": "Which curriculum", "delete": "Your Portfolio Guru data is clear",
     "filingreport": "Admin only", "funnelreport": "Admin only", "gather": "Gathering mode",
-    "health": "Portfolio Health", "help": "Portfolio Guru help", "link": "Link Telegram",
+    "health": "Portfolio Health", "help": "Portfolio Guru help", "link": "has been retired",
     "listusers": "Admin only", "pathway": "Current view", "plan": "Your plan",
     "privacy": "Privacy & consent", "reset": "Your Portfolio Guru data is clear",
     "setbeta": "Admin only", "settier": "Admin only", "settings": "Kaizen: not connected",
@@ -66,9 +66,9 @@ async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, cove
     monkeypatch.setattr(bot, "has_credentials", lambda uid: False)
     import credentials
     from sqlmodel import Session, select
-    link = MagicMock(side_effect=AssertionError("No-argument link must not mutate"))
+    link = MagicMock(side_effect=AssertionError("Retired link must not contact Supabase"))
     beta_store = MagicMock()
-    monkeypatch.setattr("supabase_sync.consume_link_token", link)
+    monkeypatch.setattr("supabase_sync._supabase", link)
     monkeypatch.setattr("supabase_sync.store_beta_request", beta_store)
     reset_mirror = MagicMock()
     monkeypatch.setattr("supabase_sync.delete_user_data", reset_mirror)
@@ -127,7 +127,7 @@ async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, cove
             if boundary:
                 from tests.whole_bot_audit import record_command_boundary
                 record_command_boundary(command)
-            # /link without a code proves its prompt, not its account mutation.
+            # Check the retired /link reply for both old argument shapes.
             if CATEGORIES[slot.callback] != "protected-boundary" or boundary:
                 coverage.validate(slot, f"command:{command}", boundary=boundary)
                 coverage.record_unit("command:" + command, f"command:{command}", slots=[slot], boundary=boundary)
@@ -914,7 +914,7 @@ def test_catalogue_rejects_unproven_state_dispatch(evidence_kind):
     assert unit["id"] in receipt["uncovered"]
 
 
-def test_catalogue_link_prompt_cannot_cover_token_mutation():
+def test_catalogue_link_no_args_cannot_cover_legacy_token_reply():
     from tests.whole_bot_catalogue import catalogue_receipt
     event = {"callback": "link_command", "kind": "command", "command": "link",
              "payload": None, "argument_branch": "no-args", "result": -1, "boundaries": []}
@@ -933,22 +933,22 @@ def test_catalogue_protected_command_requires_asserted_boundary(command, owner):
 
 
 @pytest.mark.asyncio
-async def test_link_token_dispatch_reaches_only_stubbed_account_mutation(offline_app, monkeypatch):
+async def test_link_token_dispatch_is_retired_without_supabase(offline_app, monkeypatch):
     from tests.whole_bot_audit import record_command_boundary
     app, collector = offline_app
-    consume = MagicMock(return_value=(True, "Synthetic account linked"))
-    monkeypatch.setattr("supabase_sync.consume_link_token", consume)
+    consume = MagicMock(side_effect=AssertionError("Retired link must not connect"))
+    monkeypatch.setattr("supabase_sync._supabase", consume)
     coverage = Coverage(inventory(app))
     coverage.observe()
     try:
         update = make_command_update("link", args=["synthetic-one-use-code"])
         _prepare_update(update, app.bot)
         await app.process_update(update)
-        consume.assert_called_once_with("synthetic-one-use-code", TEST_USER.id)
-        assert any("Synthetic account linked" in t for t in collector.texts)
+        consume.assert_not_called()
+        assert any("has been retired; nothing is needed" in t for t in collector.texts)
         record_command_boundary("link", argument_branch="token")
         slot = next(s for s in coverage.slots if "link" in s.commands)
-        coverage.record_unit("command:link/args:token", "token consumed at stub", slots=[slot], boundary=True)
+        coverage.record_unit("command:link/args:token", "legacy token receives retirement reply", slots=[slot], boundary=True)
         assert not coverage.unit_evidence["command:link"]["offline"]
     finally:
         coverage.restore()

@@ -22,7 +22,7 @@ _START = {}
 _EFFECTS = {}
 _BOUNDARIES = {
     "bot": ("route_filing", "store_credentials", "store_voice_profile", "clear_voice_profile", "store_training_level", "store_curriculum", "save_health_profile", "_test_kaizen_login"),
-    "stripe_handler": ("create_checkout_session",), "supabase_sync": ("delete_user_data", "consume_link_token", "store_beta_request"),
+    "stripe_handler": ("create_checkout_session",), "supabase_sync": ("delete_user_data", "store_beta_request"),
     "assessor_writeback": ("execute_write_plan",), "filing_coverage": ("record_pushback",),
     "chase_guard": ("log_chase",), "consent": ("record_consent", "record_withdrawal"),
     "urllib.request": ("urlopen",),

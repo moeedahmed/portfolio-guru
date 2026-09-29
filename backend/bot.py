@@ -1290,8 +1290,10 @@ def _reminder_settings_view(user_id: int):
     from datetime import date as _date
 
     state = pr.load_state(user_id)
-    if not _proactive_enabled():
-        # Only the Sunday check-in runs, so offer a plain on/off switch.
+    if not (_proactive_enabled() and _proactive_audience([user_id])):
+        # Only the Sunday check-in runs for this doctor, so offer a plain
+        # on/off switch. While the daily check is piloted on named ids, nobody
+        # outside PG_PROACTIVE_USER_IDS sees its settings.
         text = (
             "🔔 *Reminders*\n\n"
             f"Currently: {_reminders_status_label(user_id)}.\n\n"
@@ -10046,32 +10048,10 @@ Send an anonymised case (text, voice, photo, video, or document). I'll draft the
 
 
 async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Consume a /link <token> from the EM Gurus Hub web app and bind this
-    Telegram user to that auth.users id. Tokens are generated at
-    emgurus.com/portfolio and have a short TTL."""
-    args = context.args or []
-    if not args:
-        await update.message.reply_text(
-            "To link your EM Gurus Hub account:\n\n"
-            "1. Open https://emgurus.com/portfolio and tap 'Link Telegram'\n"
-            "2. Send `/link <code>` here with the code shown",
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
-        )
-        return ConversationHandler.END
-
-    token = args[0].strip()
-    try:
-        from supabase_sync import consume_link_token
-        ok, message = consume_link_token(token, update.effective_user.id)
-    except Exception as exc:
-        logger.warning("link_command errored: %s", exc, exc_info=True)
-        ok, message = False, "Couldn't reach the web service. Try again in a moment."
-
-    if ok:
-        _track_funnel_event(context, "bot_linked")
-    icon = "✅" if ok else "⚠️"
-    await update.message.reply_text(f"{icon} {message}")
+    """Keep old /link taps harmless after retiring the Hub integration."""
+    await update.message.reply_text(
+        "ℹ️ Linking to the EM Gurus website has been retired; nothing is needed."
+    )
     return ConversationHandler.END
 
 
@@ -17574,7 +17554,9 @@ async def handle_unsigned_range_pick(update: Update, context: ContextTypes.DEFAU
 
 
 async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /unsigned — Unlimited feature. Shows date-range picker, then scans Kaizen."""
+    """Handle /unsigned — open to every beta user (Moeed, 2026-09-29) and to
+    Unlimited subscribers once payments are on. Shows the date-range picker,
+    then scans Kaizen."""
     user_id = update.effective_user.id
 
     if _is_passwordless_user(user_id):

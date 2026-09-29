@@ -4,8 +4,8 @@ Read this first. It is the product "why": vision, users, principles, scope and
 the decisions behind them. `AGENTS.md` is the engineering "how"; code, tests and
 the live runtime are the truth for what is actually built. Compiled 2026-09-28
 from the repo, git history, Brain, Hindsight and Hermes history (sources listed
-at the end). Where sources disagree, the conflict is listed under Open
-questions for Moeed, not resolved here.
+at the end). Moeed answered the open questions on 2026-09-29; his answers are in
+the decision log and the Resolved questions section.
 
 > You did the case. We file the draft.
 
@@ -42,8 +42,10 @@ evidence without spending my evening fighting Kaizen."_
 - **Beta targets** (June plan): 10 active users, 5 with two or more drafts
   saved, 2 paying or clearly willing to pay, 3 testimonials, filing failures
   visible and explainable.
-- **Launch:** willingness to pay £9.99/month proven; legal documents signed off
-  by a solicitor; payments switched on.
+- **Launch:** willingness to pay proven; legal documents signed off by a
+  solicitor; payments switched on. After beta, new users get a 14-day free
+  trial (replacing 5 free cases a month). Prices live in Stripe and are shown
+  before payment, never fixed in the legal documents.
 
 ## Product principles
 
@@ -71,12 +73,13 @@ evidence without spending my evening fighting Kaizen."_
 **In:** Telegram bot; text, voice, audio, photo, document input; form
 recommendation for DOM-mapped Kaizen forms; draft preview, edit and approval;
 Kaizen draft save (stored password or password-free connection); Portfolio
-Health / ARCP view; opt-in sign-off chaser; `/unsigned`.
+Health / ARCP view; opt-in sign-off chaser; `/unsigned` (open to every beta
+user).
 
 **Out or deferred:** supervisor submission (never); `/bulk` and `/chase`
-commands (disabled, "coming soon"); WhatsApp and a Hermes conversational layer
-(paused, revisit once stable); web front end / EM Gurus Hub link (dropped
-Aug 2026); other colleges and platforms (after the EM profiles are finished);
+commands (disabled, "coming soon"); a Hermes conversational layer (paused);
+any web app or EM Gurus Hub link (none planned: WhatsApp is the next front
+end, via Meta's official WhatsApp Business Platform); other colleges and platforms (after the EM profiles are finished);
 cloud hosting (Mac mini through paid beta); public launch (until legal
 sign-off).
 
@@ -109,30 +112,36 @@ sign-off).
 | 2026-09-27 | Proactive messages quiet and event-driven, capped                                                                                         | Brain decision                                       |
 | 2026-09-27 | Moeed's standing instruction is release approval                                                                                          | git history; AGENTS.md                               |
 | 2026-09-28 | Open beta: everyone unlimited, payments off until public launch                                                                           | git history; Brain decision                          |
+| 2026-09-29 | Backup copy moves to the dedicated London Supabase project, keyed on Telegram id; old EM Gurus project kept until verified, never deleted | Moeed (decision cards)                               |
+| 2026-09-29 | `/unsigned` open to all beta users                                                                                                        | Moeed (decision cards)                               |
+| 2026-09-29 | Next front end: WhatsApp first, via Meta's official route; no web app                                                                     | Moeed (decision cards)                               |
+| 2026-09-29 | Legal documents carry no fixed price; the price is shown before payment                                                                   | Moeed (decision cards)                               |
+| 2026-09-29 | After beta: 14-day free trial replaces 5 free cases a month (not built; beta stays unlimited)                                            | Moeed (decision cards)                               |
+| 2026-09-29 | Proactive reminders piloted on Moeed's account only, dry run first                                                                        | Moeed (decision cards)                               |
+| 2026-09-29 | Stay on Supabase (Convex not adopted)                                                                                                     | Moeed (decision cards)                               |
 
-## Open questions for Moeed
+## Resolved questions (2026-09-29)
 
-Contradictions found between sources. Not resolved here.
-
-1. **Stage.** AGENTS.md says "controlled dogfood, invite-only paid beta
-   gated"; the 28 Sep decision says open beta for everyone. Which label is
-   current, and is invite gating gone?
-2. **Where data lives.** The 24 Aug plan makes London Supabase the primary
-   store; AGENTS.md and later memory say SQLite on the Mac mini is primary and
-   Supabase is a best-effort mirror (the London migration was never applied).
-   Is the London plan still the goal?
-3. **Paid tier name.** Code says `pro_plus` (and `/unsigned` is gated to it);
-   users see "Unlimited". With payments off, is `/unsigned` open to everyone?
-4. **"Chase".** `/chase` is disabled, yet the Portfolio Health sign-off chaser
-   is on for beta. Are these the same feature?
-5. **Channel.** WhatsApp (dedicated number) and a Hermes conversational bot
-   were both planned, then paused. Still the post-stabilisation direction?
-6. **Web front end.** The June plan made a web front end central; the August
-   plan dropped the Hub link. Is any web surface still planned?
-7. **Legal documents** still describe £9.99 pricing as in force; they need
-   updating for the open beta before solicitor review.
-8. **Retention.** A 180-day purge (July) versus delete-on-save (August): has
-   delete-on-save fully replaced it in the live bot?
+1. **Stage.** Open beta: every user is an unlimited beta user and payments
+   are off until public launch (28 Sep decision). Paid-beta gating is gone.
+2. **Where data lives.** SQLite on the live Mac mini stays the primary store.
+   The Supabase backup copy moves from the shared EM Gurus project (Ireland)
+   to the dedicated Portfolio Guru project in London, keyed on Telegram id.
+   Supabase stays the cloud database (no Convex).
+3. **`/unsigned`.** Open to every beta user; after launch it follows the
+   paid plan.
+4. **"Chase".** Checked in code, not a new decision: `/chase` (messaging
+   assessors) stays disabled. The Portfolio Health sign-off chaser is
+   separate: it only reminds the doctor.
+5. **Channel.** WhatsApp is the next front end, through Meta's official
+   WhatsApp Business Platform. Meta business setup is being done by Moeed.
+6. **Web front end.** None planned. The EM Gurus Hub link is retired.
+7. **Legal documents.** No fixed price; the price is shown before payment.
+   Free during beta, then a 14-day free trial.
+8. **Retention.** Checked in code, not a new decision: the encrypted draft
+   backup is deleted when Kaizen confirms the save (orphans expire after 7
+   days), and the Supabase backup holds no clinical text, so the old 180-day
+   purge has nothing left to clear.
 
 ## Sources
 

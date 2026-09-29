@@ -3,7 +3,7 @@
 The bug this pins: /reset used to clear only LOCAL state, leaving cloud copies of
 credentials, clinical cases, profile and usage in Supabase indefinitely. This test
 asserts delete_user_data issues deletes against every sensitive table, keyed by the
-resolved emgurus_user_id, and respects the billing-link retention default.
+telegram_user_id, and respects the billing-link retention default.
 """
 import supabase_sync
 
@@ -36,16 +36,15 @@ class _Client:
 
 def _patch(monkeypatch, sink):
     monkeypatch.setattr(supabase_sync, "_supabase", lambda: _Client(sink))
-    monkeypatch.setattr(supabase_sync, "_resolve_emgurus_user_id", lambda _uid: "uuid-xyz")
 
 
 SENSITIVE = {
-    "portfolio_credentials",
-    "portfolio_cases",
-    "portfolio_profile",
-    "portfolio_usage",
-    "portfolio_chase_log",
-    "portfolio_link_tokens",
+    "pg_credentials",
+    "pg_filings",
+    "pg_profile",
+    "pg_usage",
+    "pg_kc_coverage",
+    "pg_beta_requests",
 }
 
 
@@ -56,12 +55,12 @@ def test_default_erasure_purges_sensitive_tables_keeps_billing(monkeypatch):
     result = supabase_sync.delete_user_data(42)
 
     deleted_tables = {t for (t, op, _c, _v) in sink if op == "delete"}
-    assert SENSITIVE.issubset(deleted_tables)
+    assert SENSITIVE == deleted_tables
     # Billing link is retained by default.
-    assert "portfolio_users" not in deleted_tables
-    # Every delete is scoped to the resolved UUID, never a broad wipe.
-    assert all(col == "emgurus_user_id" and val == "uuid-xyz" for (_t, _o, col, val) in sink)
-    assert result["portfolio_cases"] == "deleted"
+    assert "pg_users" not in deleted_tables
+    # Every delete is scoped to the Telegram ID, never a broad wipe.
+    assert all(col == "telegram_user_id" and val == 42 for (_t, _o, col, val) in sink)
+    assert result["pg_filings"] == "deleted"
 
 
 def test_full_erasure_includes_billing_link(monkeypatch):
@@ -71,15 +70,25 @@ def test_full_erasure_includes_billing_link(monkeypatch):
     supabase_sync.delete_user_data(42, include_billing_link=True)
 
     deleted_tables = {t for (t, op, _c, _v) in sink if op == "delete"}
-    assert "portfolio_users" in deleted_tables
+    assert deleted_tables == SENSITIVE | {"pg_users"}
+    assert "pg_consent_records" not in deleted_tables
 
 
-def test_unlinked_user_is_noop(monkeypatch):
+def test_unconfigured_mirror_is_noop(monkeypatch):
+    monkeypatch.setattr(supabase_sync, "_supabase", lambda: None)
+    assert supabase_sync.delete_user_data(42) == {"_skipped": "supabase not configured"}
+
+
+def test_erasure_continues_after_one_table_fails(monkeypatch):
     sink = []
-    monkeypatch.setattr(supabase_sync, "_supabase", lambda: _Client(sink))
-    monkeypatch.setattr(supabase_sync, "_resolve_emgurus_user_id", lambda _uid: None)
-
-    result = supabase_sync.delete_user_data(42)
-
-    assert sink == []
-    assert result["_skipped"] == "user not linked"
+    class FailingClient(_Client):
+        def table(self, name):
+            if name == "pg_credentials":
+                raise RuntimeError("unavailable")
+            return super().table(name)
+    monkeypatch.setattr(supabase_sync, "_supabase", lambda: FailingClient(sink))
+    result = supabase_sync.delete_user_data(42, include_billing_link=True)
+    assert result["pg_credentials"].startswith("error: ")
+    assert result["pg_users"] == "deleted"
+    assert set(result) == SENSITIVE | {"pg_users"}
+    assert all(col == "telegram_user_id" and val == 42 for _, _, col, val in sink)

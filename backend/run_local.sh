@@ -154,6 +154,10 @@ fi
 FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 
+# Dedicated London mirror; never use the shared EM Gurus project.
+export SUPABASE_URL="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_URL)"
+export SUPABASE_SERVICE_ROLE_KEY="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_SERVICE_ROLE_KEY)"
+
 # Liveness heartbeat target (Healthchecks.io ping URL). bot.py already schedules
 # the 5-minute ping; without this the whole mechanism is a silent no-op, which
 # is exactly how it sat unused until 2026-08-18. Non-fatal when absent so a
@@ -187,6 +191,22 @@ if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
   echo "Sign-off chase: ENABLED${PG_SIGNOFF_CHASE_USER_IDS:+ (users: $PG_SIGNOFF_CHASE_USER_IDS)}"
 else
   echo "Sign-off chase: off (set PG_ENABLE_SIGNOFF_CHASE=1 to enable)"
+fi
+# Daily proactive reminders: piloted on Moeed's own account only, in dry run
+# (decides and logs what it would send, sends nothing). Moeed, 2026-09-29.
+# Fail closed: an empty allowlist would mean every doctor, so it switches the
+# daily check off instead.
+export PG_ENABLE_PROACTIVE="${PG_ENABLE_PROACTIVE-1}"
+export PG_PROACTIVE_DRY_RUN="${PG_PROACTIVE_DRY_RUN-1}"
+export PG_PROACTIVE_USER_IDS="${PG_PROACTIVE_USER_IDS-6912896590}"
+if [ -n "$PG_ENABLE_PROACTIVE" ] && [ -z "$PG_PROACTIVE_USER_IDS" ]; then
+  echo "Proactive reminders: no allowlist set, switching off" >&2
+  export PG_ENABLE_PROACTIVE=""
+fi
+if [ -n "$PG_ENABLE_PROACTIVE" ]; then
+  echo "Proactive reminders: ENABLED${PG_PROACTIVE_DRY_RUN:+ (dry run)} (users: $PG_PROACTIVE_USER_IDS)"
+else
+  echo "Proactive reminders: off"
 fi
 # DEEPSEEK_API_KEY is deliberately NOT exported. Clinical extraction runs on
 # Vertex AI in europe-west2; DeepSeek is a Chinese endpoint with no UK adequacy

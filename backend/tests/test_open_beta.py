@@ -124,3 +124,20 @@ async def test_free_user_gets_portfolio_health_without_upgrade(beta_usage):
     import bot
 
     assert await bot._health_gate_check(205)
+
+
+@pytest.mark.asyncio
+async def test_free_user_gets_unsigned_scan_without_upgrade(beta_usage, monkeypatch):
+    """/unsigned is open to every beta user (Moeed, 2026-09-29)."""
+    import bot
+
+    monkeypatch.setattr(bot, "_is_passwordless_user", lambda _uid: False)
+    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
+    picker = AsyncMock()
+    monkeypatch.setattr(bot, "_show_unsigned_range_picker", picker)
+    update = _update()
+
+    await bot.unsigned_command(update, _context())
+
+    picker.assert_awaited_once()
+    update.message.reply_text.assert_not_awaited()

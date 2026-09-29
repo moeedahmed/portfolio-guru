@@ -55,13 +55,13 @@ comment on table pg_consent_records is
 -- ── Kaizen credentials (Fernet ciphertext; the key lives in BWS, not here) ──
 create table if not exists pg_credentials (
   telegram_user_id     bigint primary key,
-  kaizen_username_enc  bytea not null,
-  kaizen_password_enc  bytea not null,
+  kaizen_username_enc  text not null,
+  kaizen_password_enc  text not null,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
 );
 comment on table pg_credentials is
-  'Fernet ciphertext only. FERNET_SECRET_KEY is held in Bitwarden Secrets Manager and never stored alongside the data it protects.';
+  'Fernet ciphertext only (URL-safe base64 tokens, stored as text). FERNET_SECRET_KEY is held in Bitwarden Secrets Manager and never stored alongside the data it protects.';
 
 -- ── Training profile (no clinical content; voice_profile is a style summary) ─
 create table if not exists pg_profile (
@@ -82,11 +82,12 @@ create table if not exists pg_usage (
   telegram_user_id  bigint not null,
   form_type         text not null,
   status            text not null default 'filed',
-  filed_at          timestamptz not null default now(),
-  month_key         text generated always as (to_char(filed_at, 'YYYY-MM')) stored
+  filed_at          timestamptz not null default now()
 );
-create index if not exists idx_pg_usage_user_month
-  on pg_usage (telegram_user_id, month_key);
+-- No generated month column: to_char(timestamptz) is not immutable, so
+-- Postgres refuses it. Monthly counts filter on filed_at instead.
+create index if not exists idx_pg_usage_user_filed
+  on pg_usage (telegram_user_id, filed_at);
 
 -- ── Curriculum coverage (RCEM taxonomy references, no patient detail) ───────
 create table if not exists pg_kc_coverage (
@@ -116,6 +117,19 @@ create index if not exists idx_pg_filings_user
 comment on table pg_filings is
   'Replaces portfolio_cases. Holds no case_text and no extracted_fields by design.';
 
+-- ── Beta access requests (Telegram id and @username only) ──────────────────
+create table if not exists pg_beta_requests (
+  id                bigserial primary key,
+  telegram_user_id  bigint not null,
+  username          text not null default '',
+  status            text not null default 'pending'
+                      check (status in ('pending', 'approved')),
+  created_at        timestamptz not null default now(),
+  approved_at       timestamptz
+);
+create index if not exists idx_pg_beta_requests_username
+  on pg_beta_requests (username, status);
+
 -- ── Stripe webhook idempotency ──────────────────────────────────────────────
 create table if not exists pg_stripe_webhook_events (
   event_id      text primary key,
@@ -132,5 +146,6 @@ alter table pg_usage                enable row level security;
 alter table pg_kc_coverage          enable row level security;
 alter table pg_filings              enable row level security;
 alter table pg_stripe_webhook_events enable row level security;
+alter table pg_beta_requests        enable row level security;
 
 commit;

@@ -39,12 +39,12 @@
 
 | Field           | Detail                                                                                 |
 | --------------- | -------------------------------------------------------------------------------------- |
-| Purpose         | Operate accounts, enforce free-tier limits, sync to web app.                           |
+| Purpose         | Operate accounts, enforce plan limits, keep a backup copy.                             |
 | Data subjects   | Using clinician.                                                                       |
 | Data categories | Messaging ID, name/grade, usage counts, tier.                                          |
 | Lawful basis    | Art 6(1)(b) contract; Art 6(1)(f) legitimate interests (reliability/abuse prevention). |
 | Recipients      | Supabase (cloud mirror).                                                               |
-| Transfers       | Intended EU; «REVIEW: confirm Supabase region.»                                        |
+| Transfers       | None: Supabase project in London (eu-west-2), UK.                                      |
 | Retention       | Life of account + «REVIEW».                                                            |
 | Security        | Encrypted store; access controls «REVIEW».                                             |
 
@@ -52,7 +52,7 @@
 
 | Field           | Detail                                                               |
 | --------------- | -------------------------------------------------------------------- |
-| Purpose         | Take payment for the £9.99/mo tier; manage subscriptions.            |
+| Purpose         | Take payment for the paid plan; manage subscriptions.                |
 | Data subjects   | Paying clinician.                                                    |
 | Data categories | Billing identifiers, payment status (no full card data held by us).  |
 | Lawful basis    | Art 6(1)(b) contract; Art 6(1)(c) legal obligation (tax/accounting). |
@@ -93,7 +93,7 @@
 | Sub-processor                                                 | Purpose                                                           | Data categories                                                       | Location / residency                                                                                                                                          | DPA status / link                                                                                                                                                   |
 | ------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Google Cloud — Vertex AI (Gemini)**                         | AI extraction of WPBA data                                        | Health/clinical content (text, transcribed voice, images, documents)  | Intended **UK/EU** via Vertex AI in `europe-west2` when production has `PG_USE_VERTEX` enabled with `GCP_PROJECT_ID` and `GCP_VERTEX_LOCATION=europe-west2`. «REVIEW: verify the live runtime environment and Google Cloud data-residency / no-training commitments before relying on this record; developer/evaluation code paths may still use `GOOGLE_API_KEY` outside production.» | Google Cloud Data Processing Addendum / CDPA. «REVIEW: confirm which Google terms apply to the exact API/tier and that no-training applies; link the accepted DPA.» |
-| **Supabase**                                                  | Cloud mirror of account/profile/usage + encrypted credential blob | Account, profile, usage, tier, consent records; encrypted credentials | Intended **EU** «REVIEW: confirm project region.»                                                                                                             | Supabase DPA. «REVIEW: confirm executed; link.»                                                                                                                     |
+| **Supabase**                                                  | Backup copy of account/profile/usage + encrypted credential blob  | Account, profile, usage, tier, consent records; encrypted credentials | **UK: London (eu-west-2)**, dedicated Portfolio Guru project.                                                                                                             | Supabase DPA. «REVIEW: confirm executed; link.»                                                                                                                     |
 | **Stripe**                                                    | Payment processing & subscriptions                                | Billing identifiers, payment status                                   | EU/US «REVIEW: confirm Stripe contracting entity + transfer mechanism.»                                                                                       | Stripe DPA (incorporated in Stripe Services Agreement; SCCs/UK Addendum). «REVIEW: confirm.»                                                                        |
 | **Telegram**                                                  | Messaging transport                                               | All message content in transit, platform user ID                      | «REVIEW: outside our control; likely outside UK/EEA.»                                                                                                         | «REVIEW: assess reliance on Telegram's terms; no standard B2B DPA — document risk.»                                                                                 |
 | **Meta / WhatsApp** (future)                                  | Messaging transport                                               | All message content in transit, WhatsApp ID                           | **US / global** transfers «REVIEW».                                                                                                                           | WhatsApp Business / Meta DPA + SCCs/UK Addendum. «REVIEW: not yet engaged — complete `docs/legal/whatsapp-meta-processor-review.md` before WhatsApp launch.»          |

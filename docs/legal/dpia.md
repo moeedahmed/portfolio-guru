@@ -23,10 +23,10 @@ Portfolio Guru ingests clinicians' free-text/voice/image clinical case descripti
 
 - **Collection:** user sends case content via Telegram (future: WhatsApp).
 - **AI extraction:** content sent to **Google Vertex AI (Gemini)** — _intended_ `europe-west2` / London region — to extract structured WPBA fields and recommend a form type. «REVIEW: before sign-off, verify the live runtime has `PG_USE_VERTEX` enabled with `GCP_PROJECT_ID` and `GCP_VERTEX_LOCATION=europe-west2`, and confirm Google's data-residency and no-training commitments for the exact API/tier. Developer/evaluation fallbacks may still use `GOOGLE_API_KEY` and must not be treated as production residency proof.»
-- **Storage:** canonical encrypted **SQLite** store on a controlled machine; **Fernet**-encrypted Kaizen credentials; **Supabase** (intended EU) cloud mirror for the web app.
+- **Storage:** canonical encrypted **SQLite** store on a controlled machine; **Fernet**-encrypted Kaizen credentials; **Supabase** best-effort backup copy in **London (eu-west-2)**, keyed on the Telegram user id, holding no clinical text.
 - **Use:** generate a draft, show it to the user for review, and on approval log in to **Kaizen** and save a **draft** (never auto-submit).
 - **Deletion:** account-scoped deletion on account closure / credential removal «REVIEW: confirm coverage across all stores including Supabase mirror and any logs».
-- **Payments:** **Stripe** for the £9.99/mo tier; free tier limited to 5 cases/month.
+- **Payments:** **Stripe** for the paid plan (price shown before payment). Free during beta; after beta, a 14-day free trial replaces the old monthly free allowance.
 
 ### 2.2 Scope of the processing
 

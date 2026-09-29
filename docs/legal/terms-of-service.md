@@ -89,13 +89,14 @@ Including patient data is at your discretion and risk. By sending content, you c
 
 ## 7. Subscriptions, billing, and refunds
 
-- **Free tier:** up to **5 cases per month** at no charge. «REVIEW: confirm the reset cadence (calendar month vs rolling 30 days) and exact counting rule.»
-- **Unlimited tier:** **£9.99 per month**, billed monthly in advance via **Stripe**. «REVIEW: confirm price includes/excludes VAT and whether VAT registration applies; confirm currency (GBP).»
-- **Auto-renewal:** the Unlimited subscription renews automatically each month until cancelled.
-- **Cancellation:** you may cancel at any time via «REVIEW: define cancellation route — in-bot command and/or Stripe customer portal». Cancellation takes effect at the end of the current billing period; you keep Unlimited access until then.
+- **Beta:** while the Service is in beta, it is free to use with no case limit and no payment is taken.
+- **Free trial:** after beta, new users get a **14-day free trial** of the paid plan. No payment is taken during the trial. «REVIEW: confirm whether a card is collected at trial start, and what happens at the end of the trial if the user does not subscribe.»
+- **Paid plan:** the price, billing period and any VAT are **shown to you before you pay**, and billed in advance via **Stripe**. «REVIEW: confirm price includes/excludes VAT and whether VAT registration applies; confirm currency (GBP).»
+- **Auto-renewal:** the paid subscription renews automatically each month until cancelled.
+- **Cancellation:** you may cancel at any time via «REVIEW: define cancellation route — in-bot command and/or Stripe customer portal». Cancellation takes effect at the end of the current billing period; you keep paid access until then.
 - **Refunds:** «REVIEW: define your refund policy. Note UK consumer law — under the Consumer Contracts Regulations 2013 there is normally a 14-day cancellation right for digital services, but it can be lost once the service begins _if the consumer expressly consented and acknowledged loss of the right_. Decide and document your stance (e.g. no refunds for partial months, or a discretionary refund window) and ensure the checkout captures the required consent/acknowledgement.»
 - **Price changes:** we may change pricing with reasonable advance notice; changes apply from your next billing period. «REVIEW: define notice period, e.g. 30 days.»
-- **Failed payments:** if payment fails, we may downgrade you to the free tier until payment succeeds.
+- **Failed payments:** if payment fails, we may pause paid access until payment succeeds.
 
 ---
 

@@ -133,28 +133,11 @@ def _verify_supabase_token(authorization: str | None) -> str:
 
 
 def _resolve_telegram_user_id(emgurus_user_id: str) -> int:
-    """Look up portfolio_users; raise 409 if the user hasn't linked yet."""
-    from supabase_sync import _supabase
-    sb = _supabase()
-    if sb is None:
-        raise HTTPException(status_code=500, detail="Supabase mirror not configured")
-    try:
-        resp = (
-            sb.table("portfolio_users")
-            .select("telegram_user_id")
-            .eq("emgurus_user_id", emgurus_user_id)
-            .limit(1)
-            .execute()
-        )
-    except Exception as exc:
-        logger.warning("portfolio_users lookup failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Could not look up linked account")
-    if not resp.data or not resp.data[0].get("telegram_user_id"):
-        raise HTTPException(
-            status_code=409,
-            detail="Link your Telegram bot before upgrading on the web.",
-        )
-    return int(resp.data[0]["telegram_user_id"])
+    """The retired Hub account link can no longer resolve Telegram users."""
+    raise HTTPException(
+        status_code=410,
+        detail="Web checkout has been retired; upgrade in the Telegram bot.",
+    )
 
 
 @app.post("/api/create-checkout-session")
@@ -162,16 +145,9 @@ async def create_checkout(
     body: CheckoutRequest,
     authorization: str | None = Header(default=None),
 ):
-    """Create a Stripe Checkout session for the authenticated hub user.
+    """Authenticate legacy Hub requests, then reject the retired checkout.
 
-    Flow:
-      1. Verify the Supabase JWT (from the hub session) and extract the
-         emgurus_user_id.
-      2. Resolve the linked telegram_user_id via portfolio_users. 409 if
-         unlinked — the user must run /link in the bot first.
-      3. Create a Stripe Checkout session via stripe_handler. The session's
-         success URL routes back to the dashboard.
-      4. Return the Stripe URL — the web app redirects there.
+    The resolver returns 410 without querying the mirror or creating a payment.
     """
     if body.tier not in ("pro", "pro_plus"):
         raise HTTPException(status_code=400, detail="Invalid tier")
