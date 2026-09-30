@@ -789,6 +789,9 @@ def test_about_keeps_partial_and_unconfirmed_freshness_limits_explicit():
     assert "Partial scan: the Kaizen index was unavailable." in partial
     assert "Read 3 items filed through Portfolio Guru only." in partial
     assert "Freshness unconfirmed: recent Kaizen activity may be missing" in stale
+    # Each fact is its own sentence on its own line, never run together.
+    assert "partial local view.\nPartial scan: the Kaizen index was unavailable." in partial
+    assert "view Partial" not in partial and ".." not in partial
 
 
 def test_open_queues_include_recent_items_and_keep_stuck_threshold_and_total_order():

@@ -4449,11 +4449,22 @@ def _save_confirmed_route(user_id: int, pathway: Pathway) -> None:
     )
 
 
-def _route_hint_line(pathway: Pathway) -> str:
+def _route_hint_line(pathway: Pathway, basis: str = "guessed from Kaizen") -> str:
     return (
-        f"🧭 Route: *{_pathway_label(pathway)}*, guessed from Kaizen. "
+        f"🧭 Route: *{_pathway_label(pathway)}*, {basis}. "
         "Change it in /settings → Portfolio defaults."
     )
+
+
+def _route_basis(user_id: int, stored: bool) -> str:
+    """Say honestly where an unconfirmed route came from."""
+    if stored:
+        return "guessed from Kaizen"
+    if _has_non_training_profile(user_id):
+        return "guessed from your Non-Training Profile"
+    if get_training_level(user_id):
+        return "guessed from your portfolio profile"
+    return "set by default"
 
 
 def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup:
@@ -10653,7 +10664,10 @@ async def _run_health_analysis(
             scan_is_fresh=scan_is_fresh,
         )
     if _route_needs_confirm(profile, today):
-        priorities_text = f"{priorities_text}\n\n{_route_hint_line(profile.pathway)}"
+        priorities_text = (
+            f"{priorities_text}\n\n"
+            f"{_route_hint_line(profile.pathway, _route_basis(user_id, stored_profile is not None))}"
+        )
     await send_progress()
     evidence_basis = _format_health_evidence_context(
         source=evidence_source,
@@ -10861,15 +10875,30 @@ async def _append_health_activity_snapshot(
     return f"{msg}\n\n{snapshot}"
 
 
+def _has_non_training_profile(user_id: int) -> bool:
+    """SAS or a Kaizen Non-Training Profile: not judged at ARCP."""
+    return (
+        get_training_level(user_id) == "SAS"
+        or get_kaizen_role(user_id) in _CESR_DETECTED_ROLES
+    )
+
+
 def _get_or_default_health_profile(user_id: int) -> HealthProfile:
     stored = get_health_profile(user_id)
     if stored:
         return stored
     from datetime import UTC, datetime
     now = datetime.now(UTC)
+    # Before any Kaizen connect has saved a route, a Non-Training Profile
+    # gets the same Portfolio Pathway guess a connect would give it, never
+    # the trainee ARCP view.
     return HealthProfile(
         user_id=str(user_id),
-        pathway=Pathway.training_arcp,
+        pathway=(
+            Pathway.cesr_portfolio
+            if _has_non_training_profile(user_id)
+            else Pathway.training_arcp
+        ),
         pathway_config={},
         created_at=now,
         updated_at=now,
@@ -11152,7 +11181,7 @@ def _format_health_evidence_context(
         scope = "partial — the Kaizen index was unavailable"
 
     if profile_is_default:
-        pathway_line = "Assumed pathway: Training (CCT) — change if wrong"
+        pathway_line = f"Assumed pathway: {_pathway_label(pathway)} — change if wrong"
     else:
         pathway_line = f"Pathway: {_pathway_label(pathway)}"
 

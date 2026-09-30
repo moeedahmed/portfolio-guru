@@ -5,10 +5,13 @@ curricula. This module is the verified pathway overlay on top of it: three
 pure checklists, each built from its audience's published rules, counting only
 what the Kaizen index can see.
 
-* ARCP (RCEM Higher ARCP guide, Gold Guide): no WPBA quota. Each year needs an
-  ESR, MSF (ideally in the first six months), a supervisor report per post, at
-  least three ESLEs including one PEM, and evidence against every SLO. Evidence
-  is due two weeks before the panel.
+* ARCP (RCEM ARCP decision aid and stage guides, Gold Guide): no WPBA quota.
+  Each year needs an ESR, MSF (ideally in the first six months) and a
+  supervisor report per post. Intermediate and Higher also need at least three
+  ESLEs including PEM, and evidence against every SLO. ACCS years have no
+  RCEM ESLE quota and are judged on the 11 ACCS learning outcomes, which are
+  not RCEM SLOs, so neither is checked for ACCS. Evidence is due two weeks
+  before the panel.
 * Portfolio Pathway (GMC Specialty Specific Guidance: Emergency Medicine,
   updated Feb 2025): six-year window; 36 WPBAs as 12 DOPS, 12 Mini-CEX and 12
   CBD; six ESLEs in the last three years, three in the last twelve months;
@@ -48,10 +51,10 @@ MSF_EARLY_WINDOW_DAYS = 183
 ESR_ACTION_WITHIN_DAYS = 84
 
 ALL_SLOS = tuple(range(1, 13))
-# RCEM 2021 curriculum: SLOs 5 (paediatrics), 8 (leadership) and 12 (managing
-# the department) start at Intermediate, so ACCS/core trainees are not judged
-# on them.
-CORE_EXCLUDED_SLOS = frozenset({5, 8, 12})
+# RCEM: "at least three ESLEs are required in each training year in
+# intermediate and higher training", and ACCS years follow the 11 ACCS
+# learning outcomes rather than the 12 RCEM SLOs. So an ACCS/core year has
+# no ESLE target and no SLO check here.
 CORE_LEVELS = frozenset({"ACCS", "CORE"})
 
 CESR_WINDOW_YEARS = 6
@@ -127,6 +130,7 @@ class ArcpChecklist:
     expected_slos: tuple[int, ...]
     slos_without_evidence: tuple[int, ...]
     actions: list[str] = field(default_factory=list)
+    accs: bool = False  # ACCS/core year: no ESLE target, ACCS LOs not SLOs
 
 
 def compute_arcp_checklist(
@@ -159,10 +163,9 @@ def compute_arcp_checklist(
     reports = _count(done, SUPERVISOR_REPORT_FORMS, cycle_start, cycle_end)
     esles = _count(done, frozenset({"ESLE"}), cycle_start, cycle_end)
 
-    level = (training_level or "").upper()
-    expected = tuple(
-        s for s in ALL_SLOS if not (level in CORE_LEVELS and s in CORE_EXCLUDED_SLOS)
-    )
+    accs = (training_level or "").upper() in CORE_LEVELS
+    expected = () if accs else ALL_SLOS
+    esle_target = 0 if accs else ARCP_ESLE_TARGET
     # Reflections are not WPBAs (RCEM), so they do not evidence an SLO here.
     covered = {
         slo
@@ -173,8 +176,10 @@ def compute_arcp_checklist(
     missing_slos = tuple(s for s in expected if s not in covered)
 
     actions: list[str] = []
-    if esles < ARCP_ESLE_TARGET:
-        need = ARCP_ESLE_TARGET - esles
+    if accs:
+        pass  # no ESLE quota in ACCS years
+    elif esles < esle_target:
+        need = esle_target - esles
         actions.append(
             f"Book {need} more ESLE{'s' if need > 1 else ''}, one in PEM"
         )
@@ -209,10 +214,11 @@ def compute_arcp_checklist(
         msf_overdue=msf_overdue,
         supervisor_reports=reports,
         esles=esles,
-        esle_target=ARCP_ESLE_TARGET,
+        esle_target=esle_target,
         expected_slos=expected,
         slos_without_evidence=missing_slos,
         actions=actions,
+        accs=accs,
     )
 
 

@@ -89,11 +89,33 @@ def test_reflections_do_not_evidence_an_slo():
     assert 1 not in check.slos_without_evidence
 
 
-def test_core_trainees_are_not_judged_on_slos_5_8_and_12():
+def test_accs_year_has_no_esle_quota_and_no_rcem_slo_check():
+    # RCEM: three ESLEs a year only in Intermediate and Higher; ACCS years
+    # follow the ACCS learning outcomes, not RCEM SLOs 1-12.
     check = compute_arcp_checklist([], today=TODAY, training_level="ACCS")
-    assert not {5, 8, 12} & set(check.slos_without_evidence)
-    higher = compute_arcp_checklist([], today=TODAY, training_level="HIGHER")
-    assert {5, 8, 12} <= set(higher.slos_without_evidence)
+    assert check.accs and check.esle_target == 0
+    assert check.expected_slos == () and check.slos_without_evidence == ()
+    assert not any("ESLE" in a or "SLO" in a for a in check.actions)
+    assert any("MSF" in a for a in check.actions)
+
+
+def test_intermediate_keeps_three_esles_with_pem_and_every_slo():
+    check = compute_arcp_checklist([], today=TODAY, training_level="INTERMEDIATE")
+    assert not check.accs and check.esle_target == 3
+    assert check.slos_without_evidence == tuple(range(1, 13))
+    assert "Book 3 more ESLEs, one in PEM" in check.actions
+
+
+def test_accs_landing_counts_esles_without_a_target_and_points_to_kaizen_los():
+    items = [_item("ESLE"), _item("MSF")]
+    text = format_arcp_landing(
+        compute_health_assessment(items, today=TODAY),
+        compute_arcp_checklist(items, today=TODAY, training_level="ACCS"),
+        today=TODAY,
+    )
+    assert "ESLEs this year: 1" in text
+    assert "ACCS learning outcomes aren't read here" in text
+    assert "of 3" not in text and "PEM" not in text and "SLO" not in text
 
 
 def test_msf_after_month_six_is_flagged():
