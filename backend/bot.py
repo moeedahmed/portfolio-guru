@@ -4018,13 +4018,9 @@ def _health_view_keyboard(
     queue_totals: dict[str, int] | None = None,
     needs_review_month: bool = False,
     slo_map: bool = False,
+    month_label_trainee: bool = True,
 ) -> InlineKeyboardMarkup:
-    """Show only the controls that are useful from the current Health view.
-
-    ``needs_review_month`` remains in the signature for callers and stored
-    reports created before action-first navigation. It no longer changes the
-    everyday keyboard.
-    """
+    """Keep queues, SLO/month controls and About in distinct rows."""
     rows: list[list[InlineKeyboardButton]] = []
 
     if view == "priorities":
@@ -4037,36 +4033,41 @@ def _health_view_keyboard(
         everyday: list[InlineKeyboardButton] = []
         if draft_total:
             everyday.append(InlineKeyboardButton(
-                f"📝 Drafts ({draft_total})",
+                f"📝 To send ({draft_total})",
                 callback_data="ACTION|health_queue|draft|0",
             ))
         if awaiting_total:
             everyday.append(InlineKeyboardButton(
-                f"⏳ Awaiting ({awaiting_total})",
+                f"⏳ With assessor ({awaiting_total})",
                 callback_data="ACTION|health_queue|awaiting|0",
             ))
-        if needs_review_month:
-            everyday.append(InlineKeyboardButton(
-                "📅 Review month", callback_data="ACTION|health_review_setup"
-            ))
+        if everyday:
+            rows.append(everyday)
+        detail: list[InlineKeyboardButton] = []
         if slo_map:
-            everyday.append(InlineKeyboardButton(
+            detail.append(InlineKeyboardButton(
                 "🎯 SLO map", callback_data="ACTION|health_view|curriculum"
             ))
-        everyday.append(InlineKeyboardButton(
+        if needs_review_month:
+            detail.append(InlineKeyboardButton(
+                f"📅 {'ARCP' if month_label_trainee else 'Appraisal'} month",
+                callback_data="ACTION|health_review_setup",
+            ))
+        if detail:
+            rows.append(detail)
+        rows.append([InlineKeyboardButton(
             "ℹ️ About", callback_data="ACTION|health_view|about"
-        ))
-        rows.extend(everyday[index:index + 2] for index in range(0, len(everyday), 2))
+        )])
 
     elif view == "actions" and queue_totals is not None:
         totals = queue_totals or {}
         rows.append([
             InlineKeyboardButton(
-                f"📝 Drafts ({int(totals.get('draft', 0))})",
+                f"📝 To send ({int(totals.get('draft', 0))})",
                 callback_data="ACTION|health_queue|draft|0",
             ),
             InlineKeyboardButton(
-                f"⏳ Awaiting ({int(totals.get('awaiting', 0))})",
+                f"⏳ With assessor ({int(totals.get('awaiting', 0))})",
                 callback_data="ACTION|health_queue|awaiting|0",
             ),
         ])
@@ -4086,13 +4087,23 @@ def _health_view_keyboard(
                 "➡️ Next",
                 callback_data=f"ACTION|health_queue|{queue}|{page + 1}",
             ))
-        back = InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
-        # Back shares the pager row when it fits: two buttons per row keep
-        # every label whole on a phone.
-        if len(pager) < 2:
-            rows.append(pager + [back])
-        else:
-            rows.extend([pager, [back]])
+        if pager:
+            rows.append(pager)
+        cross_link: list[InlineKeyboardButton] = []
+        totals = queue_totals or {}
+        if queue == "draft" and int(totals.get("awaiting", 0)) > 0:
+            cross_link.append(InlineKeyboardButton(
+                f"⏳ With assessor ({int(totals['awaiting'])})",
+                callback_data="ACTION|health_queue|awaiting|0",
+            ))
+        elif queue == "awaiting" and int(totals.get("draft", 0)) > 0:
+            cross_link.append(InlineKeyboardButton(
+                f"📝 To send ({int(totals['draft'])})",
+                callback_data="ACTION|health_queue|draft|0",
+            ))
+        rows.append(cross_link + [InlineKeyboardButton(
+            "🔙 Health", callback_data="ACTION|health_view|priorities"
+        )])
 
     # Direct callers and buttons sent before V2.1 used one combined page
     # number. Keep their previous/next route alive while new reports pass
@@ -4525,6 +4536,7 @@ def _store_health_report_context(
     action_queue_totals: dict[str, int],
     needs_review_month: bool,
     slo_map: bool = False,
+    month_label_trainee: bool = True,
 ) -> None:
     """Remember the rendered views so the navigation buttons have something to show.
 
@@ -4544,6 +4556,7 @@ def _store_health_report_context(
         "queue_page": {"draft": 0, "awaiting": 0},
         "needs_review_month": needs_review_month,
         "slo_map": slo_map,
+        "month_label_trainee": month_label_trainee,
     }
 
 
@@ -4598,6 +4611,7 @@ def _health_view_payload(
             queue_totals=queue_totals,
             needs_review_month=bool(report.get("needs_review_month")),
             slo_map=bool(report.get("slo_map")) and "curriculum" in views,
+            month_label_trainee=bool(report.get("month_label_trainee", True)),
         )
 
     if view == "about":
@@ -4619,6 +4633,7 @@ def _health_view_payload(
             page=page,
             page_count=len(selected_pages),
             queue=queue,
+            queue_totals=queue_totals,
         )
 
     if view == "legacy_actions":
@@ -9534,9 +9549,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             "health_review_month_selected",
             update_last=False,
         )
+        profile_now = _get_or_default_health_profile(user_id)
+        deadline = _ROUTE_DEADLINE_NAME.get(profile_now.pathway, "review")
         await _safe_edit_text(
             query.message,
-            f"📅 *Review month*\n\nSelected: *{parsed.strftime('%B %Y')}*\n\n"
+            f"📅 *{deadline[:1].upper()}{deadline[1:]} month*\n\nSelected: *{parsed.strftime('%B %Y')}*\n\n"
             "Nothing has been saved yet. Tap Confirm to use this month, choose "
             "another month, or cancel without changing your setting.",
             parse_mode="Markdown",
@@ -9553,6 +9570,8 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=_health_review_month_picker_keyboard(),
             )
             return ConversationHandler.END
+        profile_now = _get_or_default_health_profile(user_id)
+        deadline = _ROUTE_DEADLINE_NAME.get(profile_now.pathway, "review")
         _save_review_month(user_id, parsed)
         _track_funnel_event(
             context,
@@ -9563,7 +9582,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # rebuilt to show the new deadline.
         await _show_health_landing(
             query, context, user_id,
-            notice=f"✅ Review month set to *{parsed.strftime('%B %Y')}*.\n\n",
+            notice=f"✅ {deadline[:1].upper()}{deadline[1:]} month set to *{parsed.strftime('%B %Y')}*.\n\n",
         )
         return ConversationHandler.END
 
@@ -10647,6 +10666,9 @@ async def _run_health_analysis(
         "actions": format_actions(assessment),
         "about": format_about(
             basis=evidence_basis,
+            scanned_items=assessment.scanned_items,
+            core_items=assessment.total_items,
+            trainee=profile.pathway == Pathway.training_arcp,
             limited_view=limited_view,
             scan_is_fresh=scan_is_fresh,
         ),
@@ -10672,8 +10694,8 @@ async def _run_health_analysis(
         for queue in ("draft", "awaiting")
     }
     action_queue_totals = {
-        "draft": len(assessment.stuck_drafts),
-        "awaiting": len(assessment.stuck_awaiting),
+        "draft": len(assessment.open_drafts),
+        "awaiting": len(assessment.open_awaiting),
     }
     # Curriculum SLOs matter for training and Portfolio Pathway evidence, not
     # for an appraisal-only doctor.
@@ -10687,6 +10709,7 @@ async def _run_health_analysis(
             action_queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
             slo_map=slo_map,
+            month_label_trainee=profile.pathway == Pathway.training_arcp,
         )
     await send_result(
         priorities_text,
@@ -10695,6 +10718,7 @@ async def _run_health_analysis(
             queue_totals=action_queue_totals,
             needs_review_month=review_month_needs_setup,
             slo_map=slo_map,
+            month_label_trainee=profile.pathway == Pathway.training_arcp,
         ),
     )
 

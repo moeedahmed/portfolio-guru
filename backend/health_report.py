@@ -8,7 +8,7 @@ The everyday journey has three views, each with one job:
 
 - **What to do next** — draft and awaiting counts, with doctor-controlled work
   first.
-- **Draft/Awaiting queues** — five per page, each item linked to Kaizen.
+- **Draft/Awaiting queues** — 25 per page, each item linked to Kaizen.
 - **About** — only the provenance and limits needed to trust the report.
 
 Actions, Coverage, Curriculum and Scan info remain renderable for buttons in
@@ -46,21 +46,22 @@ from health_assessment import (
 
 # One phone screen of items per Actions page.
 ACTIONS_PAGE_SIZE = 5
+QUEUE_PAGE_SIZE = 25
 
 SAFETY_LINE = (
     "_Read-only planning aid, not a formal training or appraisal judgement._"
 )
 
 
-def _describe(item: StuckEvidence, *, link: bool = True) -> str:
+def _describe(item: StuckEvidence, *, link: bool = True, separator: str = " — ") -> str:
     """One unfinished item: what it is, when it is dated, where it lives.
 
     The date is the finding. A duration ("waiting 1112 days") reads as a breach
     of something, and nothing in Kaizen says what an acceptable wait is.
     """
     # Doctors recognise "Teaching Observation", not "TEACH_OBS".
-    name = form_label(item.form_type, fallback=None) if item.form_type else item.title
-    label = f"{name} — {item.event_date.strftime('%-d %b %Y')}"
+    name = form_label(item.form_type)
+    label = f"{name}{separator}{item.event_date.strftime('%-d %b %Y')}"
     # Naming an item from 2023 and leaving the doctor to find it is half a
     # feature. The URL is already indexed for every item.
     if link and item.url:
@@ -108,11 +109,6 @@ GROUP_HEADINGS = {
 
 QUEUE_EMOJI = {"draft": "📝", "awaiting": "⏳"}
 
-QUEUE_LABELS = {
-    "draft": "older drafts",
-    "awaiting": "older items awaiting sign-off",
-}
-
 # Entries older than this are offered for review rather than listed as work
 # still to do — a draft from three years ago is as likely to be abandoned as
 # outstanding, and only the doctor knows which.
@@ -123,9 +119,9 @@ def _queue_items(
     assessment: HealthAssessment, queue: str
 ) -> list[StuckEvidence]:
     if queue == "draft":
-        return assessment.stuck_drafts
+        return assessment.open_drafts
     if queue == "awaiting":
-        return assessment.stuck_awaiting
+        return assessment.open_awaiting
     raise ValueError(f"Unknown Health action queue: {queue}")
 
 
@@ -133,7 +129,7 @@ def action_queue_page_count(
     assessment: HealthAssessment,
     queue: str,
     *,
-    page_size: int = ACTIONS_PAGE_SIZE,
+    page_size: int = QUEUE_PAGE_SIZE,
 ) -> int:
     total = len(_queue_items(assessment, queue))
     return max(1, (total + page_size - 1) // page_size)
@@ -150,36 +146,45 @@ def format_action_queue(
     queue: str,
     *,
     page: int = 0,
-    page_size: int = ACTIONS_PAGE_SIZE,
+    page_size: int = QUEUE_PAGE_SIZE,
 ) -> str:
-    """One independently paginated queue of older unfinished evidence."""
+    """All open evidence, oldest first, with age-band totals across pages."""
     items = _queue_items(assessment, queue)
-    heading, note = GROUP_HEADINGS[queue]
-    label = QUEUE_LABELS[queue]
     if not items:
         return (
-            f"{QUEUE_EMOJI[queue]} *{heading}*\n\n"
-            f"No {label} were highlighted in this scan."
+            "📝 Nothing open to finish and send in this scan."
+            if queue == "draft"
+            else "⏳ Nothing open waiting on an assessor in this scan."
         )
-
+    if queue == "draft":
+        heading = "To finish and send"
+        note = "Started by you, not yet sent to an assessor."
+        footer = "_Tap one to open it in Kaizen. Bin any you no longer need._"
+    else:
+        heading = "Waiting on an assessor"
+        note = "You sent these. An assessor still needs to complete them."
+        footer = (
+            "_Kaizen doesn't show if an assessor has opened it. "
+            "If one has gone quiet, resend it from Kaizen._"
+        )
     pages = action_queue_page_count(assessment, queue, page_size=page_size)
     page = max(0, min(page, pages - 1))
-    start = page * page_size
-    window = items[start:start + page_size]
-
-    # The heading already carries the total, so the subtitle only adds the
-    # page when there is more than one.
+    window = items[page * page_size:(page + 1) * page_size]
     subtitle = note if pages == 1 else f"{note} Page {page + 1} of {pages}."
-    lines = [
-        f"{QUEUE_EMOJI[queue]} *{heading} — {len(items)}*",
-        subtitle,
-        "",
-    ]
-    lines.extend(_describe(item) for item in window)
-
-    old_note = _old_item_note(window)
-    if old_note:
-        lines.extend(["", old_note])
+    lines = [f"{QUEUE_EMOJI[queue]} *{heading} · {len(items)}*", subtitle, ""]
+    bands = (
+        ("Over a year old", lambda item: item.days_waiting > 365),
+        ("Last 12 months", lambda item: 21 <= item.days_waiting <= 365),
+        ("Last 3 weeks", lambda item: item.days_waiting < 21),
+    )
+    for label, belongs in bands:
+        shown = [item for item in window if belongs(item)]
+        if shown:
+            total = sum(1 for item in items if belongs(item))
+            lines.append(f"*{label} · {total}*")
+            lines.extend(_describe(item, separator=" · ") for item in shown)
+            lines.append("")
+    lines.append(footer)
     return "\n".join(lines).strip()
 
 
@@ -241,7 +246,7 @@ def format_actions(
     lines = ["📌 *Actions*", ""]
     shown: list[StuckEvidence] = []
     for queue in ("draft", "awaiting"):
-        items = _queue_items(assessment, queue)
+        items = assessment.stuck_drafts if queue == "draft" else assessment.stuck_awaiting
         heading, note = GROUP_HEADINGS[queue]
         lines.extend([f"*{heading} — {len(items)}*", f"_{note}_"])
         if items:
@@ -317,7 +322,7 @@ def _review_lines(
 ) -> list[str]:
     """Review timing, pointing at whichever route this view actually offers."""
     route = (
-        "open ☰ More and choose Review month"
+        "tap 📅 on Health"
         if has_button
         else "set it with /arcp"
     )
@@ -398,11 +403,10 @@ def _chase_action(assessment: HealthAssessment) -> Optional[str]:
     """The oldest item waiting on someone else, as one action."""
     if not assessment.stuck_awaiting:
         return None
-    oldest = min(assessment.stuck_awaiting, key=lambda s: s.event_date)
-    name = form_label(oldest.form_type, fallback=None) if oldest.form_type else oldest.title
+    oldest = assessment.stuck_awaiting[0]
+    name = form_label(oldest.form_type)
     return (
-        f"Chase your {name} from {oldest.event_date.strftime('%-d %b %Y')} "
-        "if it still needs signing"
+        f"Ask your assessor about your {name} from {oldest.event_date.strftime('%b %Y')}"
     )
 
 
@@ -416,7 +420,7 @@ def _do_next(
     actions = list(pathway_actions)
     chase = _chase_action(assessment)
     if chase:
-        actions.insert(min(1, len(actions)), chase)
+        actions.insert(min(2, len(actions)), chase)
     actions = actions[:DO_NEXT_LIMIT]
     if not actions:
         return []
@@ -426,21 +430,22 @@ def _do_next(
 
 
 def _queue_line(assessment: HealthAssessment) -> list[str]:
-    drafts = len(assessment.stuck_drafts)
-    awaiting = len(assessment.stuck_awaiting)
+    drafts = len(assessment.open_drafts)
+    awaiting = len(assessment.open_awaiting)
     if not drafts and not awaiting:
         return []
-    parts = []
+    lines = ["*Still open in Kaizen*"]
     if drafts:
-        parts.append(f"{drafts} draft{'s' if drafts != 1 else ''}")
+        lines.append(f"📝 {drafts} to finish and send (drafts)")
     if awaiting:
-        parts.append(f"{awaiting} awaiting sign-off")
-    return [f"Older than 3 weeks: {' and '.join(parts)} (buttons below).", ""]
+        lines.append(f"⏳ {awaiting} sent, waiting on an assessor")
+    return lines + [""]
 
 
 def _landing_footer(
     assessment: HealthAssessment,
     *,
+    trainee: bool = True,
     limited_view: bool,
     partial_scan: bool,
     scan_is_fresh: bool,
@@ -452,9 +457,8 @@ def _landing_footer(
     if notice:
         lines.extend([notice, ""])
     lines.append(
-        f"_From {assessment.total_items} Kaizen items. "
-        + SAFETY_LINE.strip("_")
-        + "_"
+        f"_From {assessment.scanned_items} Kaizen items. Read-only, not an "
+        f"{'ARCP' if trainee else 'appraisal'} judgement._"
     )
     return lines
 
@@ -477,9 +481,8 @@ def format_arcp_landing(
     deadline = checklist.evidence_deadline
     if deadline and deadline >= today:
         lines.append(
-            f"Evidence due {deadline.strftime('%-d %b %Y')} "
-            f"({_weeks_until(deadline, today)}), 2 weeks before your "
-            f"{checklist.review_date.strftime('%B')} panel"
+            f"{checklist.review_date.strftime('%B %Y')} panel · "
+            f"evidence due {deadline.strftime('%-d %b')} ({_weeks_until(deadline, today)})"
         )
     elif deadline:
         lines.append(
@@ -488,7 +491,7 @@ def format_arcp_landing(
         )
     else:
         lines.append("No ARCP month set, so this counts the last 12 months.")
-    lines.extend(["", "*This year (signed off)*"])
+    lines.extend(["", "*This year, signed off*"])
 
     if checklist.msf and checklist.msf_late:
         msf = f"⚠️ MSF done {checklist.msf_first_date.strftime('%b %Y')}, after month 6"
@@ -499,23 +502,19 @@ def format_arcp_landing(
     else:
         msf = "⬜ MSF"
     lines.append(
-        f"{msf} · {_tick(checklist.supervisor_reports > 0)} Supervisor report"
-        f" · {_tick(checklist.esr > 0)} ESR"
+        f"{msf}   {_tick(checklist.supervisor_reports > 0)} Supervisor report"
+        f"   {_tick(checklist.esr > 0)} ESR"
     )
     esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
     lines.append(
-        f"{esle_mark} ESLEs {checklist.esles}/{checklist.esle_target} "
-        "(one must be PEM: check this)"
+        f"{esle_mark} ESLEs {checklist.esles} of {checklist.esle_target} (one in PEM)"
     )
     if checklist.slos_without_evidence:
         slos = ", ".join(str(s) for s in checklist.slos_without_evidence)
-        lines.append(f"⬜ SLOs with no assessed evidence: {slos}")
+        lines.append(f"⬜ No assessed evidence yet: SLO {slos}")
     else:
-        lines.append("✅ Assessed evidence linked to every SLO")
-    lines.extend([
-        "_Form R and SLO6 procedure sign-offs aren't visible to this scan._",
-        "",
-    ])
+        lines.append("✅ Every SLO has assessed evidence")
+    lines.append("")
 
     lines.extend(_do_next(
         checklist.actions, assessment, incomplete_scan=limited_view or partial_scan
@@ -557,7 +556,7 @@ def format_portfolio_landing(
     else:
         lines.append("No appraisal month set. Add it with 📅 below.")
 
-    lines.extend(["", "*Before your appraisal (last 12 months)*"])
+    lines.extend(["", "*Before your appraisal, last 12 months*"])
     lines.append(
         f"{_tick(appraisal.cpd > 0)} CPD {appraisal.cpd}"
         f" · {_tick(appraisal.qi > 0)} QI {appraisal.qi}"
@@ -584,6 +583,7 @@ def format_portfolio_landing(
     ))
     lines.extend(_landing_footer(
         assessment,
+        trainee=False,
         limited_view=limited_view,
         partial_scan=partial_scan,
         scan_is_fresh=scan_is_fresh,
@@ -664,6 +664,9 @@ def _about_facts(basis: str, *, limited_view: bool) -> list[str]:
 def format_about(
     *,
     basis: str,
+    scanned_items: int | None = None,
+    core_items: int | None = None,
+    trainee: bool = False,
     limited_view: bool = False,
     scan_is_fresh: bool = True,
 ) -> str:
@@ -688,14 +691,20 @@ def format_about(
             "Freshness unconfirmed: recent Kaizen activity may be missing."
         )
 
-    lines = ["ℹ️ *About Portfolio Health*", ""]
-    lines.extend(facts or ["No scan details are available for this report."])
+    lines = ["ℹ️ *About this report*"]
+    lines.append(" ".join(facts) if facts else "No scan details are available for this report.")
+    if scanned_items is not None and core_items is not None and scanned_items > core_items:
+        lines.extend(["", (
+            f"{core_items} sit in the six main categories "
+            "(clinical, CPD, QI, teaching, leadership, reflection). "
+            f"The other {scanned_items - core_items} are counted but not categorised."
+        )])
+    lines.extend(["", "• Reads Kaizen only. Never edits, sends or deletes."])
+    if trainee:
+        lines.append("• Can't see Form R or SLO 6 procedure sign-offs.")
     lines.extend([
-        "",
-        "• It only reads Kaizen. It never edits, files, chases or deletes.",
-        "• It can misread an item, so open it in Kaizen to check.",
-        "• It lists older unfinished items it can see, not every one.",
-        "• A planning aid, not a formal training or appraisal judgement.",
+        "• Can misread an item: open it in Kaizen to check.",
+        "• A planning aid, not an ARCP or appraisal judgement.",
     ])
     return "\n".join(lines).strip()
 
@@ -755,58 +764,44 @@ def format_coverage(
     return "\n".join(lines).strip()
 
 
+SLO_SHORT_NAMES = {
+    1: "Adult patients", 2: "Clinical Qs", 3: "Resuscitation",
+    4: "Injured pts", 5: "Children", 6: "Procedures",
+    7: "Complex cases", 8: "Lead the shift", 9: "Teaching",
+    10: "Research", 11: "Quality, safety", 12: "Manage, lead",
+}
+
+
 def format_curriculum(assessment: HealthAssessment) -> str:
-    """Tagged curriculum spread as a short, scannable drill-down.
-
-    "12/12 SLOs covered" is technically true of a portfolio holding 298 tags
-    against one outcome and 13 against another. The count is the finding — and
-    so is how much of the portfolio the count could not see.
-    """
+    """All twelve SLO tag counts, scaled to this portfolio's largest count."""
     counts = assessment.slo_counts
+    maximum = max((counts.get(slo, 0) for slo in SLO_SHORT_NAMES), default=0)
     lines = ["🎯 *SLO map*"]
-    if counts:
-        lines.append(
-            f"{len(counts)} of 12 SLOs have tagged evidence, "
-            f"from {assessment.tagged_items} tagged items."
-        )
-    else:
-        lines.append("No tagged evidence yet, so there is no SLO spread to show.")
-    lines.append("")
-
-    if counts:
-        ranked = sorted(counts.items(), key=lambda kv: kv[1])
-        strongest_slo, strongest = ranked[-1]
-        lines.append(f"*Most:* SLO{strongest_slo} ({strongest})")
-        # With one tagged outcome the most is also the fewest, and printing it
-        # twice reads as two findings.
-        fewest = [f"SLO{slo} ({count})" for slo, count in ranked[:-1][:3]]
-        if fewest:
-            lines.append(f"*Fewest:* {', '.join(fewest)}")
-        missing = [f"SLO{slo}" for slo in range(1, 13) if slo not in counts]
-        if missing:
-            lines.append(f"*None yet:* {', '.join(missing)}")
-
-    # Untagged items are invisible to this view. Saying so stops a doctor
-    # reading a small SLO as a gap when the evidence may simply be untagged.
-    # Name the forms: a count says there is a problem, the forms say where to
-    # go and fix it.
+    lines.append(
+        f"Tagged evidence per SLO, from {assessment.tagged_items} tagged items."
+        if maximum else "No tagged evidence yet."
+    )
+    lines.extend(["", "```"])
+    for slo, name in SLO_SHORT_NAMES.items():
+        count = counts.get(slo, 0)
+        filled = max(1, round(8 * count / maximum)) if count > 0 else 0
+        bar = "█" * filled + "░" * (8 - filled)
+        lines.append(f"{slo:2} {name:<15}  {bar}  {count:3}")
+    lines.extend(["```", ""])
     untagged = assessment.untagged_items
     if untagged:
-        worst = sorted(assessment.untagged_by_form.items(), key=lambda kv: -kv[1])[:3]
-        where = ", ".join(f"{form_label(form)} {count}" for form, count in worst)
-        noun = "item" if untagged == 1 else "items"
-        detail = f" ({where})" if where else ""
-        lines.append(
-            f"*Untagged:* {untagged} {noun}{detail}, which may not count toward any SLO"
-        )
+        lines.append(f"*Untagged · {untagged} {'item' if untagged == 1 else 'items'}*, not counted above")
+        forms = sorted(assessment.untagged_by_form.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        breakdown = [f"{form_label(form)} {count}" for form, count in forms]
+        other = untagged - sum(count for _form, count in forms)
+        if other > 0:
+            breakdown.append(f"other {other}")
+        if breakdown:
+            lines.append(" · ".join(breakdown))
+        lines.append("Add SLO tags in Kaizen so they count.")
     else:
         lines.append("*Untagged:* none")
-
-    lines.extend([
-        "",
-        "_Counts tags only. More tags doesn't mean enough evidence, and this "
-        "isn't an ARCP outcome._",
-    ])
+    lines.extend(["", "_Counts tags only, not whether evidence is enough._"])
     return "\n".join(lines).strip()
 
 
@@ -859,9 +854,8 @@ def format_scan_info(
         "is absent rather than missing."
     )
     lines.append(
-        "• Health highlights older unfinished items from Kaizen workflow states; "
-        "it does not show every unfinished item. The scan holds no deadline, so "
-        "nothing here is described as overdue."
+        "• Open lists use the Kaizen workflow states visible to this scan. "
+        "Items absent from the index are not included."
     )
     lines.append(
         "• Curriculum spread covers tagged items only; category and SLO counts "

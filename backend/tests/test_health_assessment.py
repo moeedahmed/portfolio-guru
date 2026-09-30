@@ -392,32 +392,29 @@ def test_scan_info_points_at_the_command_because_it_has_no_button():
 # ── Actions ─────────────────────────────────────────────────────────────────
 
 
-def _many_stuck(count=17):
+def _many_stuck(count=17, *, drafts=None, awaiting=10):
     items = _balanced()
     items += [
         _item(state="pending", days_ago=1000 - n, ident=f"a-{n:02d}", form_type="MINI_CEX")
-        for n in range(10)
+        for n in range(awaiting)
     ]
     items += [
         _item(state="draft", days_ago=900 - n, ident=f"d-{n:02d}", form_type="JCF")
-        for n in range(count - 10)
+        for n in range(drafts if drafts is not None else count - 10)
     ]
     return items
 
 
 def test_actions_shows_the_visible_range_of_a_bounded_page():
-    assessment = _assess(_many_stuck())
-
+    assessment = _assess(_many_stuck(awaiting=30))
     first = format_action_queue(assessment, "awaiting", page=0)
     second = format_action_queue(assessment, "awaiting", page=1)
-
     assert action_queue_page_count(assessment, "awaiting") == 2
-    assert "*Awaiting sign-off — 10*" in first
-    assert "Page 1 of 2." in first
-    assert "Page 2 of 2." in second
-    # The heading carries the total once; no second "Showing … of 10" line.
+    assert "*Waiting on an assessor · 30*" in first
+    assert "Page 1 of 2." in first and "Page 2 of 2." in second
     assert "Showing" not in first
-    assert first.count("\n• ") == 5
+    assert first.count("\n• ") == 25
+    assert second.count("\n• ") == 5
 
 
 def test_actions_pages_partition_the_items_with_no_gap_or_repeat():
@@ -456,10 +453,10 @@ def test_actions_separates_awaiting_from_your_own_drafts():
 
     assert landing.index("*Older drafts — 7*") < landing.index("*Awaiting sign-off — 10*")
     assert landing.count("\n• ") == 6  # Up to three direct-linked examples per queue.
-    assert "*Older drafts — 7*" in drafts
-    assert "Started by you, not yet finished." in drafts
-    assert "*Awaiting sign-off — 10*" in awaiting
-    assert "Submitted, waiting for someone else to sign." in awaiting
+    assert "*To finish and send · 7*" in drafts
+    assert "Started by you, not yet sent to an assessor." in drafts
+    assert "*Waiting on an assessor · 10*" in awaiting
+    assert "You sent these. An assessor still needs to complete them." in awaiting
     # The read-only boundary lives on the main screen and About, not on
     # every queue page.
     for page in (drafts, awaiting):
@@ -517,16 +514,15 @@ def test_actions_does_not_misstate_recent_unfinished_items_as_complete():
     assert actions_page_count(_assess(_balanced())) == 1
 
 
-def test_action_queues_paginate_independently_at_five_per_page():
-    assessment = _assess(_many_stuck())
-
+def test_action_queues_paginate_independently_at_25_per_page():
+    assessment = _assess(_many_stuck(drafts=27, awaiting=30))
     assert action_queue_page_count(assessment, "draft") == 2
     assert action_queue_page_count(assessment, "awaiting") == 2
     drafts_2 = format_action_queue(assessment, "draft", page=1)
     awaiting_2 = format_action_queue(assessment, "awaiting", page=1)
-    assert "*Older drafts — 7*" in drafts_2 and "Page 2 of 2." in drafts_2
+    assert "*To finish and send · 27*" in drafts_2 and "Page 2 of 2." in drafts_2
     assert drafts_2.count("\n• ") == 2
-    assert "*Awaiting sign-off — 10*" in awaiting_2 and "Page 2 of 2." in awaiting_2
+    assert "*Waiting on an assessor · 30*" in awaiting_2 and "Page 2 of 2." in awaiting_2
     assert awaiting_2.count("\n• ") == 5
 
 
@@ -598,10 +594,11 @@ def test_curriculum_spread_reports_counts_over_tagged_items_only():
 
     assert assessment.slo_counts == {6: 40, 10: 3}
     assert assessment.tagged_items == 43
-    assert "2 of 12 SLOs have tagged evidence, from 43 tagged items." in curriculum
-    assert "*Most:* SLO6 (40)" in curriculum
-    assert "*Fewest:* SLO10 (3)" in curriculum
-    assert "*None yet:* SLO1, SLO2, SLO3" in curriculum
+    assert "Tagged evidence per SLO, from 43 tagged items." in curriculum
+    rows = curriculum.split("```")[1].splitlines()
+    assert any(row.startswith(" 6 Procedures") and row.endswith(" 40") for row in rows)
+    assert any(row.startswith("10 Research") and row.endswith("  3") for row in rows)
+    assert any(row.startswith(" 1 Adult patients") and row.endswith("  0") for row in rows)
     assert "item(s)" not in curriculum
 
 
@@ -613,8 +610,8 @@ def test_twelve_of_twelve_slos_does_not_claim_curriculum_adequacy():
 
     assert "12/12 SLOs represented" in coverage
     assert "presence does not assess adequacy" in coverage.lower()
-    assert "12 of 12 SLOs have tagged evidence" in curriculum
-    assert "More tags doesn't mean enough evidence" in curriculum
+    assert "from 12 tagged items" in curriculum
+    assert "Counts tags only, not whether evidence is enough" in curriculum
     assert "None yet" not in curriculum
     for text in (coverage, curriculum):
         assert "12/12 SLOs covered" not in text
@@ -629,8 +626,8 @@ def test_untagged_items_are_disclosed_not_silently_dropped():
 
     # All six are CBDs and one is tagged, so the other five are a real gap.
     assert assessment.untagged_items == 5
-    assert "*Untagged:* 5 items (" in curriculum
-    assert "may not count toward any SLO" in curriculum
+    assert "*Untagged · 5 items*, not counted above" in curriculum
+    assert "Add SLO tags in Kaizen so they count." in curriculum
 
 
 def test_untagged_count_is_stated_even_when_it_is_zero():
@@ -731,7 +728,8 @@ def test_scan_info_carries_the_basis_review_timing_and_limits():
     assert "Refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
     assert "Next review: October 2026" in text
     assert "*What this cannot see*" in text
-    assert "nothing here is described as overdue" in text
+    assert "Open lists use the Kaizen workflow states visible to this scan" in text
+    assert "overdue" not in text.lower()
     assert "category and SLO counts are inventory, not a requirement" in text
     assert "classification is not certified" in text.lower()
     assert "curriculum adequacy is not certified" in text.lower()
@@ -758,14 +756,13 @@ def test_scan_info_holds_the_fuller_pathway_expectations():
 def test_about_contains_only_the_information_needed_to_trust_health():
     text = _about(_balanced())
 
-    assert text.startswith("ℹ️ *About Portfolio Health*")
+    assert text.startswith("ℹ️ *About this report*")
     assert "Read 12 items from your Kaizen." in text
     assert "Last refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
-    assert "not every one" in text
-    assert "It can misread an item" in text
-    assert "never edits, files, chases or deletes" in text
+    assert "Can misread an item" in text
+    assert "Never edits, sends or deletes" in text
     # Said once, not twice.
-    assert text.count("not a formal training or appraisal judgement") == 1
+    assert text.count("not an ARCP or appraisal judgement") == 1
     # A full scan's scope is the default and is jargon to a doctor.
     for removed in (
         "Domains — total", "Curriculum tags", "Review timing", "WPBAs",
@@ -792,3 +789,85 @@ def test_about_keeps_partial_and_unconfirmed_freshness_limits_explicit():
     assert "Partial scan: the Kaizen index was unavailable." in partial
     assert "Read 3 items filed through Portfolio Guru only." in partial
     assert "Freshness unconfirmed: recent Kaizen activity may be missing" in stale
+
+
+def test_open_queues_include_recent_items_and_keep_stuck_threshold_and_total_order():
+    items = [
+        _item(state=state, days_ago=age, ident=f'{state}-{age}-{n}')
+        for state in ('draft', 'pending')
+        for age in (0, 20, 21, 365, 366)
+        for n in (1, 0)
+    ] + [_item(domain=HealthDomain.unclassified, ident='outside')]
+    assessment = _assess(items)
+    assert assessment.scanned_items == 21
+    assert assessment.total_items == 20
+    for opened, stuck in ((assessment.open_drafts, assessment.stuck_drafts),
+                          (assessment.open_awaiting, assessment.stuck_awaiting)):
+        assert len(opened) == 10
+        assert len(stuck) == 6
+        assert stuck == [item for item in opened if item.days_waiting >= 21]
+        assert opened == sorted(opened, key=lambda s: (-s.days_waiting, s.form_type or '', s.id))
+
+
+def test_queue_25_item_pages_group_by_age_with_global_band_counts():
+    items = [
+        _item(state='draft', days_ago=age, ident=f'{age}-{n:02}')
+        for age, count in ((366, 10), (365, 10), (20, 10))
+        for n in range(count)
+    ]
+    assessment = _assess(items)
+    assert action_queue_page_count(assessment, 'draft') == 2
+    first = format_action_queue(assessment, 'draft')
+    second = format_action_queue(assessment, 'draft', page=1)
+    assert first.count('• [') == 25
+    assert second.count('• [') == 5
+    assert '*To finish and send · 30*' in first
+    assert 'Page 1 of 2.' in first and 'Page 2 of 2.' in second
+    for band in ('Over a year old', 'Last 12 months', 'Last 3 weeks'):
+        assert f'*{band} · 10*' in first
+    assert '*Last 3 weeks · 10*' in second
+    assert '*Last 12 months' not in second and '*Over a year old' not in second
+    assert 'CBD · ' in second
+    assert 'Clinical narrative' not in first + second
+    assert len(first) < 4096
+    single = format_action_queue(_assess(items[-1:]), 'draft')
+    assert 'Page ' not in single
+    no_url = items[-1].model_copy(update={'source_ref': None})
+    assert '• CBD · ' in format_action_queue(_assess([no_url]), 'draft')
+    awaiting = format_action_queue(_assess([_item(state='pending', days_ago=1)]), 'awaiting')
+    assert '*Waiting on an assessor · 1*' in awaiting
+    assert "Kaizen doesn't show if an assessor has opened it" in awaiting
+
+
+def test_slo_map_shows_all_twelve_scaled_bars_and_remaining_untagged_forms():
+    from health_assessment import HealthAssessment
+    assessment = HealthAssessment(
+        slo_counts={1: 8, 2: 4, 3: 1}, tagged_items=10,
+        untagged_items=20, untagged_by_form={'EDU_ACT': 8, 'REFLECT_LOG': 5, 'PROC_LOG': 4, 'CBD': 3},
+    )
+    text = format_curriculum(assessment)
+    rows = text.split('```')[1].strip('\n').splitlines()
+    assert len(rows) == 12
+    assert [int(row.split()[0]) for row in rows] == list(range(1, 13))
+    assert '████████' in rows[0]
+    assert '████░░░░' in rows[1]
+    assert '█░░░░░░░' in rows[2]
+    assert rows[3].endswith('  0') and '░░░░░░░░' in rows[3]
+    assert not any(char in text.split('```')[1] for char in '*_')
+    assert 'from 10 tagged items' in text
+    assert '*Untagged · 20 items*, not counted above' in text
+    assert 'other 3' in text
+    assert len(text) < 4096
+    empty = format_curriculum(HealthAssessment(untagged_items=3, untagged_by_form={'CBD': 3}))
+    assert 'No tagged evidence yet' in empty and 'Untagged · 3 items' in empty
+    assert len(empty.split('```')[1].strip('\n').splitlines()) == 12
+
+
+def test_about_discloses_outside_core_items_and_trainee_only_limits():
+    text = format_about(basis=BASIS, scanned_items=507, core_items=460, trainee=True)
+    assert '*About this report*' in text
+    assert '460 sit in the six main categories' in text
+    assert 'other 47 are counted but not categorised' in text
+    assert 'Form R or SLO 6 procedure sign-offs' in text
+    assert 'Form R' not in format_about(basis=BASIS, scanned_items=12, core_items=12)
+    assert 'other 0' not in format_about(basis=BASIS, scanned_items=12, core_items=12)

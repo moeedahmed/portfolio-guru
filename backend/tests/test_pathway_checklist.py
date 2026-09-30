@@ -76,7 +76,7 @@ def test_arcp_counts_only_signed_off_evidence_in_the_cycle():
     ]
     check = compute_arcp_checklist(items, today=TODAY)
     assert check.esles == 1
-    assert check.actions[0] == "Book 2 more ESLEs, with at least one in PEM"
+    assert check.actions[0] == "Book 2 more ESLEs, one in PEM"
 
 
 def test_reflections_do_not_evidence_an_slo():
@@ -113,7 +113,7 @@ def test_missing_esr_only_becomes_an_action_near_the_deadline():
     assert any("ESR" in a for a in near.actions)
 
 
-def test_arcp_landing_is_phone_sized_and_names_what_it_cannot_see():
+def test_arcp_landing_is_phone_sized_and_leaves_scan_limits_to_about():
     items = _many("ESLE", 2) + [_item("MSF"), _item("CBD", slos=list(range(1, 13)))]
     assessment = compute_health_assessment(items, today=TODAY)
     text = format_arcp_landing(
@@ -121,9 +121,9 @@ def test_arcp_landing_is_phone_sized_and_names_what_it_cannot_see():
         compute_arcp_checklist(items, today=TODAY, review_date=date(2027, 5, 1)),
         today=TODAY,
     )
-    assert "Evidence due 17 Apr 2027" in text
-    assert "ESLEs 2/3" in text and "PEM" in text
-    assert "Form R" in text
+    assert "May 2027 panel · evidence due 17 Apr" in text
+    assert "ESLEs 2 of 3" in text and "PEM" in text
+    assert "Form R" not in text
     assert text.count("\n") <= 22
     do_next = text.split("*Do next*")[1]
     assert do_next.count("\n1. ") + do_next.count("\n2. ") + do_next.count("\n3. ") <= 3
@@ -250,3 +250,25 @@ def test_appraisal_only_landing_leaves_out_the_portfolio_pathway():
     assert "Before your appraisal" in text
     assert "Portfolio Pathway" not in text and "WPBAs" not in text
     assert "Add a quality improvement or audit entry" in text
+
+
+def test_landing_counts_all_open_items_and_all_scanned_categories():
+    from dataclasses import replace
+    items = [_item('ESLE')] + _many('CBD', 9, days_ago=1, state='draft') + [
+        _item('TEACH_OBS', on=date(2023, 8, 1), state='pending'),
+        _item('CBD', days_ago=1, state='pending'),
+    ]
+    assessment = replace(compute_health_assessment(items, today=TODAY), scanned_items=507, total_items=460)
+    check = compute_arcp_checklist(items, today=TODAY, review_date=date(2027, 5, 1))
+    text = format_arcp_landing(assessment, check, today=TODAY)
+    assert 'May 2027 panel · evidence due 17 Apr (28 weeks)' in text
+    assert '*This year, signed off*' in text
+    assert '⬜ MSF   ⬜ Supervisor report   ⬜ ESR' in text
+    assert 'ESLEs 1 of 3 (one in PEM)' in text
+    assert '*Still open in Kaizen*\n📝 9 to finish and send (drafts)\n⏳ 2 sent, waiting on an assessor' in text
+    assert 'Ask your assessor about your Teaching Observation from Aug 2023' in text
+    assert 'Form R' not in text and 'Chase' not in text
+    assert '_From 507 Kaizen items. Read-only, not an ARCP judgement._' in text
+    assert 'Clinical narrative' not in text
+    portfolio = format_portfolio_landing(assessment, compute_appraisal_checklist(items, today=TODAY), None, today=TODAY)
+    assert 'From 507 Kaizen items. Read-only, not an appraisal judgement.' in portfolio

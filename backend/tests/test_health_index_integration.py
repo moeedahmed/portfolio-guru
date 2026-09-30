@@ -1166,11 +1166,11 @@ def test_review_month_route_shows_only_when_the_month_is_missing_or_passed():
 
     # The ARCP deadline and appraisal countdown depend on it, so the landing
     # offers the month only while it is missing or has passed.
-    assert ("📅 Review month", "ACTION|health_review_setup") in with_route
+    assert ("📅 ARCP month", "ACTION|health_review_setup") in with_route
     assert not any(data == "ACTION|health_review_setup" for _text, data in without)
     assert landing == [
-        ("📝 Drafts (2)", "ACTION|health_queue|draft|0"),
-        ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
+        ("📝 To send (2)", "ACTION|health_queue|draft|0"),
+        ("⏳ With assessor (3)", "ACTION|health_queue|awaiting|0"),
         ("ℹ️ About", "ACTION|health_view|about"),
     ]
     assert old_more == [('🔙 Health', "ACTION|health_view|priorities")]
@@ -1417,7 +1417,7 @@ async def test_health_arcp_index_present_is_not_reported_as_a_partial_scan(
     assert "Partial scan" not in text
     assert "Limited view" not in scan
     assert not any(label in text for label in ("Well covered", "Needs attention", "Thin"))
-    assert "Read-only planning aid, not a formal training or appraisal judgement" in text
+    assert "Read-only, not an ARCP judgement" in text
 
 
 @pytest.mark.asyncio
@@ -1777,3 +1777,43 @@ async def test_health_scan_shows_items_read_while_it_runs(monkeypatch):
 
     texts = [text for _, text, _ in sim.messages_sent if text]
     assert any("42 items read so far" in text for text in texts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('pathway', [Pathway.training_arcp, Pathway.appraisal_only, Pathway.cesr_portfolio])
+async def test_health_report_wires_recent_queues_all_scan_counts_and_route_labels(
+    kaizen_index, isolated_health_store, monkeypatch, pathway
+):
+    import bot
+    user_id = 99999999
+    today = datetime.now(UTC).date().isoformat()
+    for ident, state, form in [('draft', 'draft', 'CBD'), ('pending', 'pending', 'CBD'), ('outside', 'complete', 'OOP')]:
+        await kaizen_index.upsert_evidence_item(_evidence_row(
+            kaizen_index, id=ident, user_id=str(user_id), state=state,
+            event_type=form, date_occurred_on=today, linked_kc_tags=[],
+            description='Synthetic narrative, never display',
+        ))
+    monkeypatch.setattr(bot, 'get_case_history', AsyncMock(return_value=[]))
+    monkeypatch.setattr(bot, 'get_health_profile', lambda _uid: _profile(user_id, pathway))
+    monkeypatch.setattr(bot, 'get_training_level', lambda _uid: 'ST6')
+    store = SimpleNamespace(user_data={})
+    result = AsyncMock()
+    await bot._run_health_analysis(
+        user_id=user_id, chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(), send_result=result, send_photo_fn=AsyncMock(),
+        fail_fn=AsyncMock(), context_store=store,
+    )
+    report = store.user_data['last_health_report']
+    assert report['action_queue_totals'] == {'draft': 1, 'awaiting': 1}
+    assert report['month_label_trainee'] is (pathway == Pathway.training_arcp)
+    assert 'From 3 Kaizen items.' in report['views']['priorities']
+    about = report['views']['about']
+    assert 'Read 3 items from your Kaizen.' in about
+    assert '2 sit in the six main categories' in about
+    assert 'other 1 are counted but not categorised' in about
+    assert ('Form R' in about) is (pathway == Pathway.training_arcp)
+    assert 'Last 3 weeks · 1' in report['action_queue_pages']['draft'][0]
+    assert 'Synthetic narrative' not in '\n'.join(report['views'].values())
+    expected = '📅 ARCP month' if pathway == Pathway.training_arcp else '📅 Appraisal month'
+    for markup in (result.call_args.args[1], bot._health_view_payload(store, 'priorities')[1]):
+        assert (expected, 'ACTION|health_review_setup') in _buttons(markup)

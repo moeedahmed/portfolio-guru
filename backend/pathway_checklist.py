@@ -176,7 +176,7 @@ def compute_arcp_checklist(
     if esles < ARCP_ESLE_TARGET:
         need = ARCP_ESLE_TARGET - esles
         actions.append(
-            f"Book {need} more ESLE{'s' if need > 1 else ''}, with at least one in PEM"
+            f"Book {need} more ESLE{'s' if need > 1 else ''}, one in PEM"
         )
     else:
         actions.append("Check at least one of your ESLEs this year was in PEM")
@@ -187,7 +187,7 @@ def compute_arcp_checklist(
         actions.append(
             "Start your MSF now; it is due in the first six months"
             if msf_overdue
-            else "Start your MSF in the first six months of the year"
+            else "Start your MSF (due in the first 6 months)"
         )
     if not reports:
         actions.append("Ask your clinical supervisor for your placement report")

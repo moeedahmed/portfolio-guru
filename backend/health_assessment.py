@@ -98,6 +98,9 @@ class DomainStat:
 class HealthAssessment:
     """Everything the views render, computed once, deterministically."""
 
+    open_drafts: list[StuckEvidence] = field(default_factory=list)
+    open_awaiting: list[StuckEvidence] = field(default_factory=list)
+    scanned_items: int = 0
     stuck_awaiting: list[StuckEvidence] = field(default_factory=list)
     stuck_drafts: list[StuckEvidence] = field(default_factory=list)
     domains: list[DomainStat] = field(default_factory=list)
@@ -133,13 +136,11 @@ DOMAIN_LABELS: dict[HealthDomain, str] = {
 }
 
 
-def _stuck_from(item: EvidenceItem, today: date) -> Optional[StuckEvidence]:
+def _open_from(item: EvidenceItem, today: date) -> Optional[StuckEvidence]:
     state = (item.workflow_state or "").strip().lower()
     if state not in BLOCKED_STATES:
         return None
     days = (today - item.event_date).days
-    if days < STUCK_AFTER_DAYS:
-        return None
     return StuckEvidence(
         id=item.id,
         title=item.title,
@@ -197,13 +198,15 @@ def compute_health_assessment(
         )
 
     stats = _domain_stats(items, reference)
-    stuck = [s for s in (_stuck_from(item, reference) for item in items) if s]
+    opened = [s for s in (_open_from(item, reference) for item in items) if s]
     # Total order, not just a sort by age: two items filed on the same day must
     # land in the same position on every render, or a doctor paging through
     # Actions sees items move between pages.
-    stuck.sort(key=lambda s: (-s.days_waiting, s.form_type or "", s.id))
-    awaiting = [s for s in stuck if s.waits_on_others]
-    drafts = [s for s in stuck if not s.waits_on_others]
+    opened.sort(key=lambda s: (-s.days_waiting, s.form_type or "", s.id))
+    open_awaiting = [s for s in opened if s.waits_on_others]
+    open_drafts = [s for s in opened if not s.waits_on_others]
+    awaiting = [s for s in open_awaiting if s.days_waiting >= STUCK_AFTER_DAYS]
+    drafts = [s for s in open_drafts if s.days_waiting >= STUCK_AFTER_DAYS]
 
     core_total = sum(stat.count for stat in stats)
     recent = sum(
@@ -220,6 +223,9 @@ def compute_health_assessment(
     tagged = sum(1 for item in items if getattr(item, "slo_numbers", None))
 
     return HealthAssessment(
+        open_drafts=open_drafts,
+        open_awaiting=open_awaiting,
+        scanned_items=len(items),
         stuck_awaiting=awaiting,
         stuck_drafts=drafts,
         domains=stats,

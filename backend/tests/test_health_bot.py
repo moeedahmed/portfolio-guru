@@ -139,13 +139,13 @@ def test_health_keyboards_are_contextual_in_every_view():
         )
     ) == [
         [
-            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
-            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("📝 To send (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 Review month", "ACTION|health_review_setup"),
-            ("ℹ️ About", "ACTION|health_view|about"),
+            ("📅 ARCP month", "ACTION|health_review_setup"),
         ],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
@@ -153,8 +153,8 @@ def test_health_keyboards_are_contextual_in_every_view():
         )
     ) == [
         [
-            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
-            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("📝 To send (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
         [("🔙 Health", "ACTION|health_view|priorities")],
     ]
@@ -169,7 +169,7 @@ def test_health_keyboards_are_contextual_in_every_view():
         ],
         [("🔙 Health", "ACTION|health_view|priorities")],
     ]
-    # First and last pages have one pager button, so Back shares its row.
+    # Pager rows stay separate from the cross-link and Health row.
     assert _keyboard_rows(
         bot._health_view_keyboard(
             "action_queue", page=0, page_count=2, queue="awaiting"
@@ -177,8 +177,8 @@ def test_health_keyboards_are_contextual_in_every_view():
     ) == [
         [
             ("➡️ Next", "ACTION|health_queue|awaiting|1"),
-            ("🔙 Health", "ACTION|health_view|priorities"),
         ],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
@@ -187,8 +187,8 @@ def test_health_keyboards_are_contextual_in_every_view():
     ) == [
         [
             ("⬅️ Previous", "ACTION|health_queue|awaiting|0"),
-            ("🔙 Health", "ACTION|health_view|priorities"),
         ],
+        [("🔙 Health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("about")) == [
         [("🔙 Health", "ACTION|health_view|priorities")],
@@ -217,17 +217,15 @@ def test_health_keyboards_are_contextual_in_every_view():
             "priorities", queue_totals={"draft": 0, "awaiting": 3}
         )
     ) == [[
-        ("⏳ Awaiting (3)", "ACTION|health_queue|awaiting|0"),
-        ("ℹ️ About", "ACTION|health_view|about"),
-    ]]
+        ("⏳ With assessor (3)", "ACTION|health_queue|awaiting|0"),
+    ], [("ℹ️ About", "ACTION|health_view|about")]]
     assert _keyboard_rows(
         bot._health_view_keyboard(
             "priorities", queue_totals={"draft": 2, "awaiting": 0}
         )
     ) == [[
-        ("📝 Drafts (2)", "ACTION|health_queue|draft|0"),
-        ("ℹ️ About", "ACTION|health_view|about"),
-    ]]
+        ("📝 To send (2)", "ACTION|health_queue|draft|0"),
+    ], [("ℹ️ About", "ACTION|health_view|about")]]
 
     # The route is set once at Kaizen connect and changed in Settings, so
     # Health never shows route buttons, whatever the report stored.
@@ -239,13 +237,13 @@ def test_health_keyboards_are_contextual_in_every_view():
         )
     ) == [
         [
-            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
-            ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
+            ("📝 To send (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ With assessor (20)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 Review month", "ACTION|health_review_setup"),
-            ("ℹ️ About", "ACTION|health_view|about"),
+            ("📅 ARCP month", "ACTION|health_review_setup"),
         ],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
     # Trainees and Portfolio Pathway doctors get the SLO map back as a
     # drill-down; the everyday actions stay in pairs.
@@ -259,12 +257,12 @@ def test_health_keyboards_are_contextual_in_every_view():
     )
     assert slo_rows == [
         [
-            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
-            ("⏳ Awaiting (20)", "ACTION|health_queue|awaiting|0"),
+            ("📝 To send (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ With assessor (20)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 Review month", "ACTION|health_review_setup"),
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
+            ("📅 ARCP month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -290,13 +288,13 @@ async def test_health_landing_callbacks_open_independent_paginated_queues(monkey
     assert landing is not None
     assert _keyboard_rows(landing[1]) == [
         [
-            ("📝 Drafts (7)", "ACTION|health_queue|draft|0"),
-            ("⏳ Awaiting (10)", "ACTION|health_queue|awaiting|0"),
+            ("📝 To send (7)", "ACTION|health_queue|draft|0"),
+            ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 Review month", "ACTION|health_review_setup"),
-            ("ℹ️ About", "ACTION|health_view|about"),
+            ("📅 ARCP month", "ACTION|health_review_setup"),
         ],
+        [("ℹ️ About", "ACTION|health_view|about")],
     ]
 
     await bot.handle_action_button(
@@ -802,8 +800,8 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
     assert "Change it in /settings → Portfolio defaults." in text
     assert _keyboard_rows(keyboard) == [
         [
-            ("📅 Review month", "ACTION|health_review_setup"),
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
+            ("📅 ARCP month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -2121,7 +2119,7 @@ async def test_one_tap_route_choice_saves_it_and_returns_to_health(isolated_heal
     assert "📊 *Appraisal readiness*" in text
     buttons = sim.get_last_buttons()
     assert not any(data.startswith("ACTION|health_review_select|") for _, data in buttons)
-    assert ("📅 Review month", "ACTION|health_review_setup") in buttons
+    assert ("📅 ARCP month", "ACTION|health_review_setup") in buttons
 
 
 @pytest.mark.asyncio
@@ -2188,3 +2186,64 @@ def test_reconnecting_keeps_a_confirmed_non_trainee_route(isolated_health_store,
     assert bot._autoset_health_pathway_from_role(4245, "sas") == Pathway.cesr_portfolio
     stored = health_profile_store.get_health_profile(4245)
     assert bot._route_needs_confirm(stored, datetime.now(UTC).date())
+
+
+@pytest.mark.parametrize('trainee,label', [(True, '📅 ARCP month'), (False, '📅 Appraisal month')])
+def test_health_month_label_survives_stored_report_navigation(trainee, label):
+    import bot
+    context = SimpleNamespace(user_data={})
+    bot._store_health_report_context(
+        context, views={'priorities': 'landing', 'curriculum': 'SLO map'},
+        action_pages=[], action_queue_pages={}, action_queue_totals={},
+        needs_review_month=True, slo_map=True, month_label_trainee=trainee,
+    )
+    assert _keyboard_rows(bot._health_view_payload(context, 'priorities')[1]) == [
+        [('🎯 SLO map', 'ACTION|health_view|curriculum'), (label, 'ACTION|health_review_setup')],
+        [('ℹ️ About', 'ACTION|health_view|about')],
+    ]
+    del context.user_data['last_health_report']['month_label_trainee']
+    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(
+        _keyboard_rows(bot._health_view_payload(context, 'priorities')[1]), []
+    )
+
+
+@pytest.mark.parametrize('queue,label,target', [
+    ('draft', '⏳ With assessor (10)', 'awaiting'),
+    ('awaiting', '📝 To send (7)', 'draft'),
+])
+def test_queue_cross_link_opens_other_list_and_preserves_page(queue, label, target):
+    import bot
+    context = SimpleNamespace(user_data={})
+    _seed_health_navigation(bot, context)
+    text, markup = bot._health_view_payload(context, 'action_queue', queue=queue, page=1)
+    assert text == f'{queue} page 2'
+    assert _keyboard_rows(markup)[-1] == [
+        (label, f'ACTION|health_queue|{target}|0'),
+        ('🔙 Health', 'ACTION|health_view|priorities'),
+    ]
+    bot._health_view_payload(context, 'action_queue', queue=target, page=0)
+    assert bot._health_view_payload(context, 'action_queue', queue=queue)[0] == text
+    context.user_data['last_health_report']['action_queue_totals'][target] = 0
+    assert _keyboard_rows(bot._health_view_payload(context, 'action_queue', queue=queue)[1])[-1] == [
+        ('🔙 Health', 'ACTION|health_view|priorities')
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('pathway,label', [(Pathway.training_arcp, 'ARCP'), (Pathway.appraisal_only, 'Appraisal')])
+async def test_month_selection_and_confirmation_name_the_route(monkeypatch, pathway, label):
+    import bot
+    sim = BotSimulator(user_id=4242)
+    context = sim._make_context()
+    profile = HealthProfile(user_id='4242', pathway=pathway, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+    monkeypatch.setattr(bot, '_get_or_default_health_profile', lambda _uid: profile)
+    save = Mock()
+    monkeypatch.setattr(bot, '_save_review_month', save)
+    landing = AsyncMock()
+    monkeypatch.setattr(bot, '_show_health_landing', landing)
+    await bot.handle_action_button(sim._make_callback_update('ACTION|health_review_select|2027-05'), context)
+    assert f'*{label} month*' in sim.get_last_text()
+    save.assert_not_called()
+    await bot.handle_action_button(sim._make_callback_update('ACTION|health_review_confirm|2027-05'), context)
+    save.assert_called_once()
+    assert f'✅ {label} month set to *May 2027*.' in landing.call_args.kwargs['notice']
