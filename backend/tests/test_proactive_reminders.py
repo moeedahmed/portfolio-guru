@@ -226,6 +226,15 @@ async def test_tick_dry_run_sends_and_records_nothing(tick_env, monkeypatch):
     assert not bot._proactive_owns(111)  # old weekly jobs still speak in a dry run
 
 
+@pytest.mark.asyncio
+async def test_tick_checks_a_named_pilot_user_with_no_filings(tick_env, monkeypatch):
+    bot, context = tick_env
+    monkeypatch.setenv("PG_PROACTIVE_USER_IDS", "333")
+    await bot.proactive_tick(context)
+    assert context.bot.send_message.await_count == 1
+    assert context.bot.send_message.await_args.kwargs["chat_id"] == 333
+
+
 def test_old_weekly_jobs_step_aside_only_for_covered_users(monkeypatch):
     import bot
 

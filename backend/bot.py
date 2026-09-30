@@ -1054,6 +1054,14 @@ def _proactive_audience(user_ids: list) -> list:
     return [user_id for user_id in user_ids if str(user_id) in allowed]
 
 
+def _proactive_candidates(active_user_ids: list) -> list:
+    """Doctors the daily check looks at: those who have filed, plus any named
+    pilot account, so a named doctor with no filings yet is still checked."""
+    raw = os.environ.get("PG_PROACTIVE_USER_IDS", "").strip()
+    named = [int(part) for part in raw.split(",") if part.strip().isdigit()]
+    return _proactive_audience(list(dict.fromkeys([*active_user_ids, *named])))
+
+
 def _proactive_owns(user_id) -> bool:
     """True when the daily check, not the old weekly jobs, speaks to this user.
 
@@ -1209,7 +1217,7 @@ async def proactive_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
     ops_alert.ping_check(heartbeat_url, "/start")
     sent = quiet = failed = refreshed = 0
     try:
-        for user_id in _proactive_audience(await get_all_active_users()):
+        for user_id in _proactive_candidates(await get_all_active_users()):
             try:
                 if (
                     refreshed < PROACTIVE_MAX_REFRESH_PER_RUN
