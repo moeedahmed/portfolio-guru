@@ -34,15 +34,15 @@ def test_unexecuted_slots_cannot_be_reported_as_covered():
 
 
 COMMAND_EXPECTATIONS = {
-    "arcp": "Review date", "assignbeta": "Admin only", "beta": "Beta request submitted",
-    "bulk": "Bulk filing is coming soon", "cancel": "Cancelled", "chase": "coming soon",
+    "arcp": "Review date", "assignbeta": "Admin only",
+    "cancel": "Cancelled",
     "curriculum": "Which curriculum", "delete": "Your Portfolio Guru data is clear",
     "filingreport": "Admin only", "funnelreport": "Admin only", "gather": "Gathering mode",
-    "health": "Portfolio Health", "help": "Portfolio Guru help", "link": "has been retired",
+    "health": "Portfolio Health", "help": "Portfolio Guru help",
     "listusers": "Admin only", "pathway": "Current view", "plan": "Your plan",
     "privacy": "Privacy & consent", "reset": "Your Portfolio Guru data is clear",
     "setbeta": "Admin only", "settier": "Admin only", "settings": "Kaizen: not connected",
-    "setup": "Step 1 of 3", "start": "Step 1 of 3", "unsigned": "Connect your Kaizen",
+    "setup": "Step 1 of 3", "start": "Step 1 of 3", "unsigned": "Portfolio Health",
     "upgrade": "Your plan", "voice": "Writing style setup",
 }
 
@@ -113,21 +113,14 @@ async def test_command_dispatch_receipt(offline_app, monkeypatch, tmp_path, cove
             if command == "cancel":
                 assert not any(slot.conversation and slot.conversation._conversations
                                for slot in coverage.slots)
-            if command == "beta":
-                assert any(m["chat_id"] == bot.ADMIN_USER_ID for m in collector.sent)
             if command in {"reset", "delete"}:
                 reset_mirror.assert_called_once_with(TEST_USER.id)
                 with Session(credentials.engine) as session:
                     assert session.exec(select(credentials.UserCredential)).first() is None
-            if command == "beta":
-                beta_store.assert_called_once_with(TEST_USER.id, TEST_USER.username or "")
-            if command == "link":
-                link.assert_not_called()
-            boundary = command in {"reset", "delete", "beta", "link"}
+            boundary = command in {"reset", "delete"}
             if boundary:
                 from tests.whole_bot_audit import record_command_boundary
                 record_command_boundary(command)
-            # Check the retired /link reply for both old argument shapes.
             if CATEGORIES[slot.callback] != "protected-boundary" or boundary:
                 coverage.validate(slot, f"command:{command}", boundary=boundary)
                 coverage.record_unit("command:" + command, f"command:{command}", slots=[slot], boundary=boundary)
@@ -402,15 +395,17 @@ async def test_passwordless_sign_in_again_buttons_never_save_without_a_session(
 @pytest.mark.parametrize("choice", ["3m", "6m", "12m", "all", "cancel", "custom"])
 async def test_unsigned_range_has_observed_destination(scenario, monkeypatch, choice):
     app, collector, draft, filing, errors = scenario
-    scrape = AsyncMock(return_value=[])
-    monkeypatch.setattr(bot, "scrape_unsigned_tickets", scrape)
+    context = type("Context", (), {"user_data": app.user_data[TEST_USER.id]})()
+    bot._store_health_report_context(context, views={"priorities": "📊 Portfolio Health"},
+        action_pages=[], action_queue_pages={"awaiting": ["📬 With assessor — synthetic"]},
+        action_queue_totals={"awaiting": 1}, needs_review_month=False)
     update = make_callback_update("UNSIGNED|" + choice)
     _prepare_update(update, app.bot)
     await app.process_update(update)
     assert not errors
-    expected = "Cancelled" if choice == "cancel" else "date range" if choice == "custom" else "No unsigned tickets"
-    assert any(expected in t for t in collector.texts)
-    assert scrape.await_count == (0 if choice in {"cancel", "custom"} else 1)
+    assert any("With assessor" in t for t in collector.texts)
+    assert not app.user_data[TEST_USER.id].get("awaiting_unsigned_range")
+    filing.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -599,15 +594,19 @@ async def test_unknown_and_malformed_callbacks_cannot_file(scenario, payload):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload", ["CHASE_LOG|cancel", "CHASE_LOG|synthetic@example.invalid"])
-async def test_chase_controls_use_only_stubbed_local_record(scenario, monkeypatch, payload):
+async def test_chase_controls_are_answered_without_recording(scenario, monkeypatch, payload):
     app, collector, draft, filing, errors = scenario
-    log = MagicMock(return_value={"chase_number": 1, "date": "2026-01-01"})
+    log = MagicMock()
+    answer = AsyncMock()
+    monkeypatch.setattr(type(app.bot), "answer_callback_query", answer)
     monkeypatch.setattr("chase_guard.log_chase", log)
     update = make_callback_update(payload)
     _prepare_update(update, app.bot)
     await app.process_update(update)
-    assert not errors and any("closed" in t or "logged" in t for t in collector.texts)
-    assert log.call_count == int(not payload.endswith("cancel"))
+    assert not errors
+    log.assert_not_called()
+    answer.assert_awaited_once()
+    assert "earlier step" in answer.await_args.kwargs["text"]
 
 
 @pytest.mark.asyncio
@@ -914,16 +913,14 @@ def test_catalogue_rejects_unproven_state_dispatch(evidence_kind):
     assert unit["id"] in receipt["uncovered"]
 
 
-def test_catalogue_link_no_args_cannot_cover_legacy_token_reply():
-    from tests.whole_bot_catalogue import catalogue_receipt
-    event = {"callback": "link_command", "kind": "command", "command": "link",
-             "payload": None, "argument_branch": "no-args", "result": -1, "boundaries": []}
-    receipt = catalogue_receipt({"tests": {"prompt asserted": [event]}, "emitted": [], "errors": []})
-    assert "command:link" in receipt["uncovered"]
-    assert "command:link/args:token" in receipt["uncovered"]
+def test_catalogue_retired_commands_are_not_registered_obligations():
+    from tests.whole_bot_catalogue import reviewed_units
+    units = reviewed_units(inventory(build_offline_application()))
+    assert not {"command:beta", "command:bulk", "command:chase", "command:link", "command:link/args:token"} & units.keys()
+    assert "behaviour:unknown-command" in units
 
 
-@pytest.mark.parametrize("command,owner", [("beta", "beta_command"), ("reset", "reset_data"), ("delete", "reset_data")])
+@pytest.mark.parametrize("command,owner", [("reset", "reset_data"), ("delete", "reset_data")])
 def test_catalogue_protected_command_requires_asserted_boundary(command, owner):
     from tests.whole_bot_catalogue import catalogue_receipt
     event = {"callback": owner, "kind": "command", "command": command, "payload": None,
@@ -934,24 +931,15 @@ def test_catalogue_protected_command_requires_asserted_boundary(command, owner):
 
 @pytest.mark.asyncio
 async def test_link_token_dispatch_is_retired_without_supabase(offline_app, monkeypatch):
-    from tests.whole_bot_audit import record_command_boundary
     app, collector = offline_app
     consume = MagicMock(side_effect=AssertionError("Retired link must not connect"))
     monkeypatch.setattr("supabase_sync._supabase", consume)
-    coverage = Coverage(inventory(app))
-    coverage.observe()
-    try:
-        update = make_command_update("link", args=["synthetic-one-use-code"])
-        _prepare_update(update, app.bot)
-        await app.process_update(update)
-        consume.assert_not_called()
-        assert any("has been retired; nothing is needed" in t for t in collector.texts)
-        record_command_boundary("link", argument_branch="token")
-        slot = next(s for s in coverage.slots if "link" in s.commands)
-        coverage.record_unit("command:link/args:token", "legacy token receives retirement reply", slots=[slot], boundary=True)
-        assert not coverage.unit_evidence["command:link"]["offline"]
-    finally:
-        coverage.restore()
+    update = make_command_update("link", args=["synthetic-one-use-code"])
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    consume.assert_not_called()
+    assert collector.texts == [bot.UNKNOWN_COMMAND_MSG]
+    assert "synthetic-one-use-code" not in collector.texts[0]
 
 
 def state_obligations():
@@ -1134,3 +1122,27 @@ async def test_shadowed_route_needs_its_own_real_state_dispatch(scenario, monkey
         bot.extract_form_data.assert_not_awaited()
     finally:
         recorder.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('payload', ['ACTION|unsigned', 'UNSIGNED|custom'])
+@pytest.mark.parametrize('stored', [True, False])
+async def test_old_unsigned_buttons_open_awaiting_or_refresh(scenario, monkeypatch, payload, stored):
+    app, collector, draft, filing, errors = scenario
+    context = type('Context', (), {'user_data': app.user_data[TEST_USER.id]})()
+    landing = AsyncMock()
+    monkeypatch.setattr(bot, '_show_health_landing', landing)
+    if stored:
+        bot._store_health_report_context(context, views={'priorities': '📊 Portfolio Health'},
+            action_pages=[], action_queue_pages={'awaiting': ['📬 With assessor — synthetic']},
+            action_queue_totals={'awaiting': 1}, needs_review_month=False)
+    update = make_callback_update(payload)
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert not errors
+    if stored:
+        assert any('With assessor' in t for t in collector.texts)
+        landing.assert_not_awaited()
+    else:
+        landing.assert_awaited_once()
+    filing.assert_not_awaited()

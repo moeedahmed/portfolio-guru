@@ -33,9 +33,8 @@ Honesty boundary, stated up front so no row below can be misread:
   NVIDIA Nemotron are **target model slots** the model-agnostic config
   layer is designed to accept — they are not wired into the live path, and
   the ledger labels any such row `Demo / Test`.
-- Scheduled-automation surfaces (`/chase`, `/unsigned`, `/bulk`) are
-  **disabled** — their code returns early with "coming soon". They are
-  listed below only as a roadmap row, never as a live capability.
+- `/bulk` and `/chase` are **retired**. `/unsigned` opens Portfolio Health’s
+  "With assessor" list; it does not send reminders to assessors.
 
 ## Honesty key
 
@@ -175,9 +174,9 @@ Portfolio Guru: supervisor polling/scheduling code exists, but the
 trainee-facing automation commands are not switched on in this cut.
 
 - Evidence `[roadmap]`: `backend/supervisor_poller.py` and
-  `backend/supervisor_scheduler.py` exist with tests, but `/chase`,
-  `/unsigned`, and `/bulk` return early with "coming soon" — the code
-  below those returns is not live and must not be demoed as live.
+  `backend/supervisor_scheduler.py` exist with tests, but `/chase` and
+  `/bulk` are retired. `/unsigned` opens the read-only "With assessor" list;
+  it must not be demoed as assessor messaging.
 - Honesty: this row is roadmap, included for completeness, not a claim.
 
 ## What we deliberately do not claim

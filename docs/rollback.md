@@ -39,11 +39,11 @@ redeploy:
 
 - **Vertex AI extraction**: `PG_USE_VERTEX` flag (via `gemini_client.make_client()`)
   — unset/false falls back to the non-Vertex path.
-- **Individual commands**: `/bulk` and `/chase` already ship disabled
-  (early `return`, "coming soon" in `backend/bot.py`). The same
-  early-return pattern is the fastest way to pull a misbehaving command
-  without a full rollback — patch, run `scripts/verify_changed.sh`, then
-  follow the normal release path (`scripts/release_loop.sh`).
+- **Individual commands**: `/beta`, `/link`, `/bulk` and `/chase` are retired
+  and unregistered. To retire another command without a full rollback,
+  remove its registration so the unknown-command reply handles it, run
+  `scripts/verify_changed.sh`, then follow the normal release path
+  (`scripts/release_loop.sh`).
 - **Filing**: `filer_router.PLATFORM_REGISTRY` controls which platforms are
   live; removing/stubbing an entry disables filing for that platform without
   touching the rest of the bot.

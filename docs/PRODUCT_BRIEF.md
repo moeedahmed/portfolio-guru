@@ -73,11 +73,11 @@ evidence without spending my evening fighting Kaizen."_
 **In:** Telegram bot; text, voice, audio, photo, document input; form
 recommendation for DOM-mapped Kaizen forms; draft preview, edit and approval;
 Kaizen draft save (stored password or password-free connection); Portfolio
-Health / ARCP view; opt-in sign-off chaser; `/unsigned` (open to every beta
-user).
+Health / ARCP view; opt-in sign-off chaser; `/unsigned` opens the "With assessor"
+list (open to every beta user, including password-free connections).
 
-**Out or deferred:** supervisor submission (never); `/bulk` and `/chase`
-commands (disabled, "coming soon"); a Hermes conversational layer (paused);
+**Out or deferred:** supervisor submission (never); `/beta`, `/link`, `/bulk`
+and `/chase` commands (retired); a Hermes conversational layer (paused);
 any web app or EM Gurus Hub link (none planned: WhatsApp is the next front
 end, via Meta's official WhatsApp Business Platform); other colleges and platforms (after the EM profiles are finished);
 cloud hosting (Mac mini through paid beta); public launch (until legal
@@ -131,7 +131,7 @@ sign-off).
 3. **`/unsigned`.** Open to every beta user; after launch it follows the
    paid plan.
 4. **"Chase".** Checked in code, not a new decision: `/chase` (messaging
-   assessors) stays disabled. The Portfolio Health sign-off chaser is
+   assessors) is retired. The Portfolio Health sign-off chaser is
    separate: it only reminds the doctor.
 5. **Channel.** WhatsApp is the next front end, through Meta's official
    WhatsApp Business Platform. Meta business setup is being done by Moeed.

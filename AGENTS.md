@@ -18,7 +18,7 @@ Core product edge: this is not a generic AI writing tool. Doctors can already dr
 - Target: Kaizen ePortfolio (`eportfolio.rcem.ac.uk` → `kaizenep.com`). Multi-platform-ready via `filer_router.PLATFORM_REGISTRY` (kaizen built, horus stubbed).
 - Inputs: text, voice, audio, photos, documents.
 - Output: Kaizen draft save only. No supervisor submission.
-- Disabled commands: `/bulk` and `/chase` return early with "coming soon" (their dead implementation code has been removed). `/unsigned` is NOT disabled — it is a live, tier-gated (`pro_plus`) feature registered in `build_application`. The `/upgrade` upsell copy must never advertise `/bulk` or `/chase` as a paid perk while they are disabled.
+- Retired commands: `/beta`, `/link`, `/bulk` and `/chase` are unregistered and receive the unknown-command reply. `/unsigned` opens Portfolio Health’s "With assessor" list, with the same access gate as `/health`, including password-free connections. The `/upgrade` upsell copy must never advertise the retired `/bulk` or `/chase` commands as paid perks.
 
 ## Dev / Test Commands
 
@@ -62,7 +62,7 @@ Single source: `backend/filer_router.py` selects the method per form type.
 
 ## Key Known Failure Modes
 
-- `/bulk` and `/chase` are disabled (early `return`, "coming soon"); `/unsigned` IS live (tier-gated). Don't assume a command is disabled from docs alone — check its handler body.
+- `/beta`, `/link`, `/bulk` and `/chase` are retired; `/unsigned` is a Portfolio Health entry point. Check the registered handlers before treating an old command or button as live.
 - Kaizen date format: `d/m/yyyy`, not US `m/d/yyyy`.
 - Two separate filer implementations: `filer.py` (browser-use) and `browser_filer.py` (Playwright). Shared logic, different failure modes.
 - LLM extraction is non-deterministic — test with multiple runs.

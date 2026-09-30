@@ -56,6 +56,7 @@ TEMPLATE_KINDS = {
 CONSTANT_KINDS = {
     "CONSENT_TEXT": "exempt",
     "FILE_CASE_PROMPT": "prompt",
+    "UNKNOWN_COMMAND_MSG": "error",
     "HELP_MSG": "exempt",  # generated command list; intro checked below
     "WELCOME_MSG": "prompt",
     "WELCOME_MSG_CONNECTED": "prompt",

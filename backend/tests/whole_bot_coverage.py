@@ -60,23 +60,22 @@ def registration_digest(slots):
 
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
-REGISTRATION_DIGEST = "8e39260f662cd30dc6cfe2b4a140c1d1b0f314787cec32b4492eb85c7a89aaa7"
+REGISTRATION_DIGEST = 'b657920654c0d9f0d3d965b8ab4c05d33804d9674c5f8eed7414a6ea59f71377'
 CATEGORIES = {
     name: category for category, names in {
-        "admin": "assignbeta_command beta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
-        "disabled": "bulk_command chase_command",
+        "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
         "protected-boundary": "handle_approval_approve handle_approval_submit handle_reset_confirm handle_upgrade_button setup_password setup_retry_login reset_data passwordless_setup_done",
-        "internal": "handle_assessor_intent_capture",
+        "internal": "handle_assessor_intent_capture _track_command_use",
         "safe": """_setup_wrong_input _answer_unhandled_button _reply_use_current_step arcp_command cancel_command curriculum_command gather_command
             gather_done_callback handle_action_button handle_amend_draft handle_approval_edit
             handle_approval_media_feedback handle_attachment_confirm handle_callback handle_case_input
-            handle_chase_log handle_consent_callback handle_document_intent handle_edit_field
+            handle_consent_callback handle_document_intent handle_edit_field
             handle_edit_value handle_edit_value_with_intent handle_feedback handle_filing_feedback
             handle_form_choice handle_form_search_text handle_gathering_input handle_info_button
             handle_mid_conversation_text handle_pathway_choice handle_pending_media_context
             handle_pushback handle_quick_improve handle_review_draft handle_same_case_another
             handle_reset_keep handle_set_curriculum handle_set_level handle_supervisor_callback handle_template_review_media
-            handle_template_review_text handle_unsigned_range_pick handle_reminder_callback health_command help_command link_command
+            handle_template_review_text handle_unsigned_range_pick handle_reminder_callback health_command help_command unknown_command
             pathway_command privacy_command settings_command setup_cancel setup_curriculum
             setup_start setup_training_level setup_username start unsigned_command upgrade_command
             voice_collect_example voice_start passwordless_setup_start passwordless_setup_new_link setup_password_start
@@ -86,8 +85,8 @@ CATEGORIES = {
 
 # Mixed dispatchers can reach writes; their harmless entry paths must never
 # qualify the entire family as safe for a future live explorer.
-for _name in """beta_command link_command handle_action_button handle_callback
-    handle_attachment_confirm handle_chase_log handle_consent_callback handle_feedback
+for _name in """handle_action_button handle_callback
+    handle_attachment_confirm handle_consent_callback handle_feedback
     handle_filing_feedback handle_pathway_choice handle_pushback handle_set_curriculum
     handle_set_level handle_supervisor_callback setup_curriculum setup_training_level
     voice_collect_example passwordless_reconnected""".split():

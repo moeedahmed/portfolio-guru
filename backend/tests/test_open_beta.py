@@ -123,17 +123,14 @@ async def test_settings_callback_shows_unlimited_beta_with_payments_off(beta_usa
 
 
 @pytest.mark.asyncio
-async def test_beta_command_needs_no_request(monkeypatch):
+async def test_retired_beta_command_needs_no_request(monkeypatch):
     import bot
-
-    monkeypatch.delenv("PG_PAYMENTS_ENABLED", raising=False)
     store = MagicMock()
     monkeypatch.setattr("supabase_sync.store_beta_request", store)
     update = _update()
-    await bot.beta_command(update, _context())
-
+    await bot.unknown_command(update, _context())
     store.assert_not_called()
-    update.message.reply_text.assert_awaited_once_with(bot._BETA_PLAN_TEXT)
+    update.message.reply_text.assert_awaited_once_with(bot.UNKNOWN_COMMAND_MSG)
 
 
 @pytest.mark.asyncio
@@ -144,17 +141,65 @@ async def test_free_user_gets_portfolio_health_without_upgrade(beta_usage):
 
 
 @pytest.mark.asyncio
-async def test_free_user_gets_unsigned_scan_without_upgrade(beta_usage, monkeypatch):
-    """/unsigned is open to every beta user (Moeed, 2026-09-29)."""
+@pytest.mark.parametrize("passwordless", [False, True])
+@pytest.mark.parametrize("command", ["unsigned", "health"])
+async def test_health_entry_opens_requested_view_for_every_beta_user(beta_usage, monkeypatch, passwordless, command):
     import bot
-
-    monkeypatch.setattr(bot, "_is_passwordless_user", lambda _uid: False)
-    monkeypatch.setattr(bot, "has_credentials", lambda _uid: True)
-    picker = AsyncMock()
-    monkeypatch.setattr(bot, "_show_unsigned_range_picker", picker)
+    monkeypatch.setattr(bot, "_is_passwordless_user", lambda _uid: passwordless)
+    context = _context()
+    landing = "📊 Portfolio Health"
+    awaiting = "📬 With assessor — synthetic evidence"
+    async def run_health(**kwargs):
+        assert kwargs["context_store"] is context
+        bot._store_health_report_context(context, views={"priorities": landing}, action_pages=[],
+            action_queue_pages={"awaiting": [awaiting]}, action_queue_totals={"awaiting": 1},
+            needs_review_month=False)
+        await kwargs["send_result"](landing, None)
+    monkeypatch.setattr(bot, "_run_health_with_optional_kaizen_sync", run_health)
     update = _update()
+    await getattr(bot, command + "_command")(update, context)
+    reply = update.message.reply_text.await_args
+    assert reply.args[0] == (awaiting if command == "unsigned" else landing)
+    assert reply.kwargs["parse_mode"] == "Markdown"
+    if command == "unsigned":
+        assert reply.kwargs["reply_markup"] == bot._health_view_payload(context, "action_queue", page=0, queue="awaiting")[1]
 
+
+@pytest.mark.asyncio
+async def test_unsigned_respects_health_gate(monkeypatch):
+    import bot
+    gate = AsyncMock(return_value=False)
+    run = AsyncMock()
+    monkeypatch.setattr(bot, '_health_gate_check', gate)
+    monkeypatch.setattr(bot, '_run_health_with_optional_kaizen_sync', run)
+    update = _update()
     await bot.unsigned_command(update, _context())
+    gate.assert_awaited_once_with(update.effective_user.id)
+    run.assert_not_awaited()
+    assert 'Portfolio Health is included' in update.message.reply_text.await_args.args[0]
 
-    picker.assert_awaited_once()
-    update.message.reply_text.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_unsigned_without_queue_keeps_health_landing(monkeypatch):
+    import bot
+    monkeypatch.setattr(bot, '_health_gate_check', AsyncMock(return_value=True))
+    async def run(**kwargs):
+        await kwargs['send_result']('📊 Portfolio Health', None)
+    monkeypatch.setattr(bot, '_run_health_with_optional_kaizen_sync', run)
+    update = _update()
+    await bot.unsigned_command(update, _context())
+    assert update.message.reply_text.await_args.args[0] == '📊 Portfolio Health'
+
+
+@pytest.mark.asyncio
+async def test_upgrade_copy_never_advertises_retired_bulk_or_chase(monkeypatch):
+    import bot
+    monkeypatch.setenv('PG_PAYMENTS_ENABLED', '1')
+    with patch('bot.get_user_tier', AsyncMock(return_value='free')), \
+         patch('bot.get_cases_this_month', AsyncMock(return_value=0)), \
+         patch('bot._flow_msg', AsyncMock()) as flow_msg:
+        await bot.upgrade_command(_update(), _context())
+    text = flow_msg.await_args.args[2].lower()
+    assert 'bulk' not in text
+    assert 'chase' not in text
+    assert 'coming soon' not in text

@@ -237,7 +237,7 @@ from unittest.mock import AsyncMock
 import bot
 async def main():
     reply_text = AsyncMock()
-    await bot.chase_command(SimpleNamespace(message=SimpleNamespace(reply_text=reply_text)), SimpleNamespace())
+    await bot.unknown_command(SimpleNamespace(message=SimpleNamespace(reply_text=reply_text)), SimpleNamespace())
     reply_text.assert_awaited_once()
     print(json.dumps(reply_text.await_args_list[0].args[0]))
 asyncio.run(main())'''

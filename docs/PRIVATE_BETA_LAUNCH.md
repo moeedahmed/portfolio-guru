@@ -298,5 +298,4 @@ These are intentionally not done by this branch — orchestrator owns them:
 - Restart launchd on the Mac Mini after deploy completes (or let the
   deploy script handle the bootstrap, then verify).
 - Send beta users the message above.
-- Decide whether to keep `/bulk`, `/unsigned`, `/chase` as coming-soon
-  responses or hide them entirely from the menu for the beta window.
+- `/bulk` and `/chase` are retired; `/unsigned` opens Health’s "With assessor" list

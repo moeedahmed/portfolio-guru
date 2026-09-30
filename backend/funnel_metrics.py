@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _SAFE_METADATA_KEYS = frozenset(
     {
+        "command",
         "source",
         "form_type",
         "state",
@@ -148,6 +149,7 @@ def summarise(
     operator_count = 0
     unattributed_count = 0
     total = 0
+    command_counts: Counter[str] = Counter()
 
     for record in records:
         is_synthetic = bool(record.get("synthetic"))
@@ -168,6 +170,9 @@ def summarise(
             unattributed_count += 1
             continue
         event = str(record.get("event") or "unknown")
+        if event == "command_used":
+            command = (record.get("metadata") or {}).get("command", "unknown")
+            command_counts[command] += 1
         total += 1
         events_by_name[event] += 1
         events_by_user[user_id][event] += 1
@@ -203,6 +208,7 @@ def summarise(
     }
 
     return {
+        "command_counts": dict(command_counts),
         "total": total,
         "unique_users": len(events_by_user),
         "completed_users": len(completed_users),
@@ -261,6 +267,13 @@ def format_admin_report(summary: Dict[str, Any]) -> str:
         f"  • Draft saved: {counts['draft_saved']['users']} users / {counts['draft_saved']['events']} events",
         f"  • Filing failed: {counts['filing_failed']['users']} users / {counts['filing_failed']['events']} events",
     ]
+    command_counts = Counter(summary.get("command_counts") or {})
+    if command_counts:
+        commands = ", ".join(
+            f"{'unknown' if name == 'unknown' else '/' + name} {count}"
+            for name, count in command_counts.most_common(5)
+        )
+        lines.append(f"Commands used: {commands}")
     exclusion_parts = _exclusion_footer_parts(summary)
     if exclusion_parts:
         lines.extend(["", f"(Excluded {'; '.join(exclusion_parts)}.)"])

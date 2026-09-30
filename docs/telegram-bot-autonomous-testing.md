@@ -151,7 +151,7 @@ Live also requires an explicit `TELEGRAM_QA_USER_ID` matching the synthetic
 session account. That match does not establish synthetic isolation of a linked
 portfolio. `/health`, `/unsigned`, unsigned lookback/custom controls, all health
 views/queues/review routes, credential/portfolio access, generation and persistent
-mutations are protected. The live roots are `/help`, `/bulk`, `/chase` and the
+mutations are protected. The live roots are `/help` and the
 explicit `/cancel` reset/cleanup path; only static help/disabled-form toast
 callbacks are traversable. Unknown controls still fail closed. It never sources dotenv, never sends `/reset` or
 `/delete`, and never invokes payment, credential changes, admin mutations/reports,

@@ -7,8 +7,8 @@ import sys
 from urllib.parse import urlsplit
 
 COMMAND_POLICY = {name: effect for effect, names in {
-    "safe": "help bulk chase cancel",
-    "protected": "start privacy settings link unsigned curriculum health arcp upgrade plan gather pathway voice reset delete setup settier setbeta beta listusers filingreport funnelreport assignbeta",
+    "safe": "help cancel",
+    "protected": "start privacy settings unsigned curriculum health arcp upgrade plan gather pathway voice reset delete setup settier setbeta listusers filingreport funnelreport assignbeta",
 }.items() for name in names.split()}
 
 REVIEWED_EXACT = set("""ACTION|file ACTION|reset ACTION|cancel ACTION|help ACTION|unsigned
@@ -23,14 +23,13 @@ AMEND|cancel AMEND|cancel_choice AMEND|start_new AMEND|update_current
 DOCUSE|attach DOCUSE|both DOCUSE|ignore DOCUSE|info EDIT|draft
 FIELD|clinical_reasoning FIELD|clinical_setting FIELD|curriculum_links FIELD|date_of_encounter
 FIELD|patient_presentation FIELD|reflection VOICE|back_to_choice VOICE|back_to_settings
-VOICE|more VOICE|cancel VOICE|preview_reject VOICE|path_manual VOICE|path_kaizen UNSIGNED|cancel UNSIGNED|custom
-UNSIGNED|3m UNSIGNED|6m UNSIGNED|12m UNSIGNED|all REVIEW|draft IMPROVE|reflection""".split())
+VOICE|more VOICE|cancel VOICE|preview_reject VOICE|path_manual VOICE|path_kaizen REVIEW|draft IMPROVE|reflection""".split())
 PROTECTED = re.compile(
     r"(?:APPROVE\|(?:draft|submit)|CONFIRM\|(?:reset|delete)|UPGRADE\|(?:pro|pro_plus)|"
     r"ACTION\|(?:setup|retry_setup_login|retry_filing|confirm_refresh_portfolio|confirm_refresh_for_health)|"
     r"ACTION\|health_review_confirm\|[^|]+|"
     r"(?:SETLEVEL|SET_CURRICULUM|SETUP_CURRICULUM|PATHWAY|PATHWAY_SETTINGS|CONSENT|"
-    r"FILING_CURRICULUM|FEEDBACK|FILING|PUSHBACK|CHASE_LOG|SUP|REMIND)\|.+|"
+    r"FILING_CURRICULUM|FEEDBACK|FILING|PUSHBACK|UNSIGNED|SUP|REMIND)\|.+|"
     r"VOICE\|(?:done|remove|preview_accept|kaizen_sample\|.+)|ATTACH\|(?:yes|no))"
 )
 PROTECTED_DYNAMIC = re.compile(
@@ -95,8 +94,8 @@ def command_expectation(command):
     return {
         "start": ("ready", "username", "consent", "start"),
         "cancel": ("cancelled", "canceled"), "arcp": ("review date", "arcp"),
-        "chase": ("assessor reminders", "coming soon"),
-        "voice": ("writing style", "voice"), "link": ("link",),
-        "unsigned": ("unsigned", "connect", "unlimited"),
+        **{name: ("don't recognise that command",) for name in ("unknown", "chase", "bulk", "beta", "link")},
+        "voice": ("writing style", "voice"),
+        "unsigned": ("with assessor", "portfolio health", "connect", "unlimited"),
         "plan": ("plan",), "upgrade": ("plan", "upgrade"),
     }.get(command, (command,))

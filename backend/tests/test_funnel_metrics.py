@@ -344,3 +344,41 @@ async def test_alert_filing_failure_routine_failure_does_not_call_notify(monkeyp
     )
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text,command', [('/health@portfolio_guru_bot private-content', 'health'), ('/settier 1 free', 'settier'), ('/junk_private', 'unknown'), ('/beta', 'unknown'), ('/link code', 'unknown'), ('/bulk', 'unknown'), ('/chase', 'unknown')])
+async def test_command_tracking_logs_safe_name_and_identity(log_path, text, command):
+    import bot
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=12345), effective_message=SimpleNamespace(text=text))
+    context = SimpleNamespace(user_data={'last_funnel_event': 'draft_previewed'})
+    await bot._track_command_use(update, context)
+    records = list(fm.iter_records(log_path))
+    assert len(records) == 1
+    assert records[0]['event'] == 'command_used'
+    assert records[0]['metadata'] == {'command': command}
+    assert records[0]['user_id'] == 12345
+    assert context.user_data['last_funnel_event'] == 'draft_previewed'
+    assert 'private' not in log_path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_command_tracking_swallows_own_errors(monkeypatch):
+    import bot
+    monkeypatch.setattr(fm, 'log_event', MagicMock(side_effect=RuntimeError('unavailable')))
+    await bot._track_command_use(SimpleNamespace(effective_user=SimpleNamespace(id=12345), effective_message=SimpleNamespace(text='/help')), SimpleNamespace(user_data={}))
+
+
+def test_command_counts_follow_cohort_filters_and_report_top_five(log_path):
+    for command, count in [('health', 12), ('settings', 5), ('unknown', 2), ('help', 1), ('start', 1), ('reset', 1)]:
+        for _ in range(count):
+            fm.log_event(user_id=111, username=None, event='command_used', metadata={'command': command})
+    for user_id in (99999999, 6912896590, None):
+        fm.log_event(user_id=user_id, username=None, event='command_used', metadata={'command': 'health'})
+    summary = fm.summarise(fm.iter_records(log_path))
+    assert summary['command_counts']['health'] == 12
+    line = next(line for line in fm.format_admin_report(summary).splitlines() if line.startswith('Commands used:'))
+    assert line.startswith('Commands used: /health 12, /settings 5, unknown 2')
+    assert len(line.split(', ')) == 5
+    assert fm.summarise(fm.iter_records(log_path), include_synthetic=True, include_operator=True)['command_counts']['health'] == 14
+    assert 'Commands used:' not in fm.format_admin_report(fm.summarise([]))

@@ -22,8 +22,8 @@ def payload_branch(payload):
         return "|".join(parts[:2]) + "|*"
     if family in {"APPROVE", "CANCEL"} and len(parts) == 3 and parts[1] == "draft":
         return family + "|draft"  # case token stamp, not a new branch
-    if family == "CHASE_LOG":
-        return payload if payload == "CHASE_LOG|cancel" else "CHASE_LOG|*"
+    if family == "UNSIGNED":
+        return "UNSIGNED|*"
     if family == "PUSHBACK" and len(parts) >= 3:
         return "PUSHBACK|*|" + parts[2]
     if family == "ACTION" and len(parts) > 2:
@@ -47,7 +47,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '73fd7f8bed0d552499321274431b6b15c38ec846980fc8149718d22804268072'
+PRODUCER_DIGEST = 'c8e5b13fabb3a8798742f645f8b82dd72fd997c8f17f52c113e835a6c8a5ed7b'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -64,18 +64,19 @@ DOCUSE|both DOCUSE|ignore DOCUSE|info FIELD|* FORM|* FORM|back FORM|best FORM|ca
 FORM|show_all GATHER|done INFO|privacy_details INFO|privacy_summary INFO|what PATHWAY_SETTINGS|* PATHWAY|* PUSHBACK|*|curriculum_links
 PUSHBACK|*|date_of_encounter PUSHBACK|*|key_capabilities PUSHBACK|*|other PUSHBACK|*|reflection SETLEVEL|*
 SET_CURRICULUM|* SUP|cancel-draft|* SUP|confirm-save-draft|* SUP|later|* SUP|open|* SUP|prepare-writeback|*
-SUP|recapture|* SUP|request-save-draft|* SUP|review|* SUP|skip|* UNSIGNED|12m UNSIGNED|3m UNSIGNED|6m
-UNSIGNED|all UNSIGNED|cancel UNSIGNED|custom UPGRADE|pro_plus VOICE|back_to_choice VOICE|back_to_settings
+SUP|recapture|* SUP|request-save-draft|* SUP|review|* SUP|skip|* UNSIGNED|* UPGRADE|pro_plus VOICE|back_to_choice VOICE|back_to_settings
 VOICE|done VOICE|kaizen_sample|last_12m VOICE|kaizen_sample|last_6m VOICE|kaizen_sample|recent_10 VOICE|more
 VOICE|path_kaizen VOICE|path_manual VOICE|remove APPROVE|submit REVIEW|draft IMPROVE|reflection EDIT|*
 FILING|feedback|* FEEDBACK|good|* FEEDBACK|bad|* FILING_CURRICULUM|retry|* FILING_CURRICULUM|select|*
-SETUP_CURRICULUM|* CHASE_LOG|cancel CHASE_LOG|* REMIND|*
+SETUP_CURRICULUM|* REMIND|*
 """.split())
 
 
 PROTECTED_BRANCHES = {"APPROVE|draft", "APPROVE|submit", "ATTACH|yes", "ATTACH|no", "CONFIRM|reset", "UPGRADE|pro_plus", "VOICE|done",
-    "FEEDBACK|good|*", "FEEDBACK|bad|*", "CHASE_LOG|*", "SUP|confirm-save-draft|*"}
+    "FEEDBACK|good|*", "FEEDBACK|bad|*", "SUP|confirm-save-draft|*"}
 BEHAVIOURS = {
+    "unknown-command": "test_unknown_and_retired_commands_reply_without_echo",
+    "command-usage": "test_command_usage_independent_dispatch",
     "cancel": "test_cancel_resets_conversation",
     "error": "test_template_review_image_error_uses_send_text_recovery",
     "retry": "test_retry_dispatches_intended_branch",
@@ -163,10 +164,7 @@ def reviewed_units(slots):
         entry["registration_candidates"] = sorted(set(entry["registration_candidates"]) | {s.key for s in candidates})
     for slot in slots:
         for command in slot.commands:
-            put("command:" + command, "command", CATEGORIES[slot.callback], [slot],
-                {"arguments": "no-args"} if command == "link" else None)
-            if command == "link":
-                put("command:link/args:token", "command", CATEGORIES[slot.callback], [slot], {"arguments": "token"})
+            put("command:" + command, "command", CATEGORIES[slot.callback], [slot])
     for branch in sorted(CALLBACK_BRANCHES):
         sample = branch.replace("*", "2025" if branch.startswith("FILING_CURRICULUM|") else "aaaaaaaa")
         candidates = [s for s in slots if isinstance(s.handler, CallbackQueryHandler) and s.handler.pattern.match(sample)]
@@ -193,7 +191,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '81f1c7376c2ecbf1df8b435a25858394dbbd75f333fd558b10b99f9aca362ed7'
+CATALOGUE_DIGEST = '888501bc5a0d55247aa2857af5c6398750f3a2ee33a94f99bcd7006b232ca254'
 
 
 def requirements_digest(units):
@@ -274,7 +272,7 @@ def catalogue_receipt(observations):
             "grouping": "State credit requires the exact dispatched slot, source, input and asserted committed result. Protected commands require branch-specific asserted boundaries. Manual and audited evidence use evidence_matches."}
 
 
-AUDIT_TESTS = """test_flow_walker test_e2e_offline test_whole_bot_coverage test_health_bot
+AUDIT_TESTS = """test_reset_command test_funnel_metrics test_flow_walker test_e2e_offline test_whole_bot_coverage test_health_bot
  test_gathering_mode test_attachment_handoff test_essential_first_gate test_supervisor_bot
  test_consent_gate test_missing_essentials_replay_guard test_concurrent_user_isolation
  test_modality_clause_coverage test_setup_manual_profile_fallback test_attachment_upload_consent

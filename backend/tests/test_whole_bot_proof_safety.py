@@ -22,7 +22,7 @@ def test_early_junit_failure(tmp_path, xml):
     (tmp_path / "live.xml").write_text(xml)
     assert qa.aggregate(tmp_path, "run")["status"] == "failed"
 
-@pytest.mark.parametrize("command", "health unsigned settings start arcp voice plan upgrade link gather pathway".split())
+@pytest.mark.parametrize("command", "health unsigned settings start arcp voice plan upgrade gather pathway".split())
 def test_protected_command(command):
     assert COMMAND_POLICY[command] == "protected"
 

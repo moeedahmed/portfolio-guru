@@ -226,12 +226,16 @@ def test_passwordless_user_counts_as_connected(passwordless_user):
 
 
 @pytest.mark.asyncio
-async def test_unsigned_explains_it_needs_a_password_connection(passwordless_user):
+async def test_unsigned_uses_health_entry_for_passwordless_connection(passwordless_user, monkeypatch):
     sim = BotSimulator()
+    health = AsyncMock(return_value=bot.ConversationHandler.END)
+    monkeypatch.setattr(bot, "_health_entry", health)
+    update, context = sim._make_text_update("/unsigned"), sim._make_context()
 
-    await bot.unsigned_command(sim._make_text_update("/unsigned"), sim._make_context())
+    result = await bot.unsigned_command(update, context)
 
-    assert "needs your Kaizen login shared with me" in sim.get_last_text()
+    health.assert_awaited_once_with(update, context, open_queue="awaiting")
+    assert result == bot.ConversationHandler.END
 
 
 # --- One shared first step -------------------------------------------------------

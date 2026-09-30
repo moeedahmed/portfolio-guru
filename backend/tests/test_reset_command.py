@@ -10,6 +10,7 @@ import inspect
 from unittest.mock import AsyncMock
 
 import pytest
+from tests.test_e2e_offline import offline_app, _prepare_update
 
 
 def test_reset_is_the_public_command_and_setup_is_hidden():
@@ -143,3 +144,95 @@ def test_build_application_registers_reset_and_delete_alias(monkeypatch, tmp_pat
         "CONFIRM" in pattern and "reset" in pattern
         for pattern in confirm_patterns
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('command', ['mistyped_secret', 'beta', 'link', 'bulk', 'chase'])
+async def test_unknown_and_retired_commands_reply_without_echo(offline_app, command):
+    import bot
+    from tests.helpers import make_command_update
+
+    app, collector = offline_app
+    update = make_command_update(command, args=['private-content'])
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert collector.texts == [bot.UNKNOWN_COMMAND_MSG]
+    assert 'private-content' not in collector.texts[0]
+    assert command not in collector.texts[0]
+    assert all('/' + name in collector.texts[0] for name, _ in bot.BOT_COMMANDS)
+
+
+def test_command_fallback_and_tracker_order():
+    import bot
+    from telegram.ext import CommandHandler, MessageHandler
+    from tests.helpers import build_offline_application
+    from tests.whole_bot_coverage import inventory
+
+    app = build_offline_application()
+    assert app.handlers[0][-1].callback is bot.unknown_command
+    tracker = app.handlers[2][0]
+    assert isinstance(tracker, MessageHandler) and tracker.callback is bot._track_command_use
+    assert tracker.block is False
+    registered = {name for slot in inventory(app) for name in slot.commands}
+    assert registered == bot._KNOWN_COMMAND_NAMES
+    assert not registered & {'beta', 'link', 'bulk', 'chase'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('command', ['help', 'start', 'unknown_private', 'chase'])
+async def test_command_usage_independent_dispatch(offline_app, monkeypatch, command):
+    import asyncio
+    import bot
+    import funnel_metrics
+    from tests.helpers import TEST_USER, make_command_update
+
+    app, collector = offline_app
+    records = []
+    def log(**kwargs):
+        records.append(kwargs)
+    monkeypatch.setattr(funnel_metrics, 'log_event', log)
+    update = make_command_update(command)
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    await asyncio.sleep(0)  # Allow the nonblocking telemetry handler to run.
+    events = [r for r in records if r['event'] == 'command_used']
+    assert len(events) == 1
+    assert events[0]['user_id'] == TEST_USER.id
+    assert events[0]['metadata'] == {'command': command if command in bot._KNOWN_COMMAND_NAMES else 'unknown'}
+    assert collector.texts
+    if command == 'help':
+        assert collector.texts == [bot.HELP_MSG]
+    elif command in {'unknown_private', 'chase'}:
+        assert collector.texts == [bot.UNKNOWN_COMMAND_MSG]
+
+
+@pytest.mark.asyncio
+async def test_unknown_command_does_not_end_active_case_conversation(offline_app):
+    import bot
+    from tests.helpers import TEST_USER, make_command_update
+    from telegram.ext import ConversationHandler
+
+    app, collector = offline_app
+    conv = next(h for h in app.handlers[0] if isinstance(h, ConversationHandler) and h.name == 'case_conv')
+    key = (TEST_USER.id, TEST_USER.id)
+    conv._conversations[key] = bot.AWAIT_APPROVAL
+    update = make_command_update('mistyped_private')
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+    assert collector.texts == [bot.UNKNOWN_COMMAND_MSG]
+    assert conv._conversations[key] == bot.AWAIT_APPROVAL
+
+
+def test_unknown_reply_only_handles_private_commands():
+    import bot
+    from telegram import Chat
+    from tests.helpers import build_offline_application, make_command_update, make_text_update
+
+    handler = build_offline_application().handlers[0][-1]
+    assert handler.callback is bot.unknown_command
+    update = make_command_update('mistyped')
+    assert handler.check_update(update)
+    with update.message._unfrozen():
+        update.message.chat = Chat(id=-123, type=Chat.GROUP)
+    assert not handler.check_update(update)
+    assert not handler.check_update(make_text_update('ordinary case text'))

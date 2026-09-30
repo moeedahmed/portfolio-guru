@@ -75,7 +75,6 @@ from kaizen_index import (
 )
 from kaizen_sync import sync_kaizen_portfolio_index_for_user
 from bulk_filer import bulk_file
-from kaizen_unsigned_scraper import scrape_unsigned_tickets
 from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
 from channel_reply_policy import select_deterministic_reply
@@ -98,7 +97,6 @@ from rcem_ai_policy import (
     with_ai_use_declaration,
 )
 from runtime_identity import write_runtime_identity
-import chase_guard
 import dogfood_audit
 
 from dotenv import load_dotenv
@@ -9342,24 +9340,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif action == "unsigned":
-        if _is_passwordless_user(user_id):
-            await query.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
-        elif not has_credentials(user_id):
-            await query.message.reply_text(
-                "🔗 Connect your Kaizen account first.",
-                reply_markup=InlineKeyboardMarkup([[_BTN_SETUP]])
-            )
-            return ConversationHandler.END
-        if not await has_unlimited_access(user_id):
-            await query.message.reply_text(
-                "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
-                "Upgrade to see all your pending assessments in one place.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
-                ]),
-            )
-            return ConversationHandler.END
-        await _show_unsigned_range_picker(query.message, context)
+        await _show_unsigned_awaiting(query, context, user_id)
 
     elif action in ("health", "health_limited"):
         # Inline pathway-aware health check — morphs the settings screen in
@@ -10093,12 +10074,37 @@ Send an anonymised case (text, voice, photo, video, or document). I'll draft the
 {_format_public_commands()}"""
 
 
-async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Keep old /link taps harmless after retiring the Hub integration."""
-    await update.message.reply_text(
-        "ℹ️ Linking to the EM Gurus website has been retired; nothing is needed."
-    )
-    return ConversationHandler.END
+UNKNOWN_COMMAND_MSG = (
+    "❓ I don't recognise that command.\n"
+    "Choose a public command:\n"
+    + " · ".join(f"/{name}" for name, _ in BOT_COMMANDS)
+)
+
+_KNOWN_COMMAND_NAMES = frozenset(name for name, _ in BOT_COMMANDS) | frozenset({
+    "settings", "health", "cancel", "reset", "delete", "help", "privacy", "curriculum",
+    "arcp", "upgrade", "plan", "unsigned", "gather", "setup", "voice", "pathway", "start",
+    "settier", "setbeta", "listusers", "filingreport", "funnelreport", "assignbeta",
+})
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reply without reflecting unknown command text or arguments."""
+    await update.message.reply_text(UNKNOWN_COMMAND_MSG)
+
+
+async def _track_command_use(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Count commands using only reviewed names, independently of command handling."""
+    try:
+        from funnel_metrics import log_event
+        token = (update.effective_message.text or "").split()[0]
+        name = token.removeprefix("/").split("@", 1)[0].lower()
+        command = name if name in _KNOWN_COMMAND_NAMES else "unknown"
+        log_event(user_id=update.effective_user.id, username=None,
+                  event="command_used", metadata={"command": command})
+    except Exception:
+        # Telemetry must never interfere with the user's command, even if
+        # persistence or the update shape is unavailable.
+        pass
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -10318,56 +10324,6 @@ async def setbeta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await set_beta_tester(target_id, flag)
     label = "Beta (unlimited)" if flag else "off (back to tier limits)"
     await update.message.reply_text(f"✅ Set user {target_id} beta_tester → {label}.")
-    return ConversationHandler.END
-
-
-async def beta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /beta — request beta tester access."""
-    user_id = update.effective_user.id
-    username = update.effective_user.username or ""
-
-    if not payments_enabled():
-        # Everyone is already in the beta, so there is nothing to request.
-        await update.message.reply_text(_BETA_PLAN_TEXT)
-        return ConversationHandler.END
-
-    # Check if already on an upgraded plan
-    tier = await get_user_tier(user_id)
-    if tier in ("pro", "pro_plus"):
-        await update.message.reply_text("You're already on an upgraded plan! No need to request beta.")
-        return ConversationHandler.END
-
-    # Check for existing pending request
-    from supabase_sync import get_beta_request_by_username
-    existing = get_beta_request_by_username(username) if username else None
-    if existing:
-        await update.message.reply_text("Your beta request is already pending. Share your @username with the Portfolio Guru team.")
-        return ConversationHandler.END
-
-    # Store the request
-    from supabase_sync import store_beta_request
-    store_beta_request(user_id, username)
-
-    # Notify the configured admin account directly.
-    try:
-        name = (update.effective_user.first_name or "") + " " + (update.effective_user.last_name or "")
-        name = name.strip() or "Unknown"
-        tag = f"@{username}" if username else "(no @username)"
-        user_id = update.effective_user.id
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=(
-                f"📩 Beta request from {name} ({tag})\n"
-                f"ID: `{user_id}`\n\n"
-                f"/setbeta {user_id} on"
-            ),
-            parse_mode="Markdown",
-        )
-    except Exception:
-        pass
-
-    reply = "✅ Beta request submitted. The Portfolio Guru team will upgrade you shortly."
-    await update.message.reply_text(reply)
     return ConversationHandler.END
 
 
@@ -11583,6 +11539,11 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle /health — analyse portfolio health against the user's selected
     pathway (Training/CCT, with ARCP as a checkpoint inside it, or CESR /
     Portfolio Pathway)."""
+    return await _health_entry(update, context)
+
+
+async def _health_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, *, open_queue=None) -> int:
+    """Shared health command entry; optionally open a queue after storing the report."""
     user_id = update.effective_user.id
 
     if not await _health_gate_check(user_id):
@@ -11613,6 +11574,10 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     async def send_result(text, reply_markup):
         # Panes are stored by _run_health_analysis from the assessment.
+        if open_queue is not None:
+            payload = _health_view_payload(context, "action_queue", page=0, queue=open_queue)
+            if payload is not None:
+                text, reply_markup = payload
         msg = progress_holder.get("msg")
         if msg is not None:
             await _safe_edit_text(msg, text, parse_mode="Markdown", reply_markup=reply_markup)
@@ -13871,28 +13836,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     _start_conversational_router_shadow(update, "handle_case_input")
     attachment_path_to_save = None
     attachment_name_to_save = None
-
-    # If the user just tapped "Custom range" in the /unsigned picker, the next
-    # text reply is their date range — intercept it before treating as a case.
-    if context.user_data.get("awaiting_unsigned_range") and update.message and update.message.text:
-        text = update.message.text.strip()
-        parsed = _parse_unsigned_range(text)
-        if not parsed:
-            await update.message.reply_text(
-                "❌ Couldn't read that as a date range. Try again, like `01/04/2025 to 31/03/2026`.",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
-                ]),
-            )
-            return ConversationHandler.END
-        from_date, to_date = parsed
-        if from_date > to_date:
-            from_date, to_date = to_date, from_date
-        context.user_data.pop("awaiting_unsigned_range", None)
-        label = f"{from_date.strftime('%d/%m/%Y')} – {to_date.strftime('%d/%m/%Y')}"
-        await _run_unsigned_scan(update.message, context, user_id, from_date, to_date, label)
-        return ConversationHandler.END
 
     # Setup recovery guard: if /start or an implicit reconnect prompt asked for
     # Kaizen details, that next text belongs to setup even when PTB's persisted
@@ -17522,214 +17465,28 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             return await handle_case_input(update, context)
 
 
-# === BULK / UNSIGNED / CHASE COMMANDS ===
+# === LEGACY UNSIGNED ENTRY POINTS ===
 
-async def bulk_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /bulk — disabled for now, coming in a future update."""
-    await update.message.reply_text("📦 Bulk filing is coming soon. For now, send cases one at a time.")
-    return
-
-
-async def _show_unsigned_range_picker(target_message, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the date-range picker for the unsigned-tickets scan."""
-    context.user_data.pop("awaiting_unsigned_range", None)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📅 3 months", callback_data="UNSIGNED|3m"),
-         InlineKeyboardButton("📅 6 months", callback_data="UNSIGNED|6m")],
-        [InlineKeyboardButton("📅 12 months", callback_data="UNSIGNED|12m"),
-         InlineKeyboardButton("📅 All time", callback_data="UNSIGNED|all")],
-        [InlineKeyboardButton("✏️ Custom range", callback_data="UNSIGNED|custom"),
-         InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
-    ])
-    await target_message.reply_text(
-        "📅 Pick a date range for the unsigned-ticket scan.",
-        reply_markup=keyboard,
-    )
-
-
-def _parse_unsigned_range(text: str) -> tuple["datetime | None", "datetime | None"] | None:
-    """Parse a typed date range like '01/04/2025 to 31/03/2026'.
-
-    Accepts d/m/yyyy or dd/mm/yyyy with " to " or "-" or "→" between dates.
-    Returns (from_date, to_date) or None if unparseable.
-    """
-    from datetime import datetime
-    cleaned = text.strip().lower().replace("→", " to ").replace(" - ", " to ").replace(" – ", " to ")
-    parts = [p.strip() for p in cleaned.split(" to ") if p.strip()]
-    if len(parts) != 2:
-        return None
-    formats = ["%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y"]
-    parsed = []
-    for part in parts:
-        d = None
-        for fmt in formats:
-            try:
-                d = datetime.strptime(part, fmt)
-                break
-            except ValueError:
-                continue
-        if not d:
-            return None
-        parsed.append(d)
-    return parsed[0], parsed[1]
-
-
-async def _run_unsigned_scan(
-    target_message,
-    context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    from_date,
-    to_date,
-    label: str,
-) -> None:
-    """Run the unsigned-tickets scan with the given date range and report results."""
-    creds = get_credentials(user_id)
-    msg = await target_message.reply_text(
-        f"🔍 Scanning Kaizen for unsigned tickets ({label}) — this can take up to a minute…"
-    )
-    try:
-        tickets = await asyncio.wait_for(
-            scrape_unsigned_tickets(creds[0], creds[1], from_date=from_date, to_date=to_date),
-            timeout=90,
-        )
-    except asyncio.TimeoutError:
-        # Same reasoning as the setup-flow timeout above: the cause may be
-        # local, so the copy states what happened rather than guessing why.
-        await msg.edit_text("⏱ The login check timed out before it finished. Try again in a moment.")
-        return
-    except Exception as exc:
-        logger.warning("Unsigned scrape errored: %s", exc, exc_info=True)
-        await msg.edit_text("Could not scan Kaizen — try again in a moment.")
-        return
-
-    if not tickets:
-        await msg.edit_text(f"✅ No unsigned tickets found ({label}).")
-        return
-
-    by_assessor: dict[str, list] = {}
-    for t in tickets:
-        name = t.get("assessor_name") or "Unknown"
-        by_assessor.setdefault(name, []).append(t)
-
-    lines = [f"📬 *Unsigned tickets — {label}: {len(tickets)} total*\n"]
-    for assessor, tix in sorted(by_assessor.items(), key=lambda kv: -len(kv[1])):
-        dates = [t["event_date"] for t in tix if t.get("event_date")]
-        oldest = min(dates) if dates else "?"
-        allowed, reason = chase_guard.check_allowed(assessor)
-        chase_icon = "🟢" if allowed else "🔴"
-        lines.append(f"{chase_icon} *{assessor}* — {len(tix)} ticket(s), oldest {oldest}")
-        lines.append(f"   _{reason}_")
-    lines.append("\n🟢 = chase allowed   🔴 = chase blocked (cooldown / cap reached)")
-    lines.append("\nOpen Kaizen to send a reminder: https://kaizenep.com/activities")
-    await msg.edit_text("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
+async def _show_unsigned_awaiting(query, context, user_id: int) -> None:
+    """Recover old unsigned buttons through the stored Portfolio Health view."""
+    payload = _health_view_payload(context, "action_queue", page=0, queue="awaiting")
+    if payload is not None:
+        text, keyboard = payload
+        await _safe_edit_text(query.message, text, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await _show_health_landing(query, context, user_id)
 
 
 async def handle_unsigned_range_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle UNSIGNED|<choice> callback — runs preset scans or prompts for custom range."""
-    from datetime import datetime, timedelta
+    """Old UNSIGNED buttons now open Health's With assessor list."""
     query = update.callback_query
     await query.answer()
-    choice = query.data.split("|", 1)[1] if "|" in query.data else ""
-    user_id = update.effective_user.id
-
-    if choice == "cancel":
-        context.user_data.pop("awaiting_unsigned_range", None)
-        await query.edit_message_text("Cancelled.")
-        return
-
-    if choice == "custom":
-        context.user_data["awaiting_unsigned_range"] = True
-        await query.edit_message_text(
-            "✏️ Send the date range, like:\n\n"
-            "`01/04/2025 to 31/03/2026`\n\n"
-            "Format: dd/mm/yyyy on each side, separated by ' to '.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="UNSIGNED|cancel")],
-            ]),
-        )
-        return
-
-    today = datetime.now()
-    if choice == "3m":
-        from_date, to_date, label = today - timedelta(days=92), today, "last 3 months"
-    elif choice == "6m":
-        from_date, to_date, label = today - timedelta(days=183), today, "last 6 months"
-    elif choice == "12m":
-        from_date, to_date, label = today - timedelta(days=365), today, "last 12 months"
-    elif choice == "all":
-        from_date, to_date, label = None, None, "all-time"
-    else:
-        await query.edit_message_text("Unknown choice.")
-        return
-
-    # Replace the picker with an acknowledgement; the scan reply is a fresh message.
-    try:
-        await query.edit_message_text(f"📅 Scanning {label}…")
-    except Exception:
-        pass
-    await _run_unsigned_scan(query.message, context, user_id, from_date, to_date, label)
+    await _show_unsigned_awaiting(query, context, update.effective_user.id)
 
 
-async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /unsigned — open to every beta user (Moeed, 2026-09-29) and to
-    Unlimited subscribers once payments are on. Shows the date-range picker,
-    then scans Kaizen."""
-    user_id = update.effective_user.id
-
-    if _is_passwordless_user(user_id):
-        await update.message.reply_text(_PASSWORDLESS_FEATURE_UNAVAILABLE_TEXT)
-        return
-    if not has_credentials(user_id):
-        await update.message.reply_text(
-            "🔗 Connect your Kaizen account first.\n\nOpen /settings to get started.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")
-            ]])
-        )
-        return
-
-    if not await has_unlimited_access(user_id):
-        await update.message.reply_text(
-            "📬 Unsigned ticket scanning is included in Portfolio Guru Unlimited.\n\n"
-            "Upgrade to see all your pending assessments in one place.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💳 Upgrade — £9.99/mo", callback_data="UPGRADE|pro_plus")],
-            ]),
-        )
-        return
-
-    await _show_unsigned_range_picker(update.message, context)
-
-
-async def chase_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /chase — coming soon."""
-    await update.message.reply_text(
-        "📬 Assessor reminders are coming soon.\n\n"
-        "This feature will let you send reminders directly through Kaizen for unsigned tickets."
-    )
-    return
-
-
-async def handle_chase_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle chase confirmation callback."""
-    query = update.callback_query
-    await query.answer()
-    data = query.data.replace("CHASE_LOG|", "")
-
-    if data == "cancel":
-        await query.edit_message_text("Chase request closed.")
-        await query.message.reply_text(
-            _cancelled_next_step_text(update.effective_user.id),
-            reply_markup=_build_next_step_keyboard(update.effective_user.id),
-        )
-        return
-
-    email = data
-    entry = chase_guard.log_chase(email=email, name=email, method="manual", telegram_user_id=update.effective_user.id)
-    await query.edit_message_text(
-        f"✅ Chase #{entry['chase_number']} logged for {email} on {entry['date']}"
-    )
+async def unsigned_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Open Health's With assessor list using the same access and sync path."""
+    return await _health_entry(update, context, open_queue="awaiting")
 
 
 # === CONSENT GATE (UK GDPR Art 9(2)(a)) ===
@@ -18473,10 +18230,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("privacy", privacy_command))
     application.add_handler(CommandHandler("settings", settings_command))
-    application.add_handler(CommandHandler("link", link_command))
-    application.add_handler(CommandHandler("bulk", bulk_command))
     application.add_handler(CommandHandler("unsigned", unsigned_command))
-    application.add_handler(CommandHandler("chase", chase_command))
     application.add_handler(CommandHandler("curriculum", curriculum_command))
     application.add_handler(CommandHandler("health", health_command))
     # Deliberately absent from BOT_COMMANDS: the public menu is core-only, and
@@ -18487,7 +18241,6 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("plan", upgrade_command))
     application.add_handler(CommandHandler("settier", settier_command))
     application.add_handler(CommandHandler("setbeta", setbeta_command))
-    application.add_handler(CommandHandler("beta", beta_command))
     application.add_handler(CommandHandler("listusers", listusers_command))
     application.add_handler(CommandHandler("filingreport", filingreport_command))
     application.add_handler(CommandHandler("funnelreport", funnelreport_command))
@@ -18504,7 +18257,6 @@ def build_application() -> Application:
     # when the user is in AWAIT_TRAINING_LEVEL, so when no conv is active the
     # global handler still services the /settings flow.
     application.add_handler(CallbackQueryHandler(handle_pathway_choice, pattern=r"^PATHWAY_SETTINGS\|"))
-    application.add_handler(CallbackQueryHandler(handle_chase_log, pattern=r"^CHASE_LOG\|"))
     application.add_handler(CallbackQueryHandler(handle_reminder_callback, pattern=r"^REMIND\|"))
     # Top-level handlers that must work regardless of conversation state
     application.add_handler(CallbackQueryHandler(handle_info_button, pattern=r"^INFO\|"))
@@ -18610,10 +18362,14 @@ def build_application() -> Application:
     # NOTE: CallbackQueryHandler already registered in case_conv fallbacks.
     # Do NOT add a second one here — causes duplicate message delivery.
 
-    # Must stay the last group-0 handler: a tap nothing above claimed (a button
+    # Must stay the last group-0 callback handler: a tap nothing above claimed (a button
     # from an earlier step or an old conversation) is answered instead of
     # leaving Telegram's spinner running with no reply.
     application.add_handler(CallbackQueryHandler(_answer_unhandled_button, pattern=r"^.*$"))
+    # Commands claimed above (including conversation fallbacks) always win.
+    application.add_handler(MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, unknown_command))
+    # Separate group: count every command without changing its dispatch or reply.
+    application.add_handler(MessageHandler(filters.COMMAND, _track_command_use, block=False), group=2)
 
     _install_dogfood_audit_bot_hooks(application)
     return application

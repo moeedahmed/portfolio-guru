@@ -69,8 +69,6 @@ class FakeClient:
         self.history.insert(0, sent)
         if text == "/cancel":
             self.show("bad reset" if self.broken_reset else "Cancelled")
-        elif text == "/chase":
-            self.show("Assessor reminders are coming soon.")
         else:
             self.show(text)
         return sent
@@ -234,7 +232,7 @@ async def test_commands_can_edit_an_older_message(approved, tmp_path):
             self.sent.append(text)
             self.history = [m for m in self.history if m.id != 1]
             self.history.insert(0, sent)
-            response = "Assessor reminders are coming soon." if text == "/chase" else text
+            response = text
             self.show(response, edit=1)
             return sent
     client = EditedCommands()
