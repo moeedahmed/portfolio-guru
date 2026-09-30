@@ -2247,3 +2247,28 @@ async def test_month_selection_and_confirmation_name_the_route(monkeypatch, path
     await bot.handle_action_button(sim._make_callback_update('ACTION|health_review_confirm|2027-05'), context)
     save.assert_called_once()
     assert f'✅ {label} month set to *May 2027*.' in landing.call_args.kwargs['notice']
+
+
+@pytest.mark.parametrize(
+    "level, role, pathway, basis",
+    [
+        ("SAS", None, Pathway.cesr_portfolio, "guessed from your Non-Training Profile"),
+        ("HIGHER", "non_training_higher", Pathway.cesr_portfolio, "guessed from your Non-Training Profile"),
+        ("ACCS", "accs", Pathway.training_arcp, "guessed from your portfolio profile"),
+        (None, None, Pathway.training_arcp, "set by default"),
+    ],
+)
+def test_route_before_kaizen_connect_follows_the_portfolio_profile(
+    isolated_health_store, monkeypatch, level, role, pathway, basis
+):
+    """A Non-Training Profile never lands on ARCP just because no Kaizen
+    connect has saved a route yet, and the hint says where the guess came from."""
+    import bot
+
+    monkeypatch.setattr(bot, "get_training_level", lambda _user_id: level)
+    monkeypatch.setattr(bot, "get_kaizen_role", lambda _user_id: role)
+
+    assert bot._get_or_default_health_profile(4242).pathway == pathway
+    assert bot._route_basis(4242, stored=False) == basis
+    assert bot._route_basis(4242, stored=True) == "guessed from Kaizen"
+    assert "guessed from Kaizen" not in bot._route_hint_line(pathway, basis)

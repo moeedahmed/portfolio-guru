@@ -457,7 +457,7 @@ def _landing_footer(
     if notice:
         lines.extend([notice, ""])
     lines.append(
-        f"_From {assessment.scanned_items} Kaizen items. Read-only, not an "
+        f"_From {assessment.scanned_items} Kaizen item{'' if assessment.scanned_items == 1 else 's'}. Read-only, not an "
         f"{'ARCP' if trainee else 'appraisal'} judgement._"
     )
     return lines
@@ -508,15 +508,23 @@ def format_arcp_landing(
         f"{_tick(checklist.supervisor_reports > 0)} Supervisor report",
         f"{_tick(checklist.esr > 0)} ESR",
     ])
-    esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
-    lines.append(
-        f"{esle_mark} ESLEs {checklist.esles} of {checklist.esle_target} (one in PEM)"
-    )
-    if checklist.slos_without_evidence:
-        slos = ", ".join(str(s) for s in checklist.slos_without_evidence)
-        lines.append(f"⬜ No assessed evidence yet: SLO {slos}")
+    if getattr(checklist, "accs", False):
+        # RCEM sets no ESLE quota for ACCS years, and ACCS learning outcomes
+        # are not the RCEM SLOs this scan reads.
+        lines.extend([
+            f"ESLEs this year: {checklist.esles}",
+            "ℹ️ ACCS learning outcomes aren't read here. Check them in Kaizen.",
+        ])
     else:
-        lines.append("✅ Every SLO has assessed evidence")
+        esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
+        lines.append(
+            f"{esle_mark} ESLEs {checklist.esles} of {checklist.esle_target} (one in PEM)"
+        )
+        if checklist.slos_without_evidence:
+            slos = ", ".join(str(s) for s in checklist.slos_without_evidence)
+            lines.append(f"⬜ No assessed evidence yet: SLO {slos}")
+        else:
+            lines.append("✅ Every SLO has assessed evidence")
     lines.append("")
 
     lines.extend(_do_next(
@@ -693,7 +701,11 @@ def format_about(
         )
 
     lines = ["ℹ️ *About this report*"]
-    lines.append(" ".join(facts) if facts else "No scan details are available for this report.")
+    # One fact per line, each a full sentence, so two never run together.
+    lines.extend(
+        [f if f.endswith((".", "!", "?")) else f"{f}." for f in facts]
+        or ["No scan details are available for this report."]
+    )
     if scanned_items is not None and core_items is not None and scanned_items > core_items:
         lines.extend(["", (
             f"{core_items} sit in the six main categories "
