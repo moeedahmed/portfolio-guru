@@ -501,10 +501,13 @@ def format_arcp_landing(
         msf = "⚠️ MSF not seen, and it's due in the first 6 months"
     else:
         msf = "⬜ MSF"
-    lines.append(
-        f"{msf}   {_tick(checklist.supervisor_reports > 0)} Supervisor report"
-        f"   {_tick(checklist.esr > 0)} ESR"
-    )
+    # One point per row: a doctor ticks these off one at a time (Moeed,
+    # 2026-09-30).
+    lines.extend([
+        msf,
+        f"{_tick(checklist.supervisor_reports > 0)} Supervisor report",
+        f"{_tick(checklist.esr > 0)} ESR",
+    ])
     esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
     lines.append(
         f"{esle_mark} ESLEs {checklist.esles} of {checklist.esle_target} (one in PEM)"
@@ -557,16 +560,14 @@ def format_portfolio_landing(
         lines.append("No appraisal month set. Add it with 📅 below.")
 
     lines.extend(["", "*Before your appraisal, last 12 months*"])
-    lines.append(
-        f"{_tick(appraisal.cpd > 0)} CPD {appraisal.cpd}"
-        f" · {_tick(appraisal.qi > 0)} QI {appraisal.qi}"
-        f" · {_tick(appraisal.colleague_feedback_5y > 0)} Colleague feedback"
-    )
-    lines.append(
-        f"Significant events {appraisal.significant_events}"
-        f" · Complaints/compliments {appraisal.complaints_compliments}"
-        " (declare any, even if none are filed)"
-    )
+    lines.extend([
+        f"{_tick(appraisal.cpd > 0)} CPD {appraisal.cpd}",
+        f"{_tick(appraisal.qi > 0)} QI {appraisal.qi}",
+        f"{_tick(appraisal.colleague_feedback_5y > 0)} Colleague feedback",
+        f"Significant events {appraisal.significant_events}",
+        f"Complaints/compliments {appraisal.complaints_compliments}"
+        " (declare any, even if none are filed)",
+    ])
     lines.extend(["_Patient feedback and CPD hours aren't visible to this scan._", ""])
     if cesr:
         lines.extend(_pathway_section(cesr))
