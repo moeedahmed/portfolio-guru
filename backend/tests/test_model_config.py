@@ -13,7 +13,7 @@ def test_gemini_fallback_models_default_order(monkeypatch):
 
     from model_config import gemini_fallback_models
 
-    assert gemini_fallback_models() == ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    assert gemini_fallback_models() == ["gemini-3-flash-preview", "gemini-3.5-flash"]
 
 
 def test_gemini_fallback_models_honours_env(monkeypatch):
