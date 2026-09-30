@@ -47,6 +47,23 @@ def test_public_form_name_replaces_internal_form_keys():
     assert "Formal Course" in text
 
 
+def test_esle_2021_public_name_preserves_the_acronym():
+    from form_display import public_form_name
+
+    assert public_form_name("ESLE_2021") == "ESLE"
+
+
+def test_short_acronyms_are_never_title_cased_in_public_form_names():
+    from form_display import base_form_type, public_form_name
+    from form_schemas import FORM_SCHEMAS
+
+    for key in FORM_SCHEMAS:
+        base = base_form_type(key)
+        if "_" not in base and len(base) <= 5 and base.isupper():
+            for form_type in (key, key + "_2021"):
+                assert public_form_name(form_type) != base.title(), form_type
+
+
 def test_variant_draft_preview_uses_public_name_and_base_schema():
     from bot import _format_generic_draft, _universal_pre_file_gate
     from models import FormDraft

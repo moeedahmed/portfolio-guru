@@ -106,6 +106,23 @@ async def test_old_upgrade_button_opens_no_checkout(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_settings_callback_shows_unlimited_beta_with_payments_off(beta_usage, monkeypatch):
+    import bot
+
+    monkeypatch.setattr(bot, "_kaizen_connected", lambda _uid: False)
+    monkeypatch.setattr(bot, "_safe_kaizen_sync_status", AsyncMock(return_value=None))
+    update = _update("ACTION|settings")
+    update.callback_query.message.edit_text = AsyncMock()
+
+    await bot.handle_action_button(update, _context())
+
+    text = update.callback_query.message.edit_text.await_args.args[0]
+    assert "Plan: Beta (unlimited)" in text
+    assert "Usage: 0/5" not in text
+    assert "Plan: Free" not in text
+
+
+@pytest.mark.asyncio
 async def test_beta_command_needs_no_request(monkeypatch):
     import bot
 

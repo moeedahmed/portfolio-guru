@@ -18,6 +18,7 @@ PUBLIC_FORM_NAME_OVERRIDES = {
     "PROC_LOG": "Procedural Log",
     "REFLECT_LOG": "Reflective Practice Log",
     "US_CASE": "Ultrasound Case Reflection",
+    "ESLE": "ESLE",
     "ESLE_ASSESS": "ESLE",
     "SERIOUS_INC": "Serious Incident Reflection",
     "EDU_ACT": "Educational Activity",

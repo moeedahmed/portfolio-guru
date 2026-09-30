@@ -3574,7 +3574,8 @@ def _stage_value_from_training_level(level: str | None, form_type: str) -> str:
     if normalised == "INTERMEDIATE":
         return "ST3/CT3" if "ST3/CT3" in options else ""
     if normalised == "ACCS":
-        return "ST1/CT1" if "ST1/CT1" in options else ""
+        # ACCS spans two years; the profile does not tell us which one.
+        return ""
     return ""
 
 
@@ -9597,6 +9598,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             tier=tier,
             used=used,
             connected=_kaizen_connected(user_id),
+            is_beta=await is_beta_tester(user_id),
             kaizen_sync=await _safe_kaizen_sync_status(user_id),
         )
         await query.message.edit_text(text, reply_markup=keyboard)

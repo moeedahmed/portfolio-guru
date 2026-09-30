@@ -211,7 +211,7 @@ def mock_callback_update():
 @pytest.fixture(autouse=True)
 def _offline_network_is_fail_closed(request, monkeypatch):
     """An omitted provider stub must fail locally, never reach an external API."""
-    if request.node.get_closest_marker("live") or request.node.get_closest_marker("kaizen") or request.path.name in {"test_e2e.py", "test_e2e_live.py"}:
+    if request.node.get_closest_marker("live") or request.node.get_closest_marker("e2e_live") or request.node.get_closest_marker("kaizen") or request.path.name in {"test_e2e.py", "test_e2e_live.py"}:
         return
     import socket
     def refused(*args, **kwargs):
@@ -219,6 +219,30 @@ def _offline_network_is_fail_closed(request, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refused)
     monkeypatch.setattr(socket.socket, "connect_ex", refused)
     monkeypatch.setattr(socket, "getaddrinfo", refused)
+
+    # Playwright connects from its driver subprocess, beyond the socket guard.
+    # Cover the public factories and aliases imported before fixture setup;
+    # imports during a test inherit the guarded public factories. Explicit
+    # per-test browser fakes can still override these patches afterwards.
+    import playwright.async_api
+    import playwright.sync_api
+
+    def browser_refused(*args, **kwargs):
+        raise RuntimeError("offline tests must not start a real browser")
+
+    monkeypatch.setattr(playwright.async_api, "async_playwright", browser_refused)
+    monkeypatch.setattr(playwright.sync_api, "sync_playwright", browser_refused)
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+    for module in list(sys.modules.values()):
+        module_file = vars(module).get("__file__") if module is not None else None
+        if not isinstance(module_file, str) or not os.path.abspath(module_file).startswith(backend_dir):
+            continue
+        if os.path.abspath(module_file).startswith(backend_dir + "tests" + os.sep):
+            continue
+        for name in ("async_playwright", "sync_playwright"):
+            if name in vars(module):
+                monkeypatch.setattr(module, name, browser_refused)
+
     # Navigation classification is a provider boundary, not the subject of legacy
     # bot scenarios. Explicit navigation tests override this neutral response.
     import bot

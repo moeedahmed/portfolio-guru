@@ -138,10 +138,15 @@ def test_moeed_exact_year_resolves_on_qiat(level, expected):
     assert _stage_value_from_training_level(level, "QIAT") == expected
 
 
-def test_harris_accs_and_intermediate_resolve_to_year_buckets_on_qiat():
+def test_accs_on_qiat_leaves_the_individual_year_for_the_doctor():
     from bot import _stage_value_from_training_level
 
-    assert _stage_value_from_training_level("ACCS", "QIAT") == "ST1/CT1"
+    assert _stage_value_from_training_level("ACCS", "QIAT") == ""
+
+
+def test_intermediate_on_qiat_resolves_to_its_single_year():
+    from bot import _stage_value_from_training_level
+
     assert _stage_value_from_training_level("INTERMEDIATE", "QIAT") == "ST3/CT3"
 
 
