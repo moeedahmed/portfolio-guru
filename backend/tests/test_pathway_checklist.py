@@ -263,7 +263,7 @@ def test_landing_counts_all_open_items_and_all_scanned_categories():
     text = format_arcp_landing(assessment, check, today=TODAY)
     assert 'May 2027 panel · evidence due 17 Apr (28 weeks)' in text
     assert '*This year, signed off*' in text
-    assert '⬜ MSF   ⬜ Supervisor report   ⬜ ESR' in text
+    assert '⬜ MSF\n⬜ Supervisor report\n⬜ ESR' in text
     assert 'ESLEs 1 of 3 (one in PEM)' in text
     assert '*Still open in Kaizen*\n📝 9 to finish and send (drafts)\n⏳ 2 sent, waiting on an assessor' in text
     assert 'Ask your assessor about your Teaching Observation from Aug 2023' in text
