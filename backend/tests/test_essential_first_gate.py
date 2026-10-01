@@ -380,6 +380,8 @@ async def test_change_of_form_reassesses_against_the_new_form():
     sim.clear_messages()
     analyse = AsyncMock(return_value=_dops_draft())
     dops_update = sim._make_callback_update("FORM|DOPS")
+    # This choice belongs to the current change-form offer, not the retired list.
+    dops_update.callback_query.message.message_id = context.user_data["last_bot_msg_id"]
     assess = _assess(_all("DOPS", ESSENTIAL_PRESENT))
     with patch("bot.assess_form_essentials", new=assess), \
          patch("bot._analyse_selected_form", new=analyse):

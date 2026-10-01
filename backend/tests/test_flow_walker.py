@@ -33,6 +33,12 @@ def _last_button_rows(sim: BotSimulator):
                 [(button.text, button.callback_data) for button in row if button.callback_data]
                 for row in markup.inline_keyboard
             ]
+
+
+def _retry_payload(sim: BotSimulator):
+    """Click the actual emitted Retry, including its approval binding."""
+    return next(payload for row in _last_button_rows(sim) for _, payload in row
+                if payload.startswith("ACTION|retry_filing|"))
     return []
 
 
@@ -2535,7 +2541,7 @@ class TestFlowWalker:
              patch('bot.route_filing', new=route_filing), \
              patch('bot.compose_filing_recovery_copy', new=AsyncMock(return_value='')):
             first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
-            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+            second = await handle_callback(sim._make_callback_update(_retry_payload(sim)), context)
 
         assert first == AWAIT_APPROVAL
         assert route_filing.await_count == 2
@@ -2577,7 +2583,7 @@ class TestFlowWalker:
              patch('bot.route_filing', new=route_filing):
             first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
             before_retry_count = len(sim.messages_sent)
-            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+            second = await handle_callback(sim._make_callback_update(_retry_payload(sim)), context)
 
         retry_messages = sim.messages_sent[before_retry_count:]
         assert first == AWAIT_APPROVAL
@@ -2621,7 +2627,7 @@ class TestFlowWalker:
              patch('bot.route_filing', new=route_filing):
             first = await handle_approval_approve(sim._make_callback_update('APPROVE|draft'), context)
             before_retry_count = len(sim.messages_sent)
-            second = await handle_callback(sim._make_callback_update('ACTION|retry_filing'), context)
+            second = await handle_callback(sim._make_callback_update(_retry_payload(sim)), context)
 
         retry_messages = sim.messages_sent[before_retry_count:]
         assert first == AWAIT_APPROVAL

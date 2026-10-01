@@ -3,6 +3,7 @@
 Moeed, 2026-09-28. ``PG_PAYMENTS_ENABLED=1`` brings the paid plans back.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from telegram.ext import ConversationHandler
@@ -13,8 +14,118 @@ def beta_usage(tmp_path, monkeypatch):
     import usage
 
     monkeypatch.delenv("PG_PAYMENTS_ENABLED", raising=False)
+    monkeypatch.delenv("PG_FREE_TRIAL_ENABLED", raising=False)
     monkeypatch.setattr(usage, "DB_PATH", str(tmp_path / "usage.db"))
     return usage
+
+
+@pytest.fixture
+def trial_usage(beta_usage, monkeypatch):
+    monkeypatch.setenv("PG_PAYMENTS_ENABLED", "1")
+    monkeypatch.setenv("PG_FREE_TRIAL_ENABLED", "1")
+    clock = {"now": datetime(2026, 10, 1, 12, tzinfo=timezone.utc)}
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"].astimezone(tz) if tz else clock["now"].replace(tzinfo=None)
+
+    monkeypatch.setattr(beta_usage, "datetime", Clock)
+    return beta_usage, clock
+
+
+async def test_trial_starts_on_first_use_and_expires_at_exact_14_days(trial_usage):
+    usage, clock = trial_usage
+    assert await usage.get_trial_started_at(301) is None
+    assert await usage.check_can_file(301) == (True, 0, -1, "trial")
+    started = await usage.get_trial_started_at(301)
+    assert started == clock["now"]
+    for _ in range(8):
+        await usage.record_case_filed(301, "CBD")
+    clock["now"] = started + timedelta(days=14) - timedelta(microseconds=1)
+    assert await usage.check_can_file(301) == (True, 8, -1, "trial")
+    clock["now"] += timedelta(microseconds=1)
+    assert await usage.check_can_file(301) == (False, 8, 0, "trial")
+    clock["now"] += timedelta(days=40)
+    assert not (await usage.check_can_file(301))[0]
+    assert await usage.get_trial_started_at(301) == started
+
+
+@pytest.mark.parametrize("tier,limit", [("pro", 100), ("pro_plus", -1)])
+async def test_existing_subscribers_do_not_start_a_trial(trial_usage, tier, limit):
+    usage, clock = trial_usage
+    await usage.set_user_tier(302, tier)
+    assert await usage.check_can_file(302) == (True, 0, limit, tier)
+    clock["now"] += timedelta(days=30)
+    assert (await usage.check_can_file(302))[0]
+    assert await usage.get_trial_started_at(302) is None
+
+
+async def test_trial_cannot_cap_beta_or_enable_payments(trial_usage, monkeypatch):
+    usage, clock = trial_usage
+    await usage.set_beta_tester(303, True)
+    assert await usage.check_can_file(303) == (True, 0, -1, "beta")
+    assert await usage.get_trial_started_at(303) is None
+    monkeypatch.delenv("PG_PAYMENTS_ENABLED")
+    clock["now"] += timedelta(days=30)
+    assert await usage.check_can_file(304) == (True, 0, -1, "beta")
+    assert await usage.get_trial_started_at(304) is None
+    assert not usage.payments_enabled()
+
+
+async def test_trial_clock_is_not_restarted_by_concurrent_first_use(trial_usage):
+    import asyncio
+    usage, clock = trial_usage
+    assert all(row[0] for row in await asyncio.gather(*(usage.check_can_file(305) for _ in range(3))))
+    assert await usage.get_trial_started_at(305) == clock["now"]
+
+
+async def test_trial_flag_defaults_off_and_only_accepts_one(beta_usage, monkeypatch):
+    for value in (None, "0", "true"):
+        if value is None:
+            monkeypatch.delenv("PG_FREE_TRIAL_ENABLED", raising=False)
+        else:
+            monkeypatch.setenv("PG_FREE_TRIAL_ENABLED", value)
+        assert not beta_usage.free_trial_enabled()
+
+
+async def test_trial_read_only_access_check_does_not_start_clock(trial_usage):
+    usage, clock = trial_usage
+    assert not await usage.has_unlimited_access(306)
+    assert await usage.get_trial_started_at(306) is None
+    await usage.check_can_file(306)
+    assert await usage.has_unlimited_access(306)
+    clock["now"] += timedelta(days=14)
+    assert not await usage.has_unlimited_access(306)
+
+
+async def test_beta_access_overrides_an_expired_trial(trial_usage, monkeypatch):
+    usage, clock = trial_usage
+    await usage.check_can_file(307)
+    started = await usage.get_trial_started_at(307)
+    clock["now"] += timedelta(days=14)
+    assert not (await usage.check_can_file(307))[0]
+    monkeypatch.delenv("PG_PAYMENTS_ENABLED")
+    assert await usage.check_can_file(307) == (True, 0, -1, "beta")
+    assert await usage.get_trial_started_at(307) == started
+
+
+async def test_expired_trial_cannot_save_an_open_draft(trial_usage, monkeypatch):
+    usage, clock = trial_usage
+    import bot
+    await usage.check_can_file(308)
+    clock["now"] += timedelta(days=14)
+    context = _context()
+    context.user_data["draft_data"] = {"_type": "FORM", "form_type": "DOPS", "fields": {"summary": "synthetic"}}
+    update = _update()
+    update.effective_user.id = 308
+    update.callback_query = None
+    with patch("bot.route_filing", AsyncMock()) as file, patch("bot.get_credentials", return_value=("fake", "fake")):
+        await bot.handle_approval_approve(update, context)
+    file.assert_not_awaited()
+    assert context.user_data["draft_data"]
+    assert update.message.reply_text.await_args.args[0] == bot._TRIAL_EXPIRED_TEXT
+
 
 
 @pytest.mark.asyncio

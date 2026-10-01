@@ -27,6 +27,8 @@ def payload_branch(payload):
     if family == "PUSHBACK" and len(parts) >= 3:
         return "PUSHBACK|*|" + parts[2]
     if family == "ACTION" and len(parts) > 2:
+        if parts[1] == "retry_filing":
+            return "ACTION|retry_filing"
         if parts[1] == "health_queue":
             return "|".join(parts[:3]) + "|*"
         if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more"}:
@@ -47,7 +49,7 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-PRODUCER_DIGEST = '8ebf5646f7c81dec7ad44c879cb01eb69eea2d10d28065324ece6639cf2e8f4c'
+PRODUCER_DIGEST = 'ca5aef082591a524e4052491b5aa7ad8b959762106983585edbda3ffd7447a1b'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -191,7 +193,7 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '888501bc5a0d55247aa2857af5c6398750f3a2ee33a94f99bcd7006b232ca254'
+CATALOGUE_DIGEST = 'eb001420ccc79179514426ca46cb536d6276c0f2a8070c3ec0b54a663ccc0d2f'
 
 
 def requirements_digest(units):

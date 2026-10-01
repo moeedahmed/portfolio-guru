@@ -70,6 +70,7 @@ CONSTANT_KINDS = {
     "_RESET_KEPT_TEXT": "confirmation",
     "REMINDERS_OFF_TEXT": "confirmation",
     "_FILING_UNCERTAIN_TEXT": "error",
+    "_TRIAL_EXPIRED_TEXT": "error",
     "_OPEN_CASE_CHOICE_TEXT": "prompt",
     "_CONNECT_CHOICE_TEXT": "menu",
     "_LOGIN_REJECTED_TEXT": "error",

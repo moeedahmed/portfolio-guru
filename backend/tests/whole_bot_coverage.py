@@ -60,7 +60,7 @@ def registration_digest(slots):
 
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
-REGISTRATION_DIGEST = 'b657920654c0d9f0d3d965b8ab4c05d33804d9674c5f8eed7414a6ea59f71377'
+REGISTRATION_DIGEST = '12cef2eae2a86f61019e671f0325ede47a88ccd21f16a41ea1de0cd30e96ce60'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",

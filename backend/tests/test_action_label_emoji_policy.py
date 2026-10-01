@@ -275,6 +275,7 @@ async def test_dynamic_form_search_route_renders_compliant_labels(monkeypatch):
         async def reply_text(self, text, **kwargs):
             captured["text"] = text
             captured.update(kwargs)
+            return SimpleNamespace(message_id=10, chat_id=123)
 
     update = SimpleNamespace(
         message=Message(),

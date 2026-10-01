@@ -366,13 +366,13 @@ def _patch_extraction(monkeypatch_obj, case: CaseDefinition) -> None:
     monkeypatch_obj.setattr("bot.is_supported_document", lambda file_name: True)
 
 
-def _build_update_for_step(step: Step):
+def _build_update_for_step(step: Step, message_id: int | None = None):
     if step.text is not None:
         return {"text": step.text}, make_text_update(step.text)
     if step.command is not None:
         return {"command": step.command}, make_command_update(step.command)
     if step.callback is not None:
-        return {"callback": step.callback}, make_callback_update(step.callback)
+        return {"callback": step.callback}, make_callback_update(step.callback, message_id=message_id)
     if step.media_type is not None:
         return _build_media_update_for_step(step)
     raise ValueError(f"Step {step.label!r} must define text, command, or callback")
@@ -476,7 +476,15 @@ def _observe_user_data(app, user_id: int = 99999) -> tuple[str | None, dict[str,
 
 
 async def _run_step(app, collector, step: Step, user_id: int = 99999) -> StepObservation:
-    action_meta, update = _build_update_for_step(step)
+    # Golden-case choices tap the current displayed prompt, as Telegram does.
+    # Stale-button scenarios construct their own explicitly older message ids.
+    user_data = app.user_data.get(user_id) or {}
+    message_id = None
+    if step.callback and step.callback.startswith("FORM|"):
+        message_id = user_data.get("last_bot_msg_id")
+    elif step.callback and step.callback.startswith("DOCUSE|"):
+        message_id = (user_data.get("_pending_media_prompt") or {}).get("message_id")
+    action_meta, update = _build_update_for_step(step, message_id=message_id)
     _prepare_update(update, app.bot)
     collector.drain()
     collector.errors.clear()

@@ -295,7 +295,7 @@ class TestOfflineE2E:
 
         # Step 2: tap FORM|CBD button
         collector.sent.clear()
-        update2 = make_callback_update("FORM|CBD")
+        update2 = make_callback_update("FORM|CBD", message_id=app.user_data[TEST_USER.id]["last_bot_msg_id"])
         _prepare_update(update2, app.bot)
         await app.process_update(update2)
 
@@ -375,7 +375,7 @@ class TestOfflineE2E:
 
         # Step 2: tap FORM|CBD → enters AWAIT_APPROVAL with the draft-first review
         collector.sent.clear()
-        update2 = make_callback_update("FORM|CBD")
+        update2 = make_callback_update("FORM|CBD", message_id=app.user_data[TEST_USER.id]["last_bot_msg_id"])
         _prepare_update(update2, app.bot)
         await app.process_update(update2)
 
@@ -469,7 +469,7 @@ class TestOfflineE2E:
         _prepare_update(update1, app.bot)
         await app.process_update(update1)
 
-        update2 = make_callback_update("FORM|CBD")
+        update2 = make_callback_update("FORM|CBD", message_id=app.user_data[TEST_USER.id]["last_bot_msg_id"])
         _prepare_update(update2, app.bot)
         await app.process_update(update2)
 
@@ -483,8 +483,11 @@ class TestOfflineE2E:
         assert not app.user_data[TEST_USER.id].get("filing_in_progress")
 
         # Retry → must reach route_filing a second time (not blocked by guard).
+        retry_payload = next(button.callback_data for record in reversed(collector.sent)
+                             for row in getattr(record.get("reply_markup"), "inline_keyboard", [])
+                             for button in row if (button.callback_data or "").startswith("ACTION|retry_filing|"))
         collector.sent.clear()
-        update4 = make_callback_update("ACTION|retry_filing")
+        update4 = make_callback_update(retry_payload)
         _prepare_update(update4, app.bot)
         await app.process_update(update4)
 
@@ -881,6 +884,12 @@ async def test_draft_review_corrections_restart_and_explicit_exit(offline_app, m
             message = update.callback_query.message
             message._unfreeze()
             message.message_id = data["gathering_msg_id"]
+            message._freeze()
+        if update.callback_query and update.callback_query.data.startswith("FORM|"):
+            # A current form tap names the actual displayed form-list message.
+            message = update.callback_query.message
+            message._unfreeze()
+            message.message_id = data["last_bot_msg_id"]
             message._freeze()
         await app.process_update(update)
         records.append({

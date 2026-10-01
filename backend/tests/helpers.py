@@ -83,13 +83,14 @@ def make_callback_update(
     data: str,
     user: User | None = None,
     message_text: str = "prev",
+    message_id: int | None = None,
 ) -> Update:
     """Build a real Update containing a CallbackQuery."""
     user = user or TEST_USER
     chat = TEST_CHAT
     # The message that the button was attached to
     msg = Message(
-        message_id=_next_msg_id(),
+        message_id=message_id if message_id is not None else _next_msg_id(),
         date=datetime.datetime.now(tz=datetime.timezone.utc),
         chat=chat,
         from_user=BOT_USER,
@@ -174,5 +175,5 @@ def isolate_bot_storage(monkeypatch, tmp_path, *, audit_path=None):
 
 
 def unstamp(callback_data):
-    """Drop the per-case token from Save/Cancel buttons (bot._case_token)."""
-    return re.sub(r"^(APPROVE|CANCEL)\|draft\|[0-9a-f]+$", r"\1|draft", callback_data or "")
+    """Normalise Save/Cancel/Retry labels for presentation assertions only."""
+    return re.sub(r"^((?:APPROVE|CANCEL)\|draft|ACTION\|retry_filing)\|[0-9a-f]+$", r"\1", callback_data or "")

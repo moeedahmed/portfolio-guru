@@ -36,6 +36,11 @@ def payments_enabled() -> bool:
     return os.environ.get("PG_PAYMENTS_ENABLED", "").strip() == "1"
 
 
+def free_trial_enabled() -> bool:
+    """Opt-in launch entitlement; never switches payments on by itself."""
+    return os.environ.get("PG_FREE_TRIAL_ENABLED", "").strip() == "1"
+
+
 async def _ensure_db():
     """Create tables if they don't exist."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -89,6 +94,12 @@ async def _ensure_db():
             await db.execute("ALTER TABLE user_profiles ADD COLUMN is_beta INTEGER DEFAULT 0")
         except Exception:
             pass  # column already exists
+        # Local additive schema only; no cloud migration or trial clock in beta.
+        try:
+            await db.execute("ALTER TABLE user_profiles ADD COLUMN trial_started_at TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc):
+                raise
         await db.commit()
 
 
@@ -243,7 +254,45 @@ async def has_unlimited_access(user_id: int) -> bool:
     """True for Unlimited subscribers and beta users (everyone while payments are off)."""
     if await is_beta_tester(user_id):
         return True
-    return await get_user_tier(user_id) == "pro_plus"
+    tier = await get_user_tier(user_id)
+    if tier == "pro_plus":
+        return True
+    if tier == "free" and free_trial_enabled():
+        started = await get_trial_started_at(user_id)
+        return started is not None and datetime.now(timezone.utc) < started + timedelta(days=14)
+    return False
+
+
+async def get_trial_started_at(user_id: int) -> datetime | None:
+    """Read the persisted UTC first-use clock without starting a trial."""
+    await _ensure_db()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT trial_started_at FROM user_profiles WHERE telegram_user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+    return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+
+async def _start_trial_on_first_use(user_id: int) -> datetime:
+    """Atomically set first eligible filing use once, including concurrent turns."""
+    await _ensure_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO user_profiles (telegram_user_id, trial_started_at)
+               VALUES (?, ?)
+               ON CONFLICT(telegram_user_id) DO UPDATE SET
+                   trial_started_at = COALESCE(user_profiles.trial_started_at, excluded.trial_started_at)""",
+            (user_id, now),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT trial_started_at FROM user_profiles WHERE telegram_user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return datetime.fromisoformat(row[0])
 
 
 async def check_can_file(user_id: int) -> tuple:
@@ -257,6 +306,10 @@ async def check_can_file(user_id: int) -> tuple:
     tier = await get_user_tier(user_id)
     limit = await get_monthly_limit(tier)
     used = await get_cases_this_month(user_id)
+    if tier == "free" and free_trial_enabled():
+        started = await _start_trial_on_first_use(user_id)
+        active = datetime.now(timezone.utc) < started + timedelta(days=14)
+        return (active, used, -1 if active else 0, "trial")
     if limit == -1:
         return (True, used, limit, tier)
     return (used < limit, used, limit, tier)
