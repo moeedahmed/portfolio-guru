@@ -610,7 +610,7 @@ async def test_chase_controls_are_answered_without_recording(scenario, monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("payload", ["REMIND|menu", "REMIND|level|urgent", "REMIND|mute|digest", "REMIND|bogus"])
+@pytest.mark.parametrize("payload", ["REMIND|menu", "REMIND|new", "REMIND|level|urgent", "REMIND|mute|digest", "REMIND|bogus"])
 async def test_reminder_controls_touch_only_local_reminder_state(scenario, monkeypatch, tmp_path, payload):
     import proactive_reminders
     monkeypatch.setenv("PORTFOLIO_GURU_PROACTIVE_PATH", str(tmp_path / "reminders.json"))

@@ -1184,7 +1184,7 @@ def _reminder_keyboard(kind: str) -> InlineKeyboardMarkup:
     )
     return InlineKeyboardMarkup([
         [first, InlineKeyboardButton("🔕 Less like this", callback_data=f"REMIND|mute|{kind}")],
-        [InlineKeyboardButton("⚙️ Reminder settings", callback_data="REMIND|menu")],
+        [InlineKeyboardButton("⚙️ Reminder settings", callback_data="REMIND|new")],
     ])
 
 
@@ -1318,13 +1318,15 @@ def _reminder_settings_view(user_id: int):
     paused = state.get("quiet_until")
     paused_line = ""
     if paused and str(paused) >= _date.today().isoformat():
-        paused_line = f"\nPaused until {_date.fromisoformat(str(paused)).strftime('%-d %b')}."
+        paused_line = f"\nPaused until {_date.fromisoformat(str(paused)).strftime('%-d %b')}"
     text = (
         "🔔 *Reminders*\n\n"
-        f"Currently: {level}.{paused_line}\n\n"
-        "Normal: at most 2 a month, weekly in the last 3 months before your "
-        "ARCP or appraisal, and twice a week in the last 4 weeks.\n"
-        "Only urgent: just things like evidence waiting months for sign-off."
+        f"Currently: {level}{paused_line}\n\n"
+        "*Normal*\n"
+        "At most 2 a month. Weekly in the last 3 months before your ARCP or "
+        "appraisal, and twice a week in the last 4 weeks.\n\n"
+        "*Only urgent*\n"
+        "Just things like evidence waiting months for sign-off."
     )
     keyboard = InlineKeyboardMarkup([
         [
@@ -1388,9 +1390,27 @@ async def handle_reminder_callback(update: Update, context: ContextTypes.DEFAULT
         state["quiet_until"] = (today + _td(days=14)).isoformat()
         pr.save_state(user_id, state)
         await query.answer("Paused for 2 weeks.")
+    elif action == "new":
+        # Opened from a reminder: settings arrive as a new message so the
+        # reminder stays in the chat to read later.
+        pr.save_state(user_id, state)
+        await query.answer()
+        text, keyboard = _reminder_settings_view(user_id)
+        await context.bot.send_message(
+            chat_id=user_id, text=text, parse_mode="Markdown", reply_markup=keyboard
+        )
+        return
     elif action == "menu":
         pr.save_state(user_id, state)
         await query.answer()
+        shown = getattr(query.message, "text", None) or ""
+        if not (shown.startswith(_SETTINGS_TITLE) or shown.startswith("🔔")):
+            # An older reminder carried this button: never overwrite it.
+            text, keyboard = _reminder_settings_view(user_id)
+            await context.bot.send_message(
+                chat_id=user_id, text=text, parse_mode="Markdown", reply_markup=keyboard
+            )
+            return
     else:
         await query.answer("That button has expired. Open /settings for reminders.")
         return
@@ -9730,9 +9750,11 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
             f"📚 Curriculum: {curriculum_label}\n\n"
             f"Pick what you want to change.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🎓 Portfolio: {training_level}", callback_data="ACTION|change_level")],
-                [InlineKeyboardButton(f"📊 Pathway: {pathway_label}", callback_data="ACTION|change_pathway")],
-                [InlineKeyboardButton(f"📚 Curriculum: {curriculum_label}", callback_data="ACTION|change_curriculum")],
+                [
+                    InlineKeyboardButton("🎓 Portfolio", callback_data="ACTION|change_level"),
+                    InlineKeyboardButton("📊 Pathway", callback_data="ACTION|change_pathway"),
+                ],
+                [InlineKeyboardButton("📚 Curriculum", callback_data="ACTION|change_curriculum")],
                 [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
             ]),
         )
