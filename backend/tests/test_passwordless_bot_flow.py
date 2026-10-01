@@ -89,7 +89,7 @@ async def test_choosing_passwordless_sends_a_one_time_sign_in_link(offered, monk
     urls = [b.url for row in markup.inline_keyboard for b in row if b.url]
     assert urls == ["https://connect.emgurus.com/handoff#token"]
     assert ("✅ I've signed in", "ACTION|passwordless_done") in sim.get_last_buttons()
-    assert "login isn't stored" in sim.get_last_text()
+    assert "We don't store your password; we keep only a sign-in that lasts about a day." in sim.get_last_text()
 
 
 @pytest.mark.asyncio

@@ -2844,7 +2844,7 @@ _CONNECT_CHOICE_TEXT = (
     "🔑 *Share my login (recommended)*\n"
     "Type your email and password here. Stays connected. Stored encrypted, deleted with /reset.\n\n"
     "🔒 *Sign in on Kaizen's page*\n"
-    "Not in this chat, and your login isn't stored. Lasts about a day."
+    "You type your password on Kaizen's own page, via our browser. Never stored. Lasts about a day."
 )
 _BTN_CONNECT_PASSWORDLESS = InlineKeyboardButton(
     "🔒 Sign in on Kaizen's page",
@@ -2881,7 +2881,7 @@ def _login_rejected_prompt(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
 _PASSWORDLESS_LINK_TEXT = (
     "🔒 *Sign in to Kaizen*\n\n"
     "Tap *Open Kaizen sign-in*. I'll confirm here as soon as it works.\n\n"
-    "_Link lasts 10 minutes. Your login isn't stored; sign-in lasts about a day._"
+    "_Link lasts 10 minutes. We don't store your password; we keep only a sign-in that lasts about a day._"
 )
 _PASSWORDLESS_LINK_ENDED_TEXT = (
     "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
@@ -17945,8 +17945,8 @@ _PRIVACY_DETAILS_TEXT = (
 )
 
 _PRIVACY_PASSWORDLESS_LINE = (
-    "\n\nSign in on Kaizen's page: you sign in there, not in this chat. Your login "
-    "isn't stored; I keep only the "
+    "\n\nSign in on Kaizen's page: you type your password into Kaizen's own login page "
+    "through our browser, not in this chat. We never store it; I keep only the "
     "signed-in session, encrypted, until Kaizen ends it (about a day)."
 )
 
