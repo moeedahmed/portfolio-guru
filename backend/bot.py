@@ -8663,7 +8663,8 @@ VOICE_CHOICE_FRESH_COPY = (
 )
 
 VOICE_CHOICE_REBUILD_COPY = (
-    "✍️ Your writing style is active.\n\n"
+    "✍️ *Writing style*\n\n"
+    "Currently: Active\n\n"
     "Want to rebuild it? Pick a source:"
 )
 

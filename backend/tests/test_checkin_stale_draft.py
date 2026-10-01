@@ -180,7 +180,7 @@ def test_settings_shows_reminders_line_and_button(monkeypatch, tmp_path):
     monkeypatch.delenv("PG_ENABLE_PROACTIVE", raising=False)
     text, keyboard = bot._settings_view_components(42)
     assert "Reminders: On" in text
-    assert any(b.callback_data == "REMIND|new" for row in keyboard.inline_keyboard for b in row)
+    assert any(b.callback_data == "REMIND|menu" for row in keyboard.inline_keyboard for b in row)
     pr.save_state(42, {**pr.empty_state(), "level": "off"})
     text, _ = bot._settings_view_components(42)
     assert "Reminders: Off" in text
