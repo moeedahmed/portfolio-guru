@@ -192,12 +192,13 @@ if [ -n "$PG_ENABLE_SIGNOFF_CHASE" ]; then
 else
   echo "Sign-off chase: off (set PG_ENABLE_SIGNOFF_CHASE=1 to enable)"
 fi
-# Daily proactive reminders: piloted on Moeed's own account only, in dry run
-# (decides and logs what it would send, sends nothing). Moeed, 2026-09-29.
+# Daily proactive reminders: piloted on Moeed's own account only. Dry run
+# (2026-09-29) proved clean; real sends switched on for that account only
+# (Moeed, 2026-10-01). Set PG_PROACTIVE_DRY_RUN=1 to go back to logging only.
 # Fail closed: an empty allowlist would mean every doctor, so it switches the
 # daily check off instead.
 export PG_ENABLE_PROACTIVE="${PG_ENABLE_PROACTIVE-1}"
-export PG_PROACTIVE_DRY_RUN="${PG_PROACTIVE_DRY_RUN-1}"
+export PG_PROACTIVE_DRY_RUN="${PG_PROACTIVE_DRY_RUN-}"
 export PG_PROACTIVE_USER_IDS="${PG_PROACTIVE_USER_IDS-6912896590}"
 if [ -n "$PG_ENABLE_PROACTIVE" ] && [ -z "$PG_PROACTIVE_USER_IDS" ]; then
   echo "Proactive reminders: no allowlist set, switching off" >&2
