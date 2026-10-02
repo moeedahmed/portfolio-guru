@@ -41,6 +41,7 @@ _ADMIN_TITLE_PREFIXES = ("add a ",)
 MAX_ENTRIES_SCANNED = 20
 MIN_FINISHED_SAMPLES = 3
 READ_TIMEOUT_SECONDS = 180
+CLOSE_TIMEOUT_SECONDS = 10
 
 
 class SampleWindow(str, Enum):
@@ -257,7 +258,10 @@ async def _read_as_user(telegram_user_id: int, limit: int) -> dict:
 
         return await _read_entries(page, limit)
     finally:
-        await _close_session(context, pw)
+        try:
+            await asyncio.wait_for(_close_session(context, pw), timeout=CLOSE_TIMEOUT_SECONDS)
+        except Exception:
+            pass
 
 
 async def sample_kaizen_entries(

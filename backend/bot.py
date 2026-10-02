@@ -9113,6 +9113,9 @@ def _voice_post_activation_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+VOICE_PREVIEW_TIMEOUT_SECONDS = 25
+
+
 async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Build, save, and activate the voice profile from collected examples.
 
@@ -9143,17 +9146,27 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("voice_profile_retry_source", None)
         context.user_data.pop("voice_kaizen_path_started", None)
 
-        sample_draft = _clean_voice_preview_text(await _generate_voice_preview(profile_json))
+        # The profile is already active; an optional demo must not block success.
+        sample_draft = ""
+        try:
+            sample_draft = _clean_voice_preview_text(await asyncio.wait_for(
+                _generate_voice_preview(profile_json), timeout=VOICE_PREVIEW_TIMEOUT_SECONDS
+            ))
+        except Exception as exc:
+            logger.warning("Voice preview unavailable after activation: %s", type(exc).__name__)
         example_count = len(examples)
+        activation_text = (
+            f"✅ Voice profile activated. Future drafts will match your writing voice.\n\n"
+            f"I learned your voice from patterns across all {example_count} examples combined — "
+            f"not from any single case."
+        )
+        if sample_draft:
+            activation_text += f"\n\n🔍 Here's a sample draft as a demo of what it sounds like:\n\n{sample_draft}"
 
         # No user input between "Analysing…" and the preview — always edit.
         await _flow_edit(
             update, context,
-            f"✅ Voice profile activated. Future drafts will match your writing voice.\n\n"
-            f"I learned your voice from patterns across all {example_count} examples combined — "
-            f"not from any single case.\n\n"
-            f"🔍 Here's a sample draft as a demo of what it sounds like:\n\n"
-            f"{sample_draft}",
+            activation_text,
             reply_markup=_voice_post_activation_keyboard(),
             flow_key="voice",
         )

@@ -5411,6 +5411,40 @@ class TestVoiceProfileTwoPathFlow:
         assert 'not quite' not in text.lower()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('preview_fails', ['hang', 'error'])
+    async def test_build_voice_profile_activates_when_preview_fails(self, preview_fails):
+        sim = BotSimulator()
+        update = sim._make_callback_update('VOICE|done')
+        context = sim._make_context()
+        context.user_data['voice_examples'] = ['one', 'two', 'three']
+
+        async def preview(_profile):
+            if preview_fails == 'error':
+                raise RuntimeError('Preview unavailable')
+            await asyncio.Event().wait()
+
+        with patch(
+            'voice_profile.generate_voice_profile',
+            new_callable=AsyncMock,
+            return_value='{"voice_summary": "x"}',
+        ), patch('bot._generate_voice_preview', side_effect=preview), \
+             patch('bot.VOICE_PREVIEW_TIMEOUT_SECONDS', 0.01), \
+             patch('bot.store_voice_profile') as store:
+            result = await asyncio.wait_for(bot._build_voice_profile(update, context), timeout=1)
+
+        store.assert_called_once_with(sim.user_id, '{"voice_summary": "x"}', 3)
+        assert result == ConversationHandler.END
+        assert sim.get_last_text() == (
+            '✅ Voice profile activated. Future drafts will match your writing voice.\n\n'
+            'I learned your voice from patterns across all 3 examples combined — '
+            'not from any single case.'
+        )
+        assert {data for _, data in sim.get_last_buttons()} == {'ACTION|file', 'ACTION|voice'}
+        assert 'voice_examples' not in context.user_data
+        assert 'pending_voice_profile' not in context.user_data
+        assert '_flow_anchor_voice' not in context.user_data
+
+    @pytest.mark.asyncio
     async def test_build_voice_profile_preview_frames_sample_as_demo_from_combined_samples(self):
         """Preview copy must explain the sample is a demo and the profile was
         built from combined writing patterns, not that one example/case."""
@@ -5626,6 +5660,30 @@ class TestVoiceProfileTwoPathFlow:
         m['close'].assert_awaited_once()
         assert result.status == SamplerStatus.OK
         assert result.samples == ['Mine']
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('read_hangs', [False, True])
+    async def test_voice_sampler_bounds_hanging_session_cleanup(self, read_hangs):
+        from voice_sampler import SamplerStatus, sample_kaizen_entries
+
+        async def hang(*_args):
+            await asyncio.Event().wait()
+
+        stack, m = self._patch_kaizen_bootstrap(cached=True, credentials=None)
+        with stack, patch('voice_sampler.READ_TIMEOUT_SECONDS', 0.05), \
+             patch('voice_sampler.CLOSE_TIMEOUT_SECONDS', 0.01):
+            m['close'].side_effect = hang
+            if read_hangs:
+                m['read'].side_effect = hang
+            result = await asyncio.wait_for(sample_kaizen_entries(123), timeout=1)
+
+        m['close'].assert_awaited_once()
+        if read_hangs:
+            assert result.status == SamplerStatus.NOT_AVAILABLE
+            assert result.reason == 'timeout'
+        else:
+            assert result.status == SamplerStatus.OK
+            assert result.samples == ['Mine']
 
     @pytest.mark.asyncio
     async def test_voice_sampler_falls_back_to_saved_password(self):
