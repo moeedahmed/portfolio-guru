@@ -17,7 +17,7 @@ import pytest
 import ai_declaration
 from ai_declaration import (
     DECLARATION_FIELD_PRIORITY,
-    DEFAULT_DECLARATION_LABEL,
+    DEFAULT_DECLARATION_TEXT,
     apply_ai_declaration,
     declaration_block,
     declaration_target_field,
@@ -100,7 +100,7 @@ def test_declaration_never_lands_in_the_timeline_description_or_a_date_field():
     for key, value in fields.items():
         if key == "reflection":
             continue
-        assert DEFAULT_DECLARATION_LABEL not in str(value), f"declaration leaked into {key}"
+        assert DEFAULT_DECLARATION_TEXT not in str(value), f"declaration leaked into {key}"
 
 
 def test_a_form_with_several_narrative_fields_declares_once_in_one_field():
@@ -116,9 +116,9 @@ def test_a_form_with_several_narrative_fields_declares_once_in_one_field():
     })
 
     assert meta["field"] == "reflection"
-    declared_in = [k for k, v in fields.items() if DEFAULT_DECLARATION_LABEL in str(v)]
+    declared_in = [k for k, v in fields.items() if DEFAULT_DECLARATION_TEXT in str(v)]
     assert declared_in == ["reflection"]
-    assert fields["reflection"].count(DEFAULT_DECLARATION_LABEL) == 1
+    assert fields["reflection"].count(DEFAULT_DECLARATION_TEXT) == 1
 
 
 def test_procedural_log_declares_in_its_reflective_comments():
@@ -165,7 +165,7 @@ def test_form_with_no_narrative_field_is_filed_without_a_declaration():
 
     assert meta["declared"] is False
     assert meta["reason"] == "no_narrative_field"
-    assert not any(DEFAULT_DECLARATION_LABEL in str(value) for value in fields.values())
+    assert not any(DEFAULT_DECLARATION_TEXT in str(value) for value in fields.values())
 
 
 # ── Idempotency and guards ───────────────────────────────────────────────────
@@ -180,7 +180,7 @@ def test_refiling_an_already_declared_draft_does_not_declare_twice():
 
     assert meta["declared"] is False
     assert meta["reason"] == "already_declared"
-    assert twice["reflection"].count(DEFAULT_DECLARATION_LABEL) == 1
+    assert twice["reflection"].count(DEFAULT_DECLARATION_TEXT) == 1
 
 
 def test_declaration_is_not_written_into_an_empty_reflection():
@@ -236,7 +236,7 @@ def test_draft_preview_shows_the_exact_declaration_before_approval():
     preview = _format_draft_preview(draft)
 
     assert ai_declaration.declaration_text() in preview
-    assert ai_declaration.declaration_label() in preview
+    assert "AI use declaration" not in preview
 
 
 def test_regeneration_prompt_does_not_carry_the_declaration_boilerplate():
@@ -252,7 +252,7 @@ def test_regeneration_prompt_does_not_carry_the_declaration_boilerplate():
     prompt_view = _format_draft_preview(draft, include_safety_layer=False)
 
     assert ai_declaration.declaration_text() not in prompt_view
-    assert DEFAULT_DECLARATION_LABEL not in prompt_view
+    assert DEFAULT_DECLARATION_TEXT not in prompt_view
 
 
 def test_preview_does_not_repeat_a_declaration_already_in_the_entry():
@@ -277,7 +277,7 @@ def test_preview_does_not_repeat_a_declaration_already_in_the_entry():
     assert preview.count(ai_declaration.declaration_text()) == 1, (
         "the declaration is shown twice in the preview"
     )
-    assert preview.count(DEFAULT_DECLARATION_LABEL) == 1
+    assert preview.count(DEFAULT_DECLARATION_TEXT) == 1
     # The one that survives is the real entry text, not the appended note.
     assert "saved with this entry" not in preview
 
@@ -291,7 +291,7 @@ def test_filing_an_already_declared_draft_adds_no_second_copy():
 
     assert meta["declared"] is False
     assert meta["reason"] == "already_declared"
-    assert fields["learning_points"].count(DEFAULT_DECLARATION_LABEL) == 1
+    assert fields["learning_points"].count(DEFAULT_DECLARATION_TEXT) == 1
 
 
 def test_draft_preview_omits_the_declaration_when_nothing_will_be_declared():

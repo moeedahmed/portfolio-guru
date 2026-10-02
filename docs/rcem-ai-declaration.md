@@ -48,13 +48,12 @@ sentence are runtime-overridable — no code change needed.
 | Variable                  | Effect                                                     |
 | ------------------------- | ---------------------------------------------------------- |
 | `PG_AI_DECLARATION`       | `0`/`false`/`no`/`off` disables the declaration entirely   |
-| `PG_AI_DECLARATION_LABEL` | Overrides the section label (default `AI use declaration`) |
+| `PG_AI_DECLARATION_LABEL` | Optional section label (default: none) |
 | `PG_AI_DECLARATION_TEXT`  | Overrides the sentence                                     |
 
 Default text:
 
-> AI use declaration: AI was used to help structure and edit this entry. The
-> content, accuracy and reflective insight are my own.
+> AI was used to help structure and edit this entry.
 
 An email asking RCEM for preferred wording has been drafted. If they reply with
 specific text, set `PG_AI_DECLARATION_TEXT` and update the default here.

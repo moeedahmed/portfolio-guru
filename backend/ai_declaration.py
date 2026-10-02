@@ -40,14 +40,14 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DECLARATION_LABEL = "AI use declaration"
+# Drafts no longer carry a label; this stays only so entries filed under the old
+# "AI use declaration:" wording are recognised and never declared twice.
+_LEGACY_DECLARATION_LABEL = "AI use declaration"
+DEFAULT_DECLARATION_LABEL = ""
 # The sentence rcem_ai_policy appended before it deferred to this module; drafts
 # restored from before that change must not be declared a second time.
 _LEGACY_REFLECTION_SENTENCE = "ai was used to help structure and edit this reflection."
-DEFAULT_DECLARATION_TEXT = (
-    "AI was used to help structure and edit this entry. "
-    "The content, accuracy and reflective insight are my own."
-)
+DEFAULT_DECLARATION_TEXT = "AI was used to help structure and edit this entry."
 
 _DISABLED_VALUES = {"0", "false", "no", "off"}
 
@@ -95,7 +95,8 @@ def declaration_text() -> str:
 
 def declaration_block() -> str:
     """The exact text appended to the entry's narrative field."""
-    return f"{declaration_label()}: {declaration_text()}"
+    label = declaration_label()
+    return f"{label}: {declaration_text()}" if label else declaration_text()
 
 
 def contains_declaration(value: Any) -> bool:
@@ -108,10 +109,11 @@ def contains_declaration(value: Any) -> bool:
     if not text.strip():
         return False
     lowered = text.lower()
+    label = declaration_label().lower()
     return (
-        f"{declaration_label().lower()}:" in lowered
+        (bool(label) and f"{label}:" in lowered)
         or declaration_text().lower() in lowered
-        or DEFAULT_DECLARATION_LABEL.lower() + ":" in lowered
+        or _LEGACY_DECLARATION_LABEL.lower() + ":" in lowered
         or _LEGACY_REFLECTION_SENTENCE in lowered
     )
 

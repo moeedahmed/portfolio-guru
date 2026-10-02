@@ -20,7 +20,7 @@ it never submits or signs them.
 | AI may structure and edit a doctor's reflection | Drafting and Quick Improve remain available after personal reflective input is detected | `backend/rcem_ai_policy.py`; approval flow in `backend/bot.py` |
 | AI must not replace authentic reflection | A deterministic source gate blocks save and Quick Improve until the doctor's words include learning, interpretation, reaction, or an intended change | `has_personal_reflective_input`; `_draft_needs_reflection_detail_before_save` |
 | Do not fabricate experiences or reflections | Existing extraction prompts prohibit invented facts; the new gate does not ask a model to judge its own authenticity | `backend/extractor.py`; `backend/rcem_ai_policy.py` |
-| Declare AI use within the log | Before filing, one populated reflection field receives: "AI was used to help structure and edit this reflection." | `with_ai_use_declaration`; `_with_rcem_ai_declaration` |
+| Declare AI use within the log | Before filing, one populated reflection field receives: "AI was used to help structure and edit this entry." | `with_ai_use_declaration`; `_with_rcem_ai_declaration` |
 | Resident remains accountable | Every reflective-draft preview states that the doctor remains responsible for accuracy, authenticity, and insight | `_draft_transparency_layer` |
 | Human critical input before submission | Save is hidden and guarded until personal reflection is present; the full draft still needs explicit approval and is saved as a Kaizen draft only | approval flow in `backend/bot.py` |
 
