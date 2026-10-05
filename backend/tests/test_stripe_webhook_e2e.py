@@ -20,6 +20,7 @@ import os
 import sys
 
 import pytest
+from hypothesis import example, given, settings, strategies as st
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -199,3 +200,123 @@ def test_create_checkout_session_is_retired(client, monkeypatch, hub_user_id):
     assert resp.json()["detail"] == "Web checkout has been retired; upgrade in the Telegram bot."
     mirror.assert_not_called()
     checkout.assert_not_called()
+
+
+# Each example owns its database and patches: Hypothesis must not reuse a
+# function-scoped pytest fixture's mutable state between generated schedules.
+async def _assert_paid_delivery_schedule(order, batch_size, *, subscription_update=False):
+    import asyncio
+    import json
+    import sqlite3
+    from tempfile import TemporaryDirectory
+    from unittest.mock import Mock
+
+    import httpx
+    import supabase_sync
+
+    with TemporaryDirectory(prefix="pg-stripe-property-") as directory, pytest.MonkeyPatch.context() as mp:
+        async with asyncio.timeout(3):
+            mp.setattr(usage, "DB_PATH", os.path.join(directory, "usage.db"))
+            mp.setattr(stripe_handler, "PRO_PLUS_PRICE_ID", "price_unlimited_test")
+            mp.setattr(webhook_server, "STRIPE_WEBHOOK_SECRET", "whsec_offline")
+            mp.setattr(webhook_server, "TELEGRAM_BOT_TOKEN", "fake")
+            mp.setattr(supabase_sync, "mirror_tier", Mock())
+            await usage.set_user_tier(42, "free", "cus_test", "sub_test")
+            await usage.set_user_tier(43, "free", "cus_other", "sub_other")
+
+            events = [
+                {"id": "evt_checkout", "type": "checkout.session.completed",
+                 "data": {"object": {"metadata": {"telegram_user_id": "42"},
+                                     "customer": "cus_test", "subscription": "sub_test"}}},
+                {"id": "evt_paid", "type": "invoice.paid",
+                 "data": {"object": {"customer": "cus_test", "subscription": "sub_test"}}},
+                {"id": "evt_succeeded", "type": "invoice.payment_succeeded",
+                 "data": {"object": {"customer": "cus_test", "subscription": "sub_test"}}},
+            ]
+            if subscription_update:
+                events.append({"id": "evt_updated", "type": "customer.subscription.updated",
+                               "data": {"object": _subscription()}})
+            mp.setattr(stripe_handler.stripe.Webhook, "construct_event",
+                       lambda payload, sig, secret: json.loads(payload))
+            mp.setattr(stripe_handler.stripe.Subscription, "retrieve",
+                       lambda subscription_id: _subscription())
+
+            # Webhook deliveries acknowledge an existing payment. Any attempt to
+            # create another payment/checkout is a failure, even if caught upstream.
+            charge_calls = []
+            def refuse_charge(*args, **kwargs):
+                charge_calls.append((args, kwargs))
+                raise AssertionError("Webhook must never initiate a charge")
+            for boundary in (stripe_handler.stripe.checkout.Session,
+                             stripe_handler.stripe.PaymentIntent, stripe_handler.stripe.Charge):
+                mp.setattr(boundary, "create", refuse_charge)
+
+            transitions, welcomed = [], []
+            real_set_tier = stripe_handler.set_user_tier
+            async def observe_tier(user_id, tier, **kwargs):
+                previous = await real_set_tier(user_id, tier, **kwargs)
+                if previous != tier:
+                    transitions.append((user_id, previous, tier))
+                return previous
+            async def capture_welcome(user_id, text):
+                welcomed.append((user_id, text))
+            mp.setattr(stripe_handler, "set_user_tier", observe_tier)
+            mp.setattr(webhook_server, "_send_telegram_message", capture_welcome)
+
+            real_seen = stripe_handler.has_processed_stripe_event
+            barrier = None
+            async def seen_before_processing(event_id):
+                seen = await real_seen(event_id)
+                if barrier is not None:
+                    # Force both copies to read before either can mark processed.
+                    # This is a real DB read, not a fake idempotency implementation.
+                    await barrier.wait()
+                return seen
+            mp.setattr(stripe_handler, "has_processed_stripe_event", seen_before_processing)
+
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=webhook_server.app),
+                                         base_url="http://offline") as http:
+                async def deliver(index):
+                    response = await http.post("/webhook/stripe", json=events[index],
+                                               headers={"stripe-signature": "offline"})
+                    assert response.status_code == 200, response.text
+                    assert response.json()["action"] in {"upgraded", "updated", "duplicate"}
+
+                # Always include actual overlap of a replay, plus generated order
+                # and batch boundaries. There are no timing waits or retries.
+                barrier = asyncio.Barrier(2)
+                await asyncio.gather(deliver(order[0]), deliver(order[0]))
+                barrier = None
+                for start in range(1, len(order), batch_size):
+                    await asyncio.gather(*(deliver(i) for i in order[start:start + batch_size]))
+                await asyncio.gather(*(deliver(i) for i in order))
+
+            assert await usage.get_user_tier(42) == "pro_plus"
+            assert await usage.get_user_tier(43) == "free"
+            assert transitions == [(42, "free", "pro_plus")], transitions
+            assert [user_id for user_id, _ in welcomed] == [42], welcomed
+            assert "Welcome" in welcomed[0][1]
+            assert charge_calls == []
+            with sqlite3.connect(usage.DB_PATH) as db:
+                recorded = db.execute("SELECT event_id FROM stripe_webhook_events").fetchall()
+            assert {row[0] for row in recorded} == {events[i]["id"] for i in order}
+            assert len(recorded) == len({events[i]["id"] for i in order})
+
+
+@pytest.mark.asyncio
+@settings(max_examples=12, derandomize=True, database=None, deadline=None)
+@given(order=st.permutations((0, 1, 2)), batch_size=st.integers(1, 3))
+async def test_paid_webhook_reordering_and_concurrent_replays_upgrade_and_welcome_once(order, batch_size):
+    await _assert_paid_delivery_schedule(order, batch_size)
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True, raises=AssertionError,
+    reason="Known bug: subscription.updated upgrades without welcoming; later paid events suppress the welcome",
+)
+@settings(max_examples=8, derandomize=True, database=None, deadline=None)
+@example(order=(3, 0, 1, 2), batch_size=1)
+@given(order=st.permutations((0, 1, 2, 3)), batch_size=st.integers(1, 3))
+async def test_subscription_update_reordering_still_welcomes_once(order, batch_size):
+    await _assert_paid_delivery_schedule(order, batch_size, subscription_update=True)

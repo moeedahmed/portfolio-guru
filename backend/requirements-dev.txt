@@ -1,0 +1,3 @@
+# Offline test tooling; runtime dependencies remain in requirements.txt.
+-r requirements.txt
+hypothesis==6.168.4
