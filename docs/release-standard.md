@@ -9,16 +9,37 @@ reading. This standard collapses that into a single decision he can actually
 make: he reads one card, approves its exact contents, and everything mechanical inside
 that unchanged envelope proceeds without asking again.
 
-Who approves: Moeed's standing instruction. When he has given the task, the
-agent prepares the card and approves it itself with the exact printed
-`<sha>:<digest>`, in the same run, then reports "done and live". The card,
-digest binding, proof and rollback mechanics are unchanged; only the tap is
-gone. He is still asked first when the effect deletes user data, changes stored
+Who approves: for behind-the-scenes (`internal`) changes, Moeed's standing
+instruction. Visible (`telegram` or `broad`) changes first require him to try
+the exact SHA on the test bot and tap Ship; record that with
+`scripts/stage.sh approve`. After that staging proof, the agent prepares the
+card and uses its exact printed `<sha>:<digest>` without another mechanical
+approval prompt. It reports "done and live" only after release proof passes.
+The card, digest binding, proof and rollback mechanics are unchanged.
+He is still asked first when the effect deletes user data, changes stored
 keys or credentials, loses database data, or sends anything to real users or
 the public.
 
 It removes prompts, not boundaries. Nothing here weakens a live-send,
 credential, spend or supervisor-facing guard.
+
+## Test bot first
+
+A clean feature branch goes through `scripts/stage.sh deploy`, then
+`scripts/stage.sh smoke --sha <full-sha>`. Visible changes wait for Moeed to try
+`@portfolio_guru_test_bot` and tap Ship, recorded by `scripts/stage.sh approve
+--sha <full-sha> --note "Moeed tried the test bot and tapped Ship"`. Internal
+changes need automated smoke only. Then prepare the immutable release card and
+run its exact printed ship command. See [Test bot](staging-bot.md) for setup,
+isolation, receipts and staging rollback.
+
+Fresh ship checks an exact-SHA staging receipt before any remote mutation:
+`smoke=pass`, `automated=pass`, and (telegram/broad) `moeed_approved=true`.
+Missing proof blocks with the precise staging command. Redeploy/smoke invalidates
+old approval. The card schema and digest do not change. Proof-only resume,
+attest and rollback remain unchanged; rollback requires no staging receipt.
+`RELEASE_STAGING_OVERRIDE="<non-empty reason>"` is emergency-only, loudly printed
+and journalled in `.release/<sha>.ship.json`; other release gates still apply.
 
 ## The card
 

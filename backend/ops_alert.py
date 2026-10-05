@@ -66,7 +66,10 @@ _UNKNOWN_EVENT_LOG = "Operator notification suppressed: unknown event"
 
 def render_alert(key: str) -> str | None:
     """Return the fixed template for ``key`` or ``None`` when unknown."""
-    return ALERT_TEMPLATES.get(key)
+    message = ALERT_TEMPLATES.get(key)
+    if message is not None and os.environ.get("PG_ENV") == "staging":
+        return "[TEST BOT] " + message
+    return message
 
 
 def _should_send(key: str, cooldown: int) -> bool:

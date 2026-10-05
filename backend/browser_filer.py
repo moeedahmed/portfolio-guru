@@ -11,6 +11,8 @@ Usage:
     )
 """
 
+from kaizen_offline import require_online
+
 import asyncio
 import logging
 import os
@@ -260,6 +262,7 @@ async def file_with_browser_use(
             "selectors_log": "/path/to/log.json" | None,
         }
     """
+    require_online()
     from browser_use import Agent
     from browser_use.browser import BrowserProfile, BrowserSession
 

@@ -238,6 +238,13 @@ def ship_harness(tmp_path):
     scripts = fake_root / "scripts"
     scripts.mkdir(parents=True)
     shutil.copy(CARD_TOOL, scripts / "release_card.py")
+    shutil.copy(REPO_ROOT / "scripts/staging_proof.py", scripts / "staging_proof.py")
+    proofs = tmp_path / "staging-proofs"
+    proofs.mkdir()
+    (proofs / f"{PUSHED_SHA}.json").write_text(json.dumps({
+        "sha": PUSHED_SHA, "target": "portfolio_guru_test_bot", "smoke": "pass",
+        "automated": "pass", "moeed_approved": True,
+    }))
     for name in ("preflight.sh", "telegram_qa_offline.sh"):
         _write_executable(scripts / name, f"#!/usr/bin/env bash\n{_env_probe(name)}exit 0\n")
 
@@ -365,6 +372,7 @@ if [[ "$status" == 200 ]]; then /bin/cat "$body"; else printf '{{"message":"refu
         "RELEASE_LOOP_PYTHON": PYTHON,
         "RELEASE_LOOP_BASH": BASH,
         "RELEASE_LOOP_CARD_TOOL": str(scripts / "release_card.py"),
+        "PORTFOLIO_GURU_STAGING_PROOF_DIR": str(proofs),
     }
     return {
         "root": fake_root,
@@ -2794,3 +2802,69 @@ def test_guard_probe_interpreter_selection(tmp_path, monkeypatch, installed_pyth
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+@pytest.mark.parametrize('risk,field,value,next_command', [
+    ('internal', 'smoke', 'fail', 'deploy'),
+    ('internal', 'automated', 'fail', 'smoke'),
+    ('telegram', 'moeed_approved', False, 'approve'),
+    ('broad', 'moeed_approved', False, 'approve'),
+    ('internal', 'sha', OTHER_SHA, 'deploy'),
+])
+def test_staging_gate_blocks_before_remote_mutation(ship_harness, risk, field, value, next_command):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    record = json.loads(proof.read_text())
+    record[field] = value
+    proof.write_text(json.dumps(record))
+    _prepared(ship_harness, risk)
+    ship_harness['git_log'].write_text('')
+    result = _ship(ship_harness, risk=risk, skip_prepare=True)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert 'FINAL_RELEASE_STATE=blocked' in result.stdout
+    assert f'scripts/stage.sh {next_command}' in result.stdout + result.stderr
+    assert not any(line.startswith(('push ', 'fetch ')) for line in ship_harness['git_log'].read_text().splitlines())
+
+
+def test_missing_staging_receipt_names_exact_deploy_command(ship_harness):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    proof.unlink()
+    result = _ship(ship_harness)
+    assert result.returncode == 1
+    assert f'scripts/stage.sh deploy --sha {PUSHED_SHA}' in result.stdout + result.stderr
+    assert 'push ' not in ship_harness['git_log'].read_text()
+
+
+def test_internal_staging_needs_no_owner_tap(ship_harness):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    record = json.loads(proof.read_text())
+    record['moeed_approved'] = False
+    proof.write_text(json.dumps(record))
+    result = _ship(ship_harness)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'FINAL_RELEASE_STATE=live' in result.stdout
+
+
+def test_emergency_staging_override_is_loud_and_journalled(ship_harness):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    proof.unlink()
+    result = _ship(ship_harness, extra_env={'RELEASE_STAGING_OVERRIDE': 'Urgent outage recovery'})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'EMERGENCY STAGING OVERRIDE: Urgent outage recovery' in result.stdout
+    journal = json.loads((ship_harness['card_dir'] / f'{PUSHED_SHA}.ship.json').read_text())
+    assert journal['staging_override'] == 'Urgent outage recovery'
+    assert journal['sha'] == PUSHED_SHA
+
+
+def test_empty_reason_cannot_override_staging(ship_harness):
+    result = _ship(ship_harness, extra_env={'RELEASE_STAGING_OVERRIDE': '   '})
+    assert result.returncode == 1
+    assert 'push ' not in ship_harness['git_log'].read_text()
+
+
+def test_proof_only_ship_resume_does_not_need_staging_again(ship_harness):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    proof.unlink()
+    result = _ship(ship_harness, extra_args=('--release-sha', PUSHED_SHA))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Proof-only resume' in result.stdout
+    assert 'push ' not in ship_harness['git_log'].read_text()

@@ -628,6 +628,12 @@ ship_reconcile_and_push() {
     err "Release branch is not a fast-forward of origin/main; rebase before shipping."
     return 1
   fi
+  # Re-check the staging receipt at the last moment: a concurrent smoke rerun
+  # may have revoked it while the offline gates ran.
+  if [[ -z "${RELEASE_STAGING_OVERRIDE:-}" ]] && ! "$PYTHON_BIN" "${RELEASE_LOOP_STAGING_TOOL:-$ROOT/scripts/staging_proof.py}" gate --sha "$APPROVAL_SHA" --risk "$RISK"; then
+    err "Staging proof for $APPROVAL_SHA is no longer valid; refusing to push."
+    return 1
+  fi
   if ! git push origin "HEAD:refs/heads/main"; then
     err "Push of exact release SHA failed."
     return 1
@@ -995,11 +1001,46 @@ resume_command() {
     "--surface $SURFACE --mode ship --risk $RISK --release-sha $PUSHED_SHA --approved $APPROVAL_TOKEN"
 }
 
+require_staging_proof() {
+  local override="${RELEASE_STAGING_OVERRIDE:-}" output
+  if [[ -n "$override" ]]; then
+    # Validate and persist before any remote mutation. No card value changes.
+    if ! "$PYTHON_BIN" - "$RELEASE_DIR/$APPROVAL_SHA.ship.json" "$APPROVAL_SHA" "$override" <<'PY'
+import json, os, sys, tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+path, sha, reason = sys.argv[1:]
+if not reason.strip() or len(reason) > 500 or any(ord(c) < 32 for c in reason):
+    raise SystemExit('RELEASE_STAGING_OVERRIDE requires a non-empty single-line reason')
+p = Path(path)
+p.parent.mkdir(parents=True, exist_ok=True)
+value = {'sha': sha, 'staging_override': reason, 'utc_time': datetime.now(timezone.utc).isoformat()}
+fd, temp = tempfile.mkstemp(prefix='.ship-', dir=p.parent)
+with os.fdopen(fd, 'w') as stream:
+    json.dump(value, stream, sort_keys=True); stream.write('\n')
+os.replace(temp, p)
+PY
+    then
+      final_state blocked "provide a non-empty emergency override reason" "no mutation"
+      exit 1
+    fi
+    warn "EMERGENCY STAGING OVERRIDE: $override (recorded in ship journal)"
+    return 0
+  fi
+  if ! output="$("$PYTHON_BIN" "${RELEASE_LOOP_STAGING_TOOL:-$ROOT/scripts/staging_proof.py}" gate --sha "$APPROVAL_SHA" --risk "$RISK" 2>&1)"; then
+    err "$output"
+    final_state blocked "staging proof required for exact SHA $APPROVAL_SHA" "no mutation"
+    exit 1
+  fi
+}
+
 mode_ship() {
   banner "SHIP — gated release closure ($SURFACE, risk=$RISK)"
   require_approval
   require_bootstrap "$APPROVAL_SHA"
   load_and_verify_card "$APPROVAL_SHA"
+  # Fresh promotion only: proof-only resume, attest and rollback stay unchanged.
+  if [[ -z "$RELEASE_SHA" ]]; then require_staging_proof; fi
   require_pinned "$APPROVAL_SHA"
   [[ "$branch" != main && -n "$branch" ]] || { err "SHIP refused — use the preserved feature branch."; final_state blocked "checkout feature branch" "no mutation"; exit 3; }
   tracked_tree_is_clean || { err "SHIP refused — uncommitted tracked changes present."; final_state blocked "commit or revert changes" "no mutation"; exit 3; }

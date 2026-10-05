@@ -46,7 +46,7 @@ def expected_commit(root: Path) -> str:
     return run_text(["git", "-C", str(root), "rev-parse", "HEAD"]).strip()
 
 
-def launchd_service(service_label: str = DEFAULT_SERVICE_LABEL) -> tuple[str, int | None]:
+def launchd_service(service_label: str = DEFAULT_SERVICE_LABEL, *, allow_unregistered: bool = False) -> tuple[str, int | None]:
     """Resolve one existing owner; never move a service between domains."""
     registrations = []
     for kind in ("gui", "user"):
@@ -60,6 +60,8 @@ def launchd_service(service_label: str = DEFAULT_SERVICE_LABEL) -> tuple[str, in
                 continue
             raise RuntimeError(f"Cannot inspect {domain}/{service_label}: {result.stderr.strip()}")
         registrations.append((domain, result.stdout))
+    if not registrations and allow_unregistered:
+        return f"user/{os.getuid()}", None
     if len(registrations) != 1:
         raise RuntimeError(f"Expected one registered {service_label} service, found {len(registrations)}")
     domain, output = registrations[0]
@@ -166,14 +168,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--expected-sha", help="required exact full SHA for release proof")
     mode.add_argument("--service-domain", action="store_true", help="print the single existing launchd owner for deployment")
+    parser.add_argument("--service-label", help="explicit isolated service; live remains the default")
+    parser.add_argument("--root", type=Path, help="explicit isolated checkout; inherited release redirection stays refused")
+    parser.add_argument("--identity", type=Path, help="explicit isolated runtime identity file")
+    parser.add_argument("--allow-unregistered", action="store_true", help="domain discovery only: initial install in user domain")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.allow_unregistered and not args.service_domain:
+        return fail("--allow-unregistered is domain discovery only, never runtime proof")
     if args.service_domain:
         try:
-            domain, _pid = launchd_service(os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL))
+            label = args.service_label or os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL)
+            domain, _pid = launchd_service(label, allow_unregistered=True) if args.allow_unregistered else launchd_service(label)
             print(domain)
             return 0
         except (RuntimeError, ValueError) as exc:
@@ -182,9 +191,9 @@ def main(argv: list[str] | None = None) -> int:
         expected_sha = validate_expected_sha(args.expected_sha or os.environ.get("PORTFOLIO_GURU_EXPECTED_SHA"))
     except ValueError as exc:
         return fail(str(exc))
-    root = resolve_root(expected_sha=expected_sha, inherited_root=os.environ.get("PORTFOLIO_GURU_APP_DIR"))
-    identity_path = Path(os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", str(DEFAULT_IDENTITY_PATH)))
-    service_label = os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL)
+    root = args.root.resolve() if args.root else resolve_root(expected_sha=expected_sha, inherited_root=os.environ.get("PORTFOLIO_GURU_APP_DIR"))
+    identity_path = args.identity or Path(os.environ.get("PORTFOLIO_GURU_RUNTIME_IDENTITY", str(DEFAULT_IDENTITY_PATH)))
+    service_label = args.service_label or os.environ.get("PORTFOLIO_GURU_SERVICE_LABEL", DEFAULT_SERVICE_LABEL)
     wait_seconds = float(os.environ.get("PORTFOLIO_GURU_RUNTIME_WAIT_SECONDS", "30"))
     deadline = time.monotonic() + max(0.0, wait_seconds)
     while True:

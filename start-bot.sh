@@ -4,6 +4,9 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "${PG_ENV:-}" = staging ]; then
+  source "$SCRIPT_DIR/backend/staging_env.sh"
+fi
 LOG="${PORTFOLIO_GURU_BOT_LOG:-$HOME/.openclaw/logs/portfolio-guru/bot.log}"
 MAX_LOG_BYTES="${PORTFOLIO_GURU_MAX_LOG_BYTES:-10485760}"  # 10 MB
 

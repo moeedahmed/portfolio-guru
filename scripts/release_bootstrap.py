@@ -36,7 +36,7 @@ import sys
 import tempfile
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-PINNED_FILES = ("scripts/release_loop.sh", "scripts/release_card.py")
+PINNED_FILES = ("scripts/release_loop.sh", "scripts/release_card.py", "scripts/staging_proof.py")
 
 
 def fail(message: str) -> int:
@@ -143,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             RELEASE_LOOP_PYTHON=python,
             RELEASE_LOOP_BASH=bash,
             RELEASE_LOOP_CARD_TOOL=staged["scripts/release_card.py"],
+            RELEASE_LOOP_STAGING_TOOL=staged["scripts/staging_proof.py"],
         )
         # The script arrived on stdin, so hand the loop a terminal if there is
         # one (the broad-risk checklist is interactive) and nothing otherwise.

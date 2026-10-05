@@ -5,6 +5,8 @@ Multimodal input (text/voice/image) with approval flow before filing.
 import asyncio
 import logging
 import os
+import kaizen_offline
+kaizen_offline.install_network_guard()
 import re
 import secrets
 import sys
@@ -19,6 +21,7 @@ from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler, PicklePersistence,
+    TypeHandler, ApplicationHandlerStop,
 )
 from store import store_credentials, get_credentials, has_credentials, init
 import kaizen_connection
@@ -100,7 +103,8 @@ from runtime_identity import write_runtime_identity
 import dogfood_audit
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+if os.environ.get("PG_ENV") != "staging":
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logging.basicConfig(level=logging.INFO)
 
@@ -4741,6 +4745,8 @@ def _format_refresh_portfolio_result(result, status: KaizenSyncStatus | None = N
     total_items = status.items_indexed if status is not None else None
     rows_written = getattr(result, "rows_written", 0)
     rows_seen = getattr(result, "rows_seen", 0)
+    if getattr(result, "offline", False):
+        return "🧪 Test bot: offline Kaizen copy.\nNo portfolio was read; there are no scan results."
     rows_drifted = getattr(result, "rows_drifted", 0)
 
     if run_status == "ok":
@@ -5781,6 +5787,9 @@ def _build_post_filing_keyboard(
     while claiming to open the filed draft.
     """
     rows: list[list[InlineKeyboardButton]] = []
+
+    if kaizen_offline.enabled():
+        return InlineKeyboardMarkup([[InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file")]])
 
     if status == "failed":
         rows.append([
@@ -7805,6 +7814,8 @@ async def _test_kaizen_login(username: str, password: str) -> bool | str:
     account. Setup must therefore never trust an existing persistent tab or
     profile session when deciding which account was connected.
     """
+    if kaizen_offline.enabled():
+        return True
     from engine.portfoliotypes.base import detect_portfolio_type
     from engine.providers.kaizen import (
         KAIZEN_DASHBOARD_BODY_PREVIEW_CHARS,
@@ -16227,7 +16238,10 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             receipt_details.append(f"{filled_count} field{'s' if filled_count != 1 else ''} completed")
 
         details_section = ("\n" + "\n".join(receipt_details)) if receipt_details else ""
-        msg_header = f"✅ Saved! Your draft is ready on Kaizen.\n\n{form_name}{details_section}"
+        msg_header = (
+            _OFFLINE_SAVED_TEXT if kaizen_offline.enabled()
+            else f"✅ Saved! Your draft is ready on Kaizen.\n\n{form_name}{details_section}"
+        )
 
         extra_blocks = []
         if date_default_note:
@@ -17995,6 +18009,33 @@ async def _show_privacy_layer(query, user_id: int, context) -> None:
 
 # === APPLICATION BUILDER ===
 
+_OFFLINE_SAVED_TEXT = "✅ Test draft saved.\n(test bot: offline Kaizen copy, nothing saved to Kaizen)"
+
+
+def _allowed_user_ids() -> set[int] | None:
+    raw = os.environ.get("PG_ALLOWED_USER_IDS")
+    if raw is None:
+        if os.environ.get("PG_ENV") == "staging":
+            raise ValueError("staging requires PG_ALLOWED_USER_IDS")
+        return None
+    parts = raw.split(",")
+    if any(not part.strip().isdigit() or int(part.strip()) <= 0 for part in parts):
+        raise ValueError("PG_ALLOWED_USER_IDS must be a non-empty comma-separated list of positive ids")
+    return {int(part.strip()) for part in parts}
+
+
+async def _allowed_user_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    allowed = _allowed_user_ids()
+    if allowed is None:
+        return
+    chat = getattr(update, "effective_chat", None)
+    # Sender and destination: an allowed user in a group must not make the
+    # test bot speak to that group's other members.
+    if getattr(update.effective_user, "id", None) not in allowed or (
+        chat is not None and getattr(chat, "id", None) not in allowed
+    ):
+        raise ApplicationHandlerStop
+
 class _DeferToConversation(CallbackQueryHandler):
     """A button handler that steps aside while another conversation wants it."""
 
@@ -18010,6 +18051,7 @@ class _DeferToConversation(CallbackQueryHandler):
 
 def build_application() -> Application:
     """Build and return the Telegram bot Application with all handlers registered."""
+    allowed = _allowed_user_ids()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN env var not set")
@@ -18045,6 +18087,10 @@ def build_application() -> Application:
     )
 
     # Main conversation handler for case filing flow
+    if allowed is not None:
+        # Blocking handler in the first group: no reply, content logging or
+        # business handler runs for a user outside the explicit allowlist.
+        application.add_handler(TypeHandler(Update, _allowed_user_gate), group=-1000)
     case_conv = ConversationHandler(
         entry_points=[
             # /start enters the conversation so it's handled by a single handler,
@@ -18634,12 +18680,13 @@ def main():
         _uk_tz = _ZoneInfo("Europe/London")
     except Exception:
         _uk_tz = None  # fall back to UTC if tzdata is unavailable
-    application.job_queue.run_daily(
-        weekly_push,
-        time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
-        days=(SUNDAY,),
-        name="weekly_push",
-    )
+    if os.environ.get("PG_ENV") != "staging":
+        application.job_queue.run_daily(
+            weekly_push,
+            time=_dtime(hour=20, minute=0, tzinfo=_uk_tz),
+            days=(SUNDAY,),
+            name="weekly_push",
+        )
 
     # Sign-off chase — Wednesday 19:00 UK, deliberately away from the Sunday
     # digest so a user never gets two proactive messages in one evening.
@@ -18686,11 +18733,12 @@ def main():
             notify=send_supervisor_notification,
         )
 
-    application.job_queue.run_repeating(
-        _supervisor_tick,
-        interval=SUPERVISOR_POLL_INTERVAL_SECONDS,
-        first=SUPERVISOR_POLL_FIRST_RUN_SECONDS,
-    )
+    if not kaizen_offline.enabled():
+        application.job_queue.run_repeating(
+            _supervisor_tick,
+            interval=SUPERVISOR_POLL_INTERVAL_SECONDS,
+            first=SUPERVISOR_POLL_FIRST_RUN_SECONDS,
+        )
 
     # Register commands so they appear in Telegram's "/" menu
     async def post_init(app):

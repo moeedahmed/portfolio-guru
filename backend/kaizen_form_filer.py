@@ -36,7 +36,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from data_paths import data_path
 
-from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+from playwright.async_api import Page, Browser, BrowserContext
+from kaizen_offline import async_playwright, require_online
 from selector_strategy import fallback_dom_id
 from form_schemas import FORM_SCHEMAS
 from ai_declaration import apply_ai_declaration
@@ -1883,6 +1884,7 @@ async def _connect_cdp() -> tuple:
 
     Callers must close ``page.context`` before ``pw.stop()``.
     """
+    require_online()
     pw = await async_playwright().start()
     try:
         browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
@@ -2094,6 +2096,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
     failure, which the bot turns into "sign in again", instead of submitting
     an empty login form to RCEM.
     """
+    require_online()
     if not username or not password:
         return False
     try:
@@ -3837,6 +3840,7 @@ async def fill_kaizen_form(
             "screenshot": path_or_None,
         }
     """
+    require_online()
     filled = []
     skipped = []
     errors = []
@@ -4203,6 +4207,7 @@ async def connect_cdp_browser() -> tuple:
     credentials and drafts save to the caller's portfolio — never to whichever
     user happens to be logged into the persistent CDP profile.
     """
+    require_online()
     try:
         pw = await async_playwright().start()
         browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
@@ -4230,6 +4235,7 @@ async def _cdp_re_login(page: Page, username: str, password: str) -> bool:
     - SSO portals sometimes block headless Chrome
     - MFA tokens cached in the profile can reduce re-authentication friction
     """
+    require_online()
     try:
         await page.goto("https://eportfolio.rcem.ac.uk",
                         wait_until="domcontentloaded", timeout=30000)
@@ -4680,6 +4686,7 @@ async def delete_all_drafts_of_type(
     Utility to delete all saved drafts of a given form type.
     Use to clean up duplicate drafts.
     """
+    require_online()
     display_name = FORM_DISPLAY_NAMES.get(form_type, form_type)
     deleted = 0
     errors = 0
@@ -4841,6 +4848,7 @@ async def file_to_kaizen(
     Used by filer_router.py and bot.py. Wraps the old filer logic
     for backward compatibility.
     """
+    require_online()
     form_type = canonical_form_type(form_type)
     uuid = FORM_UUIDS.get(form_type)
     if not uuid:
@@ -5224,6 +5232,7 @@ async def detect_and_delete_test_drafts(
     Returns:
         Dict with "found", "deleted", "errors", and "details" keys
     """
+    require_online()
     found_drafts = []
     deleted = 0
     errors = 0

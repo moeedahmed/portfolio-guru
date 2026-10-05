@@ -3,6 +3,7 @@
 All browser code is written to temp files to avoid nested quoting issues.
 """
 import json, os, shutil, subprocess, tempfile
+from kaizen_offline import require_online
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -45,6 +46,7 @@ def _resolve_cdp_ws(env: Optional[Dict[str, str]] = None, *, timeout: float = 3.
       3. On any failure → ``None`` (caller decides whether to proceed without
          setting ``BU_CDP_WS``).
     """
+    require_online()
     env = env if env is not None else os.environ
     existing = env.get("BU_CDP_WS")
     if existing:
@@ -78,6 +80,7 @@ class KaizenProvider:
 
     def _run_file(self, code: str, timeout: int = 60) -> str:
         """Write code to temp file and run via browser-harness."""
+        require_online()
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(code)
             tmp_path = f.name
@@ -184,6 +187,7 @@ print(json.dumps({{"title": t, "body_preview": b[:{KAIZEN_DASHBOARD_BODY_PREVIEW
 
     def fill_form(self, form_type: str, fields: dict) -> bool:
         # Open a form and fill fields without saving.
+        require_online()
         form_uuid = self.get_form_uuid(form_type)
         if not form_uuid:
             raise ValueError("Unknown form type: " + form_type)

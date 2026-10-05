@@ -40,7 +40,7 @@ import tempfile
 from pathlib import Path
 from data_paths import data_path
 
-from playwright.async_api import async_playwright
+from kaizen_offline import async_playwright
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 

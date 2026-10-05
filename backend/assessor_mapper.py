@@ -18,7 +18,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page
+from kaizen_offline import async_playwright
 
 from kaizen_unsigned_scraper import _login_via_rcem
 

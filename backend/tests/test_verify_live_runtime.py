@@ -100,3 +100,25 @@ def test_domain_discovery_can_recover_a_stopped_service_without_claiming_runtime
     assert capsys.readouterr().out == f"user/{verify.os.getuid()}\n"
     with pytest.raises(RuntimeError, match="no launchd pid"):
         verify.launchd_pid()
+
+
+def test_explicit_staging_runtime_flags_keep_live_defaults(monkeypatch, tmp_path, capsys):
+    captured = {}
+    def check(**kwargs):
+        captured.update(kwargs)
+        return 'LIVE_RUNTIME_OK'
+    monkeypatch.setattr(verify, 'check_runtime', check)
+    identity = tmp_path / 'staging-runtime.json'
+    assert verify.main(['--root', str(tmp_path), '--identity', str(identity), '--service-label',
+                        'com.portfolioguru.staging-bot', '--expected-sha', SHA]) == 0
+    assert captured == {'root': tmp_path.resolve(), 'identity_path': identity,
+                        'service_label': 'com.portfolioguru.staging-bot', 'expected_sha': SHA}
+    assert verify.DEFAULT_SERVICE_LABEL == 'com.portfolioguru.bot'
+    assert str(verify.DEFAULT_IDENTITY_PATH) == '/tmp/portfolio-guru-runtime.json'
+
+
+def test_initial_staging_domain_is_not_runtime_proof(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(verify.subprocess, 'run', lambda args, **kwargs: subprocess.CompletedProcess(args, 113, '', 'Could not find service'))
+    assert verify.launchd_service('com.portfolioguru.staging-bot', allow_unregistered=True) == (f'user/{verify.os.getuid()}', None)
+    assert verify.main(['--allow-unregistered', '--expected-sha', SHA]) == 1

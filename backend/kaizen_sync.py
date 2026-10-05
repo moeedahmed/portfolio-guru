@@ -33,6 +33,7 @@ from kaizen_index import (
 )
 
 KAIZEN_BASE_URL = "https://kaizenep.com"
+import kaizen_offline
 
 PORTFOLIO_HEALTH_TIMELINE_CATEGORIES: tuple[str, ...] = (
     "Assessments",
@@ -96,6 +97,14 @@ class KaizenSyncResult:
     rows_drifted: int = 0
     rows_refreshed: int = 0
     notes: list[str] = field(default_factory=list)
+    @property
+    def offline(self) -> bool:
+        return self.status == "offline"
+
+
+def _offline_sync_result() -> KaizenSyncResult:
+    return KaizenSyncResult(run_id=0, status="offline",
+                            notes=["Test bot: offline Kaizen copy; no portfolio read."])
 
 
 def _normalise_text(value: Any) -> Optional[str]:
@@ -504,6 +513,8 @@ async def sync_kaizen_portfolio_index(
     incremental pass skips them and carries on from where this one stopped.
     ``on_progress`` is awaited after each saved or refreshed row.
     """
+    if kaizen_offline.enabled():
+        return _offline_sync_result()
     run_id = await start_index_run(user_id)
     result = KaizenSyncResult(run_id=run_id, status="running")
     loop = asyncio.get_running_loop()
@@ -779,6 +790,8 @@ async def sync_kaizen_portfolio_index_for_user(
     show. The isolated CDP context and the Playwright handle are always
     closed in ``finally`` so this helper does not leak browser state.
     """
+    if kaizen_offline.enabled():
+        return _offline_sync_result()
     page, pw = await _open_kaizen_session_page()
     if page is None:
         return await _record_bootstrap_failure(

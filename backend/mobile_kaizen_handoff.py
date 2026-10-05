@@ -16,6 +16,7 @@ only through the loopback, key-protected ``/internal/handoffs`` endpoint.
 """
 
 from __future__ import annotations
+from kaizen_offline import require_online
 
 import asyncio
 import base64
@@ -319,6 +320,7 @@ async def submit_kaizen_login(page: Any, username: str, password: str) -> None:
     ``input[name="login"]``, then ``input[name="password"]``, each followed by
     the submit button. When both boxes are on one page, one submit is enough.
     """
+    require_online()
     submit = page.locator('button[type="submit"]').first
     login_box = page.locator('input[name="login"]')
     password_box = page.locator('input[name="password"]')
@@ -825,7 +827,7 @@ class MobileBrowserManager:
             await page.mouse.wheel(0, normalised["delta_y"])
 
     async def _default_connect_page(self):
-        from playwright.async_api import async_playwright
+        from kaizen_offline import async_playwright
 
         playwright_handle = await async_playwright().start()
         browser = await playwright_handle.chromium.launch(headless=True)

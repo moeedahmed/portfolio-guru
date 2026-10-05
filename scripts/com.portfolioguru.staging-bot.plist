@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.portfolioguru.staging-bot</string>
+  <key>WorkingDirectory</key><string>__STAGING_DIR__</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>__STAGING_DIR__/start-bot.sh</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>LimitLoadToSessionType</key><array><string>Aqua</string><string>Background</string></array>
+  <key>ExitTimeOut</key><integer>330</integer>
+  <key>StandardOutPath</key><string>__BOT_LOG__</string>
+  <key>StandardErrorPath</key><string>__BOT_LOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__HOME__/homebrew/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PG_ENV</key><string>staging</string>
+    <key>PORTFOLIO_GURU_BOT_LOG</key><string>__BOT_LOG__</string>
+    <key>PG_VERTEX_SA_SECRET_ID</key><string>__PG_VERTEX_SA_SECRET_ID__</string>
+    <key>PG_VERTEX_SA_CLIENT_EMAIL</key><string>__PG_VERTEX_SA_CLIENT_EMAIL__</string>
+    <key>PG_VERTEX_BWS_TOKEN_PATH</key><string>__PG_VERTEX_BWS_TOKEN_PATH__</string>
+  </dict>
+</dict>
+</plist>

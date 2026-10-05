@@ -21,6 +21,7 @@ Usage:
 import asyncio
 import logging
 import os
+import kaizen_offline
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,8 @@ async def route_filing(
     rest queue on the semaphore. Routing behaviour and the result contract
     are documented on _route_filing_unbounded.
     """
+    if kaizen_offline.enabled():
+        return kaizen_offline.filing_result(fields, submit=submit)
     if _filing_slots.locked():
         logger.info("All filing slots busy — queuing %s/%s filing", platform, form_type)
     async with _filing_slots:
@@ -202,6 +205,7 @@ async def _route_filing_unbounded(
         }
     """
     from filing_coverage import record_run
+    kaizen_offline.require_online()
 
     platform_lower = platform.lower()
     platform_config = PLATFORM_REGISTRY.get(platform_lower)

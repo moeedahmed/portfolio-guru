@@ -54,6 +54,7 @@ TEMPLATE_KINDS = {
 
 # Named message constants in bot.py. Consent is legal text, reviewed separately.
 CONSTANT_KINDS = {
+    "_OFFLINE_SAVED_TEXT": "confirmation",
     "CONSENT_TEXT": "exempt",
     "FILE_CASE_PROMPT": "prompt",
     "UNKNOWN_COMMAND_MSG": "error",

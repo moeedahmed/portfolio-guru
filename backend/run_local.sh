@@ -6,6 +6,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+if [ "${PG_ENV:-}" = staging ]; then
+  source "$SCRIPT_DIR/staging_env.sh"
+fi
 LOCK_DIR="${PORTFOLIO_GURU_BOT_LOCK:-/tmp/portfolio-guru-bot.lock}"
 
 while ! mkdir "$LOCK_DIR" 2>/dev/null; do
@@ -82,7 +85,20 @@ PY
   get_secret "$id"
 }
 
-TELEGRAM_BOT_TOKEN="$(get_secret af553b7d-5c05-418a-b80e-b405015708ed)"
+if [ "${PG_ENV:-}" = staging ]; then
+  # Check returned identity too: an alias/misconfigured BWS result must never
+  # turn this launcher into a second poller of the live bot.
+  TELEGRAM_BOT_TOKEN="$(BWS_ACCESS_TOKEN=$BWS_ACCESS_TOKEN "$BWS_BIN" secret get 28ed5b26-6c5c-4848-b5a5-b45801555aee --output json | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+if s.get("id") != "28ed5b26-6c5c-4848-b5a5-b45801555aee" or s.get("key") != "TELEGRAM_BOT_TOKEN_PORTFOLIO_TEST" or not s.get("value"):
+    raise SystemExit("TEST BOT refuses live or unexpected token secret identity")
+print(s["value"])
+')"
+  echo "TEST BOT: offline Kaizen copy; allowed users: $PG_ALLOWED_USER_IDS"
+else
+  TELEGRAM_BOT_TOKEN="$(get_secret af553b7d-5c05-418a-b80e-b405015708ed)"
+fi
 export TELEGRAM_BOT_TOKEN
 GOOGLE_API_KEY="$(get_secret af6579a0-2cbe-4cef-94b3-b405017b48fe)"
 export GOOGLE_API_KEY
@@ -155,6 +171,7 @@ FERNET_SECRET_KEY="$(get_secret 9e653679-9a33-4c23-a15c-b405015713de)"
 export FERNET_SECRET_KEY
 
 # Dedicated London mirror; never use the shared EM Gurus project.
+if [ "${PG_ENV:-}" != staging ]; then
 export SUPABASE_URL="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_URL)"
 export SUPABASE_SERVICE_ROLE_KEY="$(get_secret_by_key SUPABASE_PORTFOLIO_GURU_SERVICE_ROLE_KEY)"
 
@@ -257,6 +274,7 @@ if [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ] && [ -n "${OPENCLAW_GATEWAY_AUTH_TOKEN:-
 fi
 PORTFOLIO_OUTBOUND_GATEWAY_TOKEN="${PORTFOLIO_OUTBOUND_GATEWAY_TOKEN:-${OPENCLAW_GATEWAY_TOKEN:-}}"
 export PORTFOLIO_OUTBOUND_GATEWAY_TOKEN
+fi
 
 PYTHON=""
 if [ -x "./.venv/bin/python3" ]; then
@@ -279,6 +297,11 @@ if pg_is_truthy "${PG_USE_VERTEX:-}"; then
     echo "Vertex AI (EU) credential preflight failed; refusing to start (no ADC fallback, no traffic admitted)." >&2
     exit 1
   fi
+fi
+
+# Staging has no web servers, port cleanup, browser install or shared Chrome.
+if [ "${PG_ENV:-}" = staging ]; then
+  exec "$PYTHON" bot.py
 fi
 
 # Playwright package upgrades can leave the local browser cache one revision

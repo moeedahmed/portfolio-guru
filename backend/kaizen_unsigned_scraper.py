@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List
 
-from playwright.async_api import async_playwright
+from kaizen_offline import async_playwright
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -67,6 +67,9 @@ async def scrape_unsigned_tickets(
     when from_date / to_date are provided (inclusive on both ends). Pass
     both as None to scan everything Kaizen returns.
     """
+    from kaizen_offline import enabled
+    if enabled():
+        return []
     results = []
     pw = None
     browser_to_close = None  # only set when we launched our own browser

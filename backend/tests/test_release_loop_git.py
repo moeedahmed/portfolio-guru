@@ -87,7 +87,7 @@ def repo(tmp_path):
     git(work, "symbolic-ref", "HEAD", "refs/heads/main", env=base_env)
     scripts = work / "scripts"
     scripts.mkdir()
-    for name in ("release_loop.sh", "release_card.py", "release_bootstrap.py"):
+    for name in ("release_loop.sh", "release_card.py", "release_bootstrap.py", "staging_proof.py"):
         shutil.copy(SCRIPTS / name, scripts / name)
         (scripts / name).chmod(0o755)
     for name in ("preflight.sh", "telegram_qa_offline.sh", "telegram_bot_qa.sh", "dogfood_smoke.sh"):
@@ -113,6 +113,12 @@ def repo(tmp_path):
     (work / "backend" / "bot.py").write_text("print('released')\n")
     git(work, "commit", "-q", "-am", "release change", env=base_env)
     released = git(work, "rev-parse", "HEAD", env=base_env)
+    proofs = tmp / "staging-proofs"
+    proofs.mkdir()
+    (proofs / f"{released}.json").write_text(json.dumps({
+        "sha": released, "target": "portfolio_guru_test_bot", "smoke": "pass",
+        "automated": "pass", "moeed_approved": True,
+    }))
 
     # Stub CI keyed to whatever is actually on the bare remote's main, so the
     # provenance gates see runs for exactly the SHA the loop pushed.
@@ -148,6 +154,7 @@ printf '[{{"databaseId": %s, "headSha": "%s", "status": "completed", "conclusion
         RELEASE_LOOP_PROOF_TIMEOUT="0",
         RELEASE_LOOP_PROOF_INTERVAL="0",
         RELEASE_LOOP_TEST_MODE="1",
+        PORTFOLIO_GURU_STAGING_PROOF_DIR=str(proofs),
     )
     return {
         "work": work,

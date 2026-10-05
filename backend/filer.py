@@ -17,6 +17,8 @@ the legacy path for a one-off must set the env var, accept the credential-in-
 prompt risk, and not commit that change.
 """
 
+from kaizen_offline import require_online
+
 import asyncio
 import os
 import base64
@@ -47,6 +49,7 @@ async def file_cbd_to_kaizen(
     Returns: (status, action_log, screenshot_base64, assessor_warning)
     status: "success" | "partial" | "failed"
     """
+    require_online()
     if os.environ.get("PORTFOLIO_GURU_ALLOW_LEGACY_FILER") != "1":
         raise NotImplementedError(
             "filer.file_cbd_to_kaizen is deprecated. Route filings through "
