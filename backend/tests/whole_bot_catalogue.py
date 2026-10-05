@@ -50,7 +50,7 @@ def producer_digest():
 # Reviewed staging-only allowlist, offline save receipt/keyboard and browser
 # guard. Payload branches and live registration are unchanged; staging tests
 # exercise the first handler and offline save through the real bot flow.
-PRODUCER_DIGEST = '3fa56a2b88d023876d8cdc7d2f2cc57b245279b1e37b86e5f3446f99f1460864'
+PRODUCER_DIGEST = '4faf1f83c8cc2da71aad8f20a24f2816720809bdc1981f9df1949613d8fd9cfd'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

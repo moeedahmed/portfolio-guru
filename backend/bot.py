@@ -13437,6 +13437,11 @@ async def _regenerate_active_draft_with_feedback(
                 timeout=45,
         )
         updated = _blank_judged_missing_essentials(context, updated, case_text, form_type)
+        # A regenerated draft must keep the same profile defaults as the first
+        # draft, or a doctor who supplies one missing detail is asked for a
+        # stage of training (or date) they were never asked for before.
+        _apply_profile_training_stage(updated, update.effective_user.id, form_type)
+        _apply_default_dates(updated, form_type)
         _store_draft(context, updated)
         # The gate above already judged this exact case and form, so the
         # reflection decision here reads that fresh judgement rather than a

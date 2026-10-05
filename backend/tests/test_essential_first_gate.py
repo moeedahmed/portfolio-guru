@@ -873,6 +873,39 @@ async def test_a_reply_regenerates_the_draft_but_still_missing_essentials_stay_b
     assert "registrar was present" in context.user_data["case_text"]
 
 
+@pytest.mark.asyncio
+async def test_a_reply_keeps_the_profile_stage_of_training_and_date():
+    """Supplying one missing detail must not re-open stage of training or
+    the date: the regenerated draft gets the same profile defaults as the
+    first draft. The test bot's live journey caught this regression."""
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = THIN_CASE
+    context.user_data["chosen_form"] = "CBD"
+    context.user_data["draft_data"] = {
+        "_type": "FORM",
+        "form_type": "CBD",
+        "fields": {**CBD_FIELDS, "level_of_supervision": ""},
+        "uuid": "uuid-cbd",
+    }
+    extract = AsyncMock(return_value=_cbd_draft(stage_of_training="", date_of_encounter=""))
+    statuses = _all("CBD", ESSENTIAL_PRESENT)
+    with patch("bot.assess_form_essentials", new=_assess(statuses)), \
+         patch("bot.extract_cbd_data", new=extract), \
+         patch("bot.extract_form_data", new=extract), \
+         patch("bot.get_training_level", return_value="HIGHER"):
+        await bot._regenerate_active_draft_with_feedback(
+            sim._make_text_update("Level of supervision: indirect."),
+            context,
+            "Level of supervision: indirect.",
+            append_to_case=True,
+        )
+
+    fields = bot._load_draft(context).fields
+    assert fields["stage_of_training"] == "Higher/ST4-ST6"
+    assert fields["date_of_encounter"]
+
+
 
 @pytest.mark.asyncio
 async def test_case_content_is_drafted_even_when_judged_missing():
