@@ -5427,9 +5427,9 @@ class TestVoiceProfileTwoPathFlow:
             'voice_profile.generate_voice_profile',
             new_callable=AsyncMock,
             return_value='{"voice_summary": "x"}',
-        ), patch('bot._generate_voice_preview', side_effect=preview), \
-             patch('bot.VOICE_PREVIEW_TIMEOUT_SECONDS', 0.01), \
-             patch('bot.store_voice_profile') as store:
+        ), patch.object(bot, '_generate_voice_preview', side_effect=preview), \
+             patch.object(bot, 'VOICE_PREVIEW_TIMEOUT_SECONDS', 0.01), \
+             patch.object(bot, 'store_voice_profile') as store:
             result = await asyncio.wait_for(bot._build_voice_profile(update, context), timeout=1)
 
         store.assert_called_once_with(sim.user_id, '{"voice_summary": "x"}', 3)
