@@ -305,3 +305,16 @@ def test_draft_preview_omits_the_declaration_when_nothing_will_be_declared():
     preview = _format_draft_preview(draft)
 
     assert ai_declaration.declaration_text() not in preview
+
+
+def test_model_copied_legacy_label_is_dropped_from_preview_and_saved_entry(monkeypatch):
+    """A doctor's earlier entries carry the old 'AI use declaration:' label, so
+    the model can copy it. It must not reach the preview or Kaizen."""
+    monkeypatch.delenv("PG_AI_DECLARATION_LABEL", raising=False)
+    from rcem_ai_policy import with_ai_use_declaration
+
+    copied = "I learned to escalate early.\n\nAI use declaration: AI was used to help structure and edit this entry."
+    expected = "I learned to escalate early.\n\nAI was used to help structure and edit this entry."
+    assert with_ai_use_declaration(copied) == expected
+    out, _meta = ai_declaration.apply_ai_declaration("CBD", {"reflection": copied}, {"reflection": "reflection-box"})
+    assert out["reflection"] == expected

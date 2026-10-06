@@ -160,7 +160,7 @@ def parse_visible_kc_selections(text: str) -> list[tuple[int, int]]:
 
 
 READY_DRAFT_BUTTON_TOKEN = "save to kaizen"
-GAP_DRAFT_BUTTON_TOKEN = "save draft now, finish in kaizen"
+GAP_DRAFT_BUTTON_TEXT = "save draft to kaizen"
 MISSING_ESSENTIALS_TEXT_MARKER = "before i draft this, i still need"
 
 
@@ -177,7 +177,7 @@ def classify_post_click_draft_state(message) -> str:
     buttons_lower = [b.lower() for b in buttons]
 
     is_ready = any(READY_DRAFT_BUTTON_TOKEN in b for b in buttons_lower)
-    is_gap_draft = any(GAP_DRAFT_BUTTON_TOKEN in b for b in buttons_lower)
+    is_gap_draft = any(GAP_DRAFT_BUTTON_TEXT in b for b in buttons_lower)
     has_gap_list = "still needed:" in received_lower
     is_missing_essentials = MISSING_ESSENTIALS_TEXT_MARKER in received_lower
 

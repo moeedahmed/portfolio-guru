@@ -5509,7 +5509,7 @@ def _build_approval_keyboard(
     # Save is always offered: it only ever makes a Kaizen draft, which the
     # doctor can finish there. Gaps are filled by replying, not by buttons.
     if gaps:
-        rows.append([InlineKeyboardButton("💾 Save draft now, finish in Kaizen", callback_data=save)])
+        rows.append([InlineKeyboardButton("💾 Save draft to Kaizen", callback_data=save)])
     else:
         rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
     if can_back_to_missing:

@@ -90,7 +90,7 @@ def has_personal_reflective_input(text: str | None) -> bool:
 
 def with_ai_use_declaration(text: str | None) -> str:
     """Append the RCEM AI-use declaration once to non-empty reflection text."""
-    reflection = str(text or "").strip()
+    reflection = ai_declaration.drop_legacy_label(str(text or "")).strip()
     if not reflection:
         return ""
     if not ai_declaration.is_enabled() or ai_declaration.contains_declaration(reflection):

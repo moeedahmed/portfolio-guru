@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,21 @@ def contains_declaration(value: Any) -> bool:
     )
 
 
+_LEGACY_LABEL_PREFIX = re.compile(re.escape(_LEGACY_DECLARATION_LABEL) + r":[ \t]*", re.IGNORECASE)
+
+
+def drop_legacy_label(value: Any) -> Any:
+    """Remove the retired "AI use declaration:" label, keeping the sentence.
+
+    The model can copy the old label from a doctor's earlier entries (their
+    voice examples), and contains_declaration then treats the entry as already
+    declared, so the label would reach the preview and Kaizen unchanged.
+    """
+    if not isinstance(value, str) or declaration_label().lower() == _LEGACY_DECLARATION_LABEL.lower():
+        return value
+    return _LEGACY_LABEL_PREFIX.sub("", value)
+
+
 def fields_carry_declaration(fields: dict) -> bool:
     return any(contains_declaration(value) for value in (fields or {}).values())
 
@@ -186,7 +202,7 @@ def apply_ai_declaration(
     Returns `(fields, meta)` where meta is
     `{"declared": bool, "field": key_or_None, "reason": str}`.
     """
-    out = dict(fields or {})
+    out = {key: drop_legacy_label(value) for key, value in (fields or {}).items()}
 
     if not is_enabled():
         return out, {"declared": False, "field": None, "reason": "disabled"}

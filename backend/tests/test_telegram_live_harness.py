@@ -598,15 +598,15 @@ async def test_wait_for_matching_message_reraises_non_transient_errors():
 def test_draft_first_gap_preview_is_a_bounded_live_state():
     message = _FakeMessage(
         "Here is your Case-Based Discussion draft:\nCase narrative.\nStill needed: Level of Supervision. Reply with it.",
-        (("Save draft now, finish in Kaizen", "Cancel"),),
+        (("Save draft to Kaizen", "Cancel"),),
     )
     assert harness.classify_post_click_draft_state(message) == "draft_with_gaps"
 
 
 @pytest.mark.parametrize("text,buttons", [
-    ("Case narrative without a gap list", (("Save draft now, finish in Kaizen", "Cancel"),)),
-    ("Still needed: Level of Supervision.", (("Save draft now, finish in Kaizen", "Save to Kaizen", "Cancel"),)),
-    ("Still needed: Level of Supervision.", (("Save draft now, finish in Kaizen", "Retry"),)),
+    ("Case narrative without a gap list", (("Save draft to Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "Save to Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "Retry"),)),
 ])
 def test_gap_preview_classifier_rejects_incomplete_or_conflicting_controls(text, buttons):
     with pytest.raises(AssertionError):
@@ -630,7 +630,7 @@ async def test_focused_journey_handles_stamped_review_controls(monkeypatch, gap)
     for button, data in zip(ready.buttons[0], (b"APPROVE|draft|abc123", b"CANCEL|draft|abc123")):
         button.data = data
         button.click = AsyncMock()
-    incomplete = _FakeMessage(text + "\nStill needed: Level of Supervision. Reply with it.", (("Save draft now, finish in Kaizen", "Cancel"),), message_id=3)
+    incomplete = _FakeMessage(text + "\nStill needed: Level of Supervision. Reply with it.", (("Save draft to Kaizen", "Cancel"),), message_id=3)
     for button, data in zip(incomplete.buttons[0], (b"APPROVE|draft|def456", b"CANCEL|draft|def456")):
         button.data = data
         button.click = AsyncMock()
