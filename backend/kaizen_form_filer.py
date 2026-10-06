@@ -2054,8 +2054,6 @@ _LOGIN_REJECTION_PHRASES = (
     "incorrect username",
     "credentials are incorrect",
     "login details are incorrect",
-    "not recognised",
-    "not recognized",
 )
 
 
@@ -2072,13 +2070,16 @@ async def _has_credential_rejection(page: Page) -> bool:
     Never logs the matched text — the portal echoes the submitted identity.
     """
     try:
-        texts = await page.locator(_LOGIN_ERROR_SELECTOR).all_inner_texts()
+        errors = page.locator(_LOGIN_ERROR_SELECTOR)
+        for index in range(await errors.count()):
+            error = errors.nth(index)
+            if not await error.is_visible():
+                continue
+            lowered = (await error.inner_text() or "").lower()
+            if any(phrase in lowered for phrase in _LOGIN_REJECTION_PHRASES):
+                return True
     except Exception:
         return False
-    for text in texts or []:
-        lowered = (text or "").lower()
-        if any(phrase in lowered for phrase in _LOGIN_REJECTION_PHRASES):
-            return True
     return False
 
 
@@ -2099,6 +2100,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
     require_online()
     if not username or not password:
         return False
+    login_submitted = False
     try:
         await page.goto("https://eportfolio.rcem.ac.uk", wait_until="load", timeout=30000)
         await asyncio.sleep(2)
@@ -2108,6 +2110,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
         if await login_input.count() > 0:
             await login_input.fill(username)
             await page.locator('button[type="submit"]').click()
+            login_submitted = True
             await asyncio.sleep(2)
 
         # Step 2: Password
@@ -2115,6 +2118,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
         if await pwd_input.count() > 0:
             await pwd_input.fill(password)
             await page.locator('button[type="submit"]').click()
+            login_submitted = True
     except Exception as e:
         logger.error(f"Kaizen login could not be attempted: {type(e).__name__}")
         raise _kaizen_infrastructure_error(
@@ -2124,7 +2128,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
     try:
         await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
     except Exception as e:
-        if await _has_credential_rejection(page):
+        if login_submitted and await _has_credential_rejection(page):
             logger.info("Kaizen rejected the supplied credentials")
             return False
         logger.error(

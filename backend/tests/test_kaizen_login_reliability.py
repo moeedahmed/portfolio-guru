@@ -568,9 +568,10 @@ async def test_setup_password_shows_testing_feedback_after_submission():
 class _FakeLocator:
     """Minimal Playwright locator stand-in for the login form/error probes."""
 
-    def __init__(self, count: int = 0, texts: list[str] | None = None):
+    def __init__(self, count: int = 0, texts: list[str] | None = None, visible=None):
         self._count = count
         self._texts = texts or []
+        self._visible = visible if visible is not None else [True] * len(self._texts)
         self.filled: list[str] = []
         self.clicked = 0
 
@@ -583,17 +584,26 @@ class _FakeLocator:
     async def click(self, *args, **kwargs):
         self.clicked += 1
 
-    async def all_inner_texts(self):
-        return list(self._texts)
+    def nth(self, index):
+        return _FakeLocator(count=1, texts=[self._texts[index]], visible=[self._visible[index]])
+
+    async def is_visible(self):
+        return self._visible[0]
+
+    async def inner_text(self):
+        return self._texts[0]
 
 
 class _FakeLoginPage:
     """Drives ``_login`` deterministically: two-step form present, then a
     configurable post-submit outcome and error surface."""
 
-    def __init__(self, *, error_texts=None, goto_error=None, wait_error=None,
+    def __init__(self, *, error_texts=None, error_visible=None, form_present=True,
+                 goto_error=None, wait_error=None,
                  url="https://eportfolio.rcem.ac.uk/auth/login"):
         self._error_texts = error_texts or []
+        self._error_visible = error_visible
+        self._form_present = form_present
         self._goto_error = goto_error
         self._wait_error = wait_error
         self.url = url
@@ -605,14 +615,15 @@ class _FakeLoginPage:
 
     def locator(self, selector):
         if 'name="login"' in selector:
-            return _FakeLocator(count=1)
+            return _FakeLocator(count=int(self._form_present))
         if 'name="password"' in selector:
-            return _FakeLocator(count=1)
+            return _FakeLocator(count=int(self._form_present))
         if selector == 'button[type="submit"]':
             return _FakeLocator(count=1)
         # Anything else is the credential-rejection probe.
         self.error_probe_calls += 1
-        return _FakeLocator(count=len(self._error_texts), texts=self._error_texts)
+        return _FakeLocator(count=len(self._error_texts), texts=self._error_texts,
+                            visible=self._error_visible)
 
 
 @pytest.fixture
@@ -755,11 +766,125 @@ async def test_rejection_is_read_from_the_real_rcem_error_box():
         def __init__(self, selector):
             self.selector = selector
 
-        async def all_inner_texts(self):
-            return [rcem_text] if "#error-message" in self.selector else []
+        async def count(self):
+            return int("#error-message" in self.selector)
+
+        def nth(self, index):
+            assert index == 0
+            return self
+
+        async def is_visible(self):
+            return True
+
+        async def inner_text(self):
+            return rcem_text
 
     class Page:
         def locator(self, selector):
             return Locator(selector)
 
     assert await _has_credential_rejection(Page()) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_texts,error_visible,form_present", [
+    (["Invalid credentials"], [False], True),
+    (["Invalid credentials", "Service unavailable"], [False, True], True),
+    (["Device not recognised"], [True], True),
+    (["Device not recognized"], [True], True),
+    (["Invalid credentials"], [True], False),
+])
+async def test_login_ignores_hidden_ambiguous_or_unsubmitted_rejections(
+    _no_login_sleep, error_texts, error_visible, form_present,
+):
+    from engine.providers.kaizen import KaizenInfrastructureError
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(error_texts=error_texts, error_visible=error_visible,
+                          form_present=form_present)
+    page.wait_for_url = AsyncMock(side_effect=_playwright_timeout())
+
+    with pytest.raises(KaizenInfrastructureError):
+        await _login(page, "doctor@example.com", "synthetic-password")
+    if not form_present:
+        assert page.error_probe_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_login_finds_visible_rejection_after_hidden_error(_no_login_sleep):
+    from kaizen_form_filer import _login
+
+    page = _FakeLoginPage(error_texts=["Service unavailable", "Invalid credentials"],
+                          error_visible=[False, True])
+    page.wait_for_url = AsyncMock(side_effect=_playwright_timeout())
+
+    assert await _login(page, "doctor@example.com", "synthetic-password") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["setup_username", "setup_password"])
+async def test_leaving_setup_for_case_invalidates_old_retry(handler):
+    import bot
+    from telegram.ext import ConversationHandler
+
+    sim, _, context = _make_setup_password_harness()
+    bot._stash_setup_retry_credentials(context, "old@example.com", "synthetic-old-password")
+    update = sim._make_text_update(
+        "45M with pleuritic chest pain, D-dimer raised, CTPA showed a segmental PE and I started apixaban"
+    )
+    with patch("bot._test_kaizen_login", new=AsyncMock()) as login:
+        assert await getattr(bot, handler)(update, context) == ConversationHandler.END
+        assert "setup_username" not in context.user_data
+        assert "_setup_state_hint" not in context.user_data
+        assert bot._SETUP_RETRY_USERNAME_KEY not in context.user_data
+        assert bot._SETUP_RETRY_PASSWORD_KEY not in context.user_data
+        retry = sim._make_callback_update("ACTION|retry_setup_login")
+        assert await bot.setup_retry_login(retry, context) == bot.AWAIT_USERNAME
+    login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", [
+    "setup_start", "setup_password_start", "email", "invalid_email", "email_prompt",
+])
+async def test_fresh_setup_or_email_invalidates_old_retry(entry):
+    import bot
+
+    sim, _, context = _make_setup_password_harness()
+    bot._stash_setup_retry_credentials(context, "old@example.com", "synthetic-old-password")
+    with patch("bot._kaizen_connected", return_value=False), \
+         patch("bot._test_kaizen_login", new=AsyncMock()) as login:
+        if entry == "setup_start":
+            await bot.setup_start(sim._make_text_update("/setup"), context)
+        elif entry == "setup_password_start":
+            await bot.setup_password_start(sim._make_callback_update("ACTION|setup_password"), context)
+        elif entry == "email_prompt":
+            await bot._prompt_kaizen_password(sim._make_text_update("new@example.com"), context,
+                                             "new@example.com")
+        else:
+            update = sim._make_text_update("  new@example.com \n" if entry == "email" else "invalid")
+            update.message.delete = AsyncMock()
+            await bot.setup_username(update, context)
+            if entry == "email":
+                assert context.user_data["setup_username"] == "new@example.com"
+        assert bot._SETUP_RETRY_USERNAME_KEY not in context.user_data
+        assert bot._SETUP_RETRY_PASSWORD_KEY not in context.user_data
+        retry = sim._make_callback_update("ACTION|retry_setup_login")
+        assert await bot.setup_retry_login(retry, context) == bot.AWAIT_USERNAME
+    login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("password", ["  synthetic password  ", "\tsynthetic password\t", "\nsynthetic password "])
+async def test_setup_password_preserves_whitespace_except_trailing_newlines(password):
+    import bot
+    from engine.providers.kaizen import KaizenInfrastructureError
+
+    sim, update, context = _make_setup_password_harness()
+    update.message.text = password + "\r\n\n"
+    login = AsyncMock(side_effect=KaizenInfrastructureError("synthetic outage"))
+    with patch("bot._test_kaizen_login", new=login), patch("bot.store_credentials") as store:
+        assert await bot.setup_password(update, context) == bot.AWAIT_PASSWORD
+    login.assert_awaited_once_with("doctor@example.com", password)
+    assert bot._load_setup_retry_credentials(context) == ("doctor@example.com", password)
+    store.assert_not_called()
