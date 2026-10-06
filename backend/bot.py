@@ -7693,6 +7693,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
     # Can be triggered by command or callback. Anchor the setup flow message.
+    _clear_setup_retry_credentials(context)
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     in_place = False
     if query:
@@ -7730,6 +7731,7 @@ def _looks_like_case_not_credential(text: str, *, min_words: int, min_chars: int
 
 
 async def _leave_setup_for_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
     _flow_done(context, "setup")
@@ -7755,6 +7757,7 @@ async def _delete_typed_setup_reply(update: Update) -> bool:
 
 
 async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    _clear_setup_retry_credentials(context)
     text = update.message.text.strip()
     if _looks_like_case_not_credential(text, min_words=8, min_chars=60):
         return await _leave_setup_for_case(update, context)
@@ -7769,6 +7772,7 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _prompt_kaizen_password(
     update: Update, context: ContextTypes.DEFAULT_TYPE, username: str, *, in_place: bool = False
 ) -> int:
+    _clear_setup_retry_credentials(context)
     context.user_data["setup_username"] = username
     context.user_data["_setup_state_hint"] = "password"
     send = _flow_edit if in_place else _flow_msg
@@ -7900,7 +7904,7 @@ def _clear_setup_retry_credentials(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def setup_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     username = context.user_data.get("setup_username", "")
-    password = update.message.text.strip()
+    password = update.message.text.rstrip("\r\n")
     if _looks_like_case_not_credential(password, min_words=12, min_chars=80):
         return await _leave_setup_for_case(update, context)
 
@@ -8433,6 +8437,7 @@ async def setup_password_start(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     _stop_passwordless_watch(context, update.effective_user.id)
+    _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     context.user_data["_setup_state_hint"] = "username"
     if query.message is not None:

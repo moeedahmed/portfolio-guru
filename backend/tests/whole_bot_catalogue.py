@@ -47,10 +47,10 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-# Reviewed staging-only allowlist, offline save receipt/keyboard and browser
-# guard. Payload branches and live registration are unchanged; staging tests
-# exercise the first handler and offline save through the real bot flow.
-PRODUCER_DIGEST = '4faf1f83c8cc2da71aad8f20a24f2816720809bdc1981f9df1949613d8fd9cfd'
+# Reviewed setup retry invalidation and password whitespace preservation.
+# Wording, payload branches and registration are unchanged; offline login
+# reliability tests exercise fresh setup, email entry and stale Retry buttons.
+PRODUCER_DIGEST = 'b2e977c8cc47392f8d27e8cc02a501b63021ffb8d7c2c98e432bc0056d8cd9b1'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
