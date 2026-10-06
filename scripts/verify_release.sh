@@ -6,7 +6,8 @@
 # the complete offline pytest suite (matching the CI "Tests" job in
 # .github/workflows/test.yml) and existing preflight git-state checks.
 #
-# Still strictly offline/mocked — no live Telegram (test_e2e_live.py /
+# Strictly offline, including Chromium against loopback fake Kaizen — no
+# live Telegram (test_e2e_live.py /
 # `-m live`), no live Vertex AI, no live Kaizen/Playwright submission, no
 # live Stripe network. Live Telegram E2E stays a separate, explicitly
 # approved gate (see AGENTS.md).
@@ -19,6 +20,7 @@ set -euo pipefail
 # offline pytest child. They are not exported and cannot reach deploy/runtime
 # or live-proof commands.
 OFFLINE_TEST_ENV=(
+  PG_REQUIRE_BROWSER=1
   FERNET_SECRET_KEY=5Wv33F9sq99WGD2lEzwwd3J_JH5p6vxKdDiAwCWqoYQ=
   TELEGRAM_BOT_TOKEN=fake
   GOOGLE_API_KEY=fake
@@ -29,13 +31,15 @@ cd "$ROOT"
 
 echo "=== verify:release — Portfolio Guru full offline release gate ==="
 
-bash scripts/verify_changed.sh
+PG_REQUIRE_BROWSER=1 bash scripts/verify_changed.sh
 
 cd backend
 if [[ -x venv/bin/python3 ]]; then
   PY="venv/bin/python3"
 elif [[ -x .venv/bin/python3 ]]; then
   PY=".venv/bin/python3"
+elif [[ -x "$HOME/.local/share/portfolio-guru/venv/bin/python3" ]]; then
+  PY="$HOME/.local/share/portfolio-guru/venv/bin/python3"
 else
   PY="python3"
 fi

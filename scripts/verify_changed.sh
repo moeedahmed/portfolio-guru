@@ -4,8 +4,8 @@
 #
 # Fast, offline change-safety gate for Portfolio Guru. Run this before
 # calling ANY change "done". No live Telegram, no live Vertex AI, no live
-# Kaizen/Playwright, no live Stripe network calls — everything here is
-# mocked/offline pytest plus static guardrails.
+# Kaizen, no live Stripe network calls — offline pytest, including Chromium
+# against loopback fake Kaizen, plus static guardrails.
 #
 # Covers the critical product journeys (grounded in the current test suite,
 # not invented):
@@ -78,6 +78,7 @@ JOURNEY_TESTS=(
   # RCEM AI-use declaration must reach the filed entry and the approval preview
   tests/test_ai_declaration.py
   tests/test_filing_reliability.py
+  tests/test_kaizen_fake_browser.py
   tests/test_filing_attempt_log.py
   tests/test_curriculum_filing_recovery.py
   tests/test_esle_domains.py
@@ -117,7 +118,7 @@ JOURNEY_TESTS=(
 )
 
 echo
-echo "--- Journey smoke: ${#JOURNEY_TESTS[@]} test files, offline/mocked only ---"
+echo "--- Journey smoke: ${#JOURNEY_TESTS[@]} test files, offline only ---"
 env "${OFFLINE_TEST_ENV[@]}" "$PY" -m pytest "${JOURNEY_TESTS[@]}" -q
 
 echo
