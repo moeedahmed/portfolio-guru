@@ -10,7 +10,32 @@ This is the Portfolio Guru implementation of the wider OpenClaw Telegram bot tes
 - AI transcript review is a second-pass judgement layer for UX and clinical sense. It must not replace deterministic assertions.
 - TDLib / Telegram Desktop / OpenClaw QA Lab is the heavy proof lane. Use it only for visual evidence, bot-to-bot behaviour, screenshots, launch proof, or PR-grade audits.
 - Telegram Bot API checks are bot-side smoke checks only. They do not simulate a real user journey.
-- Browser/Kaizen automation is separate from Telegram QA and stays behind explicit launch or dogfood gates because it touches external clinical portfolio systems.
+- Live browser/Kaizen automation is separate from Telegram QA and stays behind explicit launch or dogfood gates because it touches external clinical portfolio systems.
+
+## Kaizen browser lane
+
+`tests/test_kaizen_fake_browser.py` (`kaizen_browser`) drives real Chromium
+through `file_to_kaizen`, including the RCEM sign-in hop, credential rejection,
+encrypted session reuse, mapped fields and draft save. A tiny stdlib HTTP fake
+runs on `127.0.0.1`; Playwright routes the three production hostnames to it and
+aborts every other host. Service workers and WebSockets are blocked; an inert
+loopback proxy also prevents Chromium background traffic reaching the internet.
+Python sockets remain restricted to loopback. No AI, real credentials or real
+Kaizen account is used, and staging/offline flags are unset only in these tests.
+
+Each mapped form must save the exact synthetic field values, including UK
+`d/m/yyyy` dates, return a saved document URL, and never click Submit / Send to
+assessor. Pages are generated from **our own selector map** (with existing
+schema options). This proves our filing code against that contract; it cannot
+prove compatibility after **Kaizen changes its real pages**, or its Angular
+behaviour, curriculum trees or attachment uploads. Fixed pacing delays are
+removed for these synchronous pages; real locator actions and navigations run.
+
+Run `python -m pytest tests/test_kaizen_fake_browser.py -m kaizen_browser -q`
+from `backend`. Install with `python -m playwright install chromium`.
+A missing browser may skip locally; `PG_REQUIRE_BROWSER=1` makes it fail and is
+set by CI and `verify_release.sh`. A present browser that cannot start always
+fails. The lane also runs in `verify_changed.sh` and the full offline suite.
 
 ## Launch Gate
 

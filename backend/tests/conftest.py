@@ -214,11 +214,32 @@ def _offline_network_is_fail_closed(request, monkeypatch):
     if request.node.get_closest_marker("live") or request.node.get_closest_marker("e2e_live") or request.node.get_closest_marker("kaizen") or request.path.name in {"test_e2e.py", "test_e2e_live.py"}:
         return
     import socket
+    # Only this lane owns a routed real browser and a loopback fake. Keep the
+    # socket guard for everything else, including non-loopback calls in it.
+    browser_lane = (
+        request.path.name == "test_kaizen_fake_browser.py"
+        and request.node.get_closest_marker("kaizen_browser") is not None
+    )
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_getaddrinfo = socket.getaddrinfo
     def refused(*args, **kwargs):
         pytest.fail("Offline test attempted a socket connection; stub the external boundary")
-    monkeypatch.setattr(socket.socket, "connect", refused)
-    monkeypatch.setattr(socket.socket, "connect_ex", refused)
-    monkeypatch.setattr(socket, "getaddrinfo", refused)
+    def guarded_connect(sock, address, *args, **kwargs):
+        if browser_lane and isinstance(address, tuple) and address[0] == "127.0.0.1":
+            return real_connect(sock, address, *args, **kwargs)
+        return refused()
+    def guarded_connect_ex(sock, address, *args, **kwargs):
+        if browser_lane and isinstance(address, tuple) and address[0] == "127.0.0.1":
+            return real_connect_ex(sock, address, *args, **kwargs)
+        return refused()
+    def guarded_getaddrinfo(host, *args, **kwargs):
+        if browser_lane and host == "127.0.0.1":
+            return real_getaddrinfo(host, *args, **kwargs)
+        return refused()
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
 
     # Playwright connects from its driver subprocess, beyond the socket guard.
     # Cover the public factories and aliases imported before fixture setup;
@@ -230,8 +251,9 @@ def _offline_network_is_fail_closed(request, monkeypatch):
     def browser_refused(*args, **kwargs):
         raise RuntimeError("offline tests must not start a real browser")
 
-    monkeypatch.setattr(playwright.async_api, "async_playwright", browser_refused)
-    monkeypatch.setattr(playwright.sync_api, "sync_playwright", browser_refused)
+    if not browser_lane:
+        monkeypatch.setattr(playwright.async_api, "async_playwright", browser_refused)
+        monkeypatch.setattr(playwright.sync_api, "sync_playwright", browser_refused)
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
     for module in list(sys.modules.values()):
         module_file = vars(module).get("__file__") if module is not None else None
@@ -240,7 +262,7 @@ def _offline_network_is_fail_closed(request, monkeypatch):
         if os.path.abspath(module_file).startswith(backend_dir + "tests" + os.sep):
             continue
         for name in ("async_playwright", "sync_playwright"):
-            if name in vars(module):
+            if not browser_lane and name in vars(module):
                 monkeypatch.setattr(module, name, browser_refused)
 
     # Navigation classification is a provider boundary, not the subject of legacy
