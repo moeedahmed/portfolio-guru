@@ -36,7 +36,7 @@ Never load the service before the staging checkout has a staging-capable commit.
 
 ## Test first, then promote
 
-**One lane per issue.** Each problem or feature has its own thread, branch, test-bot proof and Ship approval. The test bot runs main plus every change waiting for approval; a deploy never drops another thread's waiting change, and changes that touch the same code wait for the first to ship. Ask for Ship in a visible thread reply, never a pop-up; a typed "ship" from Moeed counts.
+**One lane per issue.** Each problem or feature has its own thread, branch, test-bot proof and Ship approval. The test bot runs main plus every change waiting for approval; a deploy never drops another thread's waiting change, and changes that touch the same code wait for the first to ship. Ship is asked like any other question (slide-up); a typed "ship" from Moeed also counts. Ask only for changes doctors will see, once per change: a later revision that does not change what doctors see stays covered by his tap (do not re-ask; mention the revision in the release line).
 
 From a clean feature branch, after the offline checks and a commit:
 
