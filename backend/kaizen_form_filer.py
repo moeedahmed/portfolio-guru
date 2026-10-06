@@ -2054,6 +2054,8 @@ _LOGIN_REJECTION_PHRASES = (
     "incorrect username",
     "credentials are incorrect",
     "login details are incorrect",
+    "not recognised",
+    "not recognized",
 )
 
 

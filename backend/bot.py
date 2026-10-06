@@ -8393,6 +8393,7 @@ async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT
             await _retire_clicked_keyboard(query)
         await _flow_msg(update, context, _KAIZEN_USERNAME_PROMPT, parse_mode="Markdown", flow_key="setup")
         return AWAIT_USERNAME
+    _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     if query and query.message is not None:
         context.user_data["_flow_anchor_setup"] = (query.message.chat_id, query.message.message_id)
