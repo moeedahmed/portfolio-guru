@@ -50,7 +50,7 @@ def producer_digest():
 # Reviewed setup retry invalidation and password whitespace preservation.
 # Wording, payload branches and registration are unchanged; offline login
 # reliability tests exercise fresh setup, email entry and stale Retry buttons.
-PRODUCER_DIGEST = 'b2e977c8cc47392f8d27e8cc02a501b63021ffb8d7c2c98e432bc0056d8cd9b1'
+PRODUCER_DIGEST = 'acea32c65906839f0c3370d5b78b812356e7e24e0e7d260246984ebfd528f38d'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
