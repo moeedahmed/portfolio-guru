@@ -17861,7 +17861,7 @@ async def _prompt_consent(
     return ConversationHandler.END
 
 
-async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
     """Record the consent decision. The prompted user's id is embedded in the
     callback data so another group member's tap can't consent on their behalf."""
     query = update.callback_query
@@ -18104,6 +18104,8 @@ def build_application() -> Application:
         application.add_handler(TypeHandler(Update, _allowed_user_gate), group=-1000)
     case_conv = ConversationHandler(
         entry_points=[
+            # Consent can resume captured input; keep its returned case state.
+            CallbackQueryHandler(handle_consent_callback, pattern=r"^CONSENT\|"),
             # /start enters the conversation so it's handled by a single handler,
             # not duplicated across group=0 fallbacks + group=1 standalone.
             CommandHandler("start", start),
@@ -18257,6 +18259,7 @@ def build_application() -> Application:
             ],
         },
         fallbacks=[
+            CallbackQueryHandler(handle_consent_callback, pattern=r"^CONSENT\|"),
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             CommandHandler("settings", settings_command),
@@ -18365,9 +18368,6 @@ def build_application() -> Application:
     # reset buttons in old chat history still complete.
     application.add_handler(CallbackQueryHandler(handle_reset_confirm, pattern=r"^CONFIRM\|(?:reset|delete)$"))
     application.add_handler(CallbackQueryHandler(handle_reset_keep, pattern=r"^CONFIRM\|keep$"))
-    # Consent decisions must work regardless of conversation state — the gate
-    # ends the conversation, so the accept/decline tap arrives outside it.
-    application.add_handler(CallbackQueryHandler(handle_consent_callback, pattern=r"^CONSENT\|"))
     application.add_handler(
         CallbackQueryHandler(
             handle_action_button,

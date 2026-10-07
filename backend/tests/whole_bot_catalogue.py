@@ -47,10 +47,10 @@ def producer_digest():
     return hashlib.sha256(json.dumps(modules).encode()).hexdigest()
 
 
-# Reviewed setup retry invalidation and password whitespace preservation.
-# Wording, payload branches and registration are unchanged; offline login
-# reliability tests exercise fresh setup, email entry and stale Retry buttons.
-PRODUCER_DIGEST = '90cb2c1ceab0a14d826440e625ed555e71fa8cf3e8819e1416c51f626c58a1c6'
+# Reviewed consent callback ownership: case_conv stores the resumed state.
+# Wording and payload branches are unchanged; offline dispatch tests cover
+# photo -> consent -> document intent and non-resuming state preservation.
+PRODUCER_DIGEST = '637cb7cd7c6145a0c9c0d3184485a2a2e195b1bb41a4dffa9a7829f7931ffe36'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -194,7 +194,8 @@ def reviewed_units(slots):
     return dict(sorted(units.items()))
 
 
-CATALOGUE_DIGEST = '888501bc5a0d55247aa2857af5c6398750f3a2ee33a94f99bcd7006b232ca254'
+# Registration candidate paths shift when consent moves into case_conv.
+CATALOGUE_DIGEST = '8dfe777d7134852697a45ce8a4d9deca3d7662e22ba0c0083082838df70bf264'
 
 
 def requirements_digest(units):

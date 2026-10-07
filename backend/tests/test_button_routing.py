@@ -67,6 +67,31 @@ def test_passwordless_reconnect_stays_inside_the_case_conversation(app):
     assert _route(app, update, case_state=bot.AWAIT_APPROVAL) == ("case_conv", "passwordless_reconnected")
 
 
+@pytest.mark.parametrize("case_state", [None, bot.AWAIT_APPROVAL])
+def test_consent_accept_stays_inside_the_case_conversation(app, case_state):
+    update = make_callback_update(f"CONSENT|accept|{TEST_USER.id}")
+    assert _route(app, update, case_state=case_state) == (
+        "case_conv", "handle_consent_callback")
+
+
+def test_setup_conversation_does_not_swallow_consent_taps(app):
+    setup = next(
+        handler for handler in app.handlers[0]
+        if isinstance(handler, ConversationHandler)
+        and any(getattr(entry, "callback", None) is bot.setup_start
+                for entry in handler.entry_points)
+    )
+    update = make_callback_update(f"CONSENT|accept|{TEST_USER.id}")
+    try:
+        for state in [None, *setup.states]:
+            setup._conversations.clear()
+            if state is not None:
+                setup._conversations[(TEST_CHAT.id, TEST_USER.id)] = state
+            assert setup.check_update(update) is None
+    finally:
+        setup._conversations.clear()
+
+
 @pytest.mark.parametrize("branch", sorted(CALLBACK_BRANCHES))
 def test_no_known_button_is_silently_dropped_when_idle(app, branch):
     data = branch.replace("*", "2025" if branch.startswith("FILING_CURRICULUM|") else "aaaaaaaa")

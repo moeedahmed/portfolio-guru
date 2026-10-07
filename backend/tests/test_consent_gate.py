@@ -21,6 +21,8 @@ import pytest
 from telegram.ext import ConversationHandler
 
 from tests.bot_simulator import BotSimulator
+from tests.helpers import TEST_CHAT, TEST_USER, make_callback_update
+from tests.test_e2e_offline import offline_app, _prepare_update
 
 
 def _all_visible_text(sim: BotSimulator) -> str:
@@ -161,6 +163,123 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
     assert "_consent_pending_input" not in context.user_data
 
     Path(pending_doc["path"]).unlink(missing_ok=True)
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+async def test_photo_consent_dispatch_stores_state_and_routes_document_intent(
+    offline_app, tmp_consent_db, monkeypatch, tmp_path,
+):
+    import bot
+    from datetime import datetime, timezone
+    from telegram import Message, PhotoSize, Update
+
+    app, collector = offline_app
+    conv = next(handler for handler in app.handlers[0]
+                if isinstance(handler, ConversationHandler) and handler.name == "case_conv")
+    key = (TEST_CHAT.id, TEST_USER.id)
+    monkeypatch.setattr(bot, "has_credentials", lambda user_id: True)
+    photo = Update(update_id=1, message=Message(
+        message_id=1, date=datetime.now(timezone.utc), chat=TEST_CHAT, from_user=TEST_USER,
+        photo=[PhotoSize(file_id="consent-photo", file_unique_id="photo", width=10, height=10)],
+        caption="I reviewed this ECG and documented my interpretation.",
+    ))
+    image_path = tmp_path / "consent-image.jpg"
+
+    async def download(path):
+        Path(path).write_bytes(b"synthetic image")
+
+    file_obj = MagicMock(download_to_drive=AsyncMock(side_effect=download))
+    get_file = AsyncMock(return_value=file_obj)
+    monkeypatch.setattr(type(app.bot), "get_file", get_file)
+    file_handle = MagicMock()
+    file_handle.name = str(image_path)
+    file_handle.__enter__.return_value = file_handle
+    monkeypatch.setattr(bot.tempfile, "NamedTemporaryFile", lambda **kwargs: file_handle)
+    read_image = AsyncMock(return_value=("Synthetic report text", []))
+    monkeypatch.setattr(bot, "_read_image_text", read_image)
+    process_case = AsyncMock(return_value=bot.AWAIT_FORM_CHOICE)
+    monkeypatch.setattr(bot, "_process_case_text", process_case)
+    document_intent = AsyncMock(wraps=bot.handle_document_intent)
+    # Wrap the registered callback while keeping production routing and state updates real.
+    for handler in conv.states[bot.AWAIT_DOC_INTENT]:
+        if handler.callback is bot.handle_document_intent:
+            monkeypatch.setattr(handler, "callback", document_intent)
+    unhandled = AsyncMock()
+    for handler in app.handlers[0]:
+        if getattr(handler, "callback", None) is bot._answer_unhandled_button:
+            monkeypatch.setattr(handler, "callback", unhandled)
+
+    _prepare_update(photo, app.bot)
+    await app.process_update(photo)
+    assert conv._conversations.get(key) is None
+    assert app.user_data[TEST_USER.id]["_consent_pending_input"]["kind"] == "photo"
+    get_file.assert_not_awaited()
+    read_image.assert_not_awaited()
+
+    accept = make_callback_update(f"CONSENT|accept|{TEST_USER.id}")
+    _prepare_update(accept, app.bot)
+    await app.process_update(accept)
+    assert await tmp_consent_db.has_current_consent(TEST_USER.id)
+    get_file.assert_awaited_once_with("consent-photo")
+    assert app.user_data[TEST_USER.id]["_pending_doc"]["path"] == str(image_path)
+    assert image_path.exists()
+    assert conv._conversations.get(key) == bot.AWAIT_DOC_INTENT
+    assert any(button.callback_data == "DOCUSE|info"
+               for row in collector.sent[-1]["reply_markup"].inline_keyboard for button in row)
+    read_image.assert_not_awaited()
+
+    info = make_callback_update("DOCUSE|info")
+    _prepare_update(info, app.bot)
+    await app.process_update(info)
+    document_intent.assert_awaited_once()
+    unhandled.assert_not_awaited()
+    read_image.assert_awaited_once_with(str(image_path))
+    process_case.assert_awaited_once()
+    assert conv._conversations.get(key) == bot.AWAIT_FORM_CHOICE
+    assert "_pending_doc" not in app.user_data[TEST_USER.id]
+    assert not image_path.exists()
+
+
+@pytest.mark.consent_gate
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_state", [None, "approval"])
+@pytest.mark.parametrize("source,action,other_account", [
+    ("case", "accept", False), ("case", "decline", False), ("case", "review", False),
+    ("setup", "accept", False), ("setup", "decline", False), ("setup", "review", False),
+    ("case", "accept", True),
+])
+async def test_non_resuming_consent_dispatch_preserves_case_state(
+    offline_app, tmp_consent_db, monkeypatch, case_state, source, action, other_account,
+):
+    import bot
+
+    app, _ = offline_app
+    conv = next(handler for handler in app.handlers[0]
+                if isinstance(handler, ConversationHandler) and handler.name == "case_conv")
+    key = (TEST_CHAT.id, TEST_USER.id)
+    initial_state = bot.AWAIT_APPROVAL if case_state == "approval" else None
+    if initial_state is not None:
+        conv._conversations[key] = initial_state
+    app.user_data[TEST_USER.id]["_consent_prompt_source"] = source
+    if source == "setup" or other_account:
+        app.user_data[TEST_USER.id]["_consent_pending_input"] = {
+            "kind": "text", "text": "Synthetic case held for consent",
+        }
+    resume = AsyncMock()
+    monkeypatch.setattr(bot, "_resume_pending_consent_input", resume)
+    target = TEST_USER.id + 1 if other_account else TEST_USER.id
+    update = make_callback_update(f"CONSENT|{action}|{target}")
+    _prepare_update(update, app.bot)
+    await app.process_update(update)
+
+    state = conv._conversations.get(key)
+    assert state == initial_state
+    resume.assert_not_awaited()
+    granted = await tmp_consent_db.has_current_consent(TEST_USER.id)
+    assert granted is (action == "accept" and not other_account)
+    if other_account or action == "review":
+        assert app.user_data[TEST_USER.id]["_consent_prompt_source"] == source
 
 
 @pytest.mark.consent_gate
