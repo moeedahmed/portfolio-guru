@@ -16,7 +16,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$ACTION" in deploy|smoke|approve|status) ;; *) echo "Usage: scripts/stage.sh deploy|smoke|approve|status [--sha <40hex>] [--note <line>]"; exit 64 ;; esac
-if [[ "$ACTION" != deploy && -z "$SHA" ]]; then echo "--sha is required" >&2; exit 64; fi
+# deploy, smoke and status default to HEAD. approve never does: the approval must
+# name the exact SHA Moeed tried, and HEAD may have moved since.
+if [[ "$ACTION" == approve && -z "$SHA" ]]; then echo "approve needs --sha <40hex>: the SHA Moeed tried on the test bot" >&2; exit 64; fi
 SHA="${SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
 [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "Full 40-hex SHA required" >&2; exit 64; }
 SHA="$(printf '%s' "$SHA" | tr '[:upper:]' '[:lower:]')"

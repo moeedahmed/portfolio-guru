@@ -33,6 +33,13 @@ changes need automated smoke only. Then prepare the immutable release card and
 run its exact printed ship command. See [Test bot](staging-bot.md) for setup,
 isolation, receipts and staging rollback.
 
+Ship is a long step. Before `release_loop.sh --mode ship` (push, CI, deploy,
+runtime proof, often 15 minutes or more), the thread's progress list must already
+say that Ship arrived and that the release is running; the list is refreshed
+before each long step, not after, so a usage limit or lost session leaves an
+honest line behind. On resume, refresh the list from live state first. The
+"live for users" reply comes only after the list shows every line resolved.
+
 Fresh ship checks an exact-SHA staging receipt before any remote mutation:
 `smoke=pass`, `automated=pass`, and (telegram/broad) `moeed_approved=true`.
 Missing proof blocks with the precise staging command. Redeploy/smoke invalidates

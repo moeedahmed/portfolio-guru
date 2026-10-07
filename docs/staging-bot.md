@@ -50,6 +50,11 @@ scripts/release_loop.sh --mode prepare --risk telegram --effect "<doctor-visible
 # Run the exact pinned ship command prepare prints, with its SHA:digest approval.
 ```
 
+Only `approve` insists on `--sha`, because it records the SHA Moeed tried;
+`deploy`, `smoke` and `status` default to HEAD. When his Ship arrives, tick the
+waiting line in the thread's progress list before running `approve`, and refresh
+it again before each long step (`deploy`, `smoke`, the ship command).
+
 `deploy` requires a clean branch and publishes it with plain
 `git push -u origin <branch>` only if HEAD is not already on an origin branch.
 It fetches all origin branches, deploys the exact detached SHA into
