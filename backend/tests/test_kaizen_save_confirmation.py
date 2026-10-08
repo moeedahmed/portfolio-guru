@@ -138,5 +138,7 @@ async def test_retry_that_cannot_reopen_its_draft_creates_nothing():
         )
 
     assert result["status"] == "failed"
-    assert "check your Kaizen drafts" in result["error"]
+    assert "start a fresh one" in result["error"]
+    # Tells the bot to forget the dead address so Retry starts a new form.
+    assert result["reopen_failed"] is True
     save.assert_not_awaited()

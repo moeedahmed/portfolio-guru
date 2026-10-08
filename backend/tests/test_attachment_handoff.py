@@ -184,14 +184,19 @@ async def test_video_case_stores_pending_video_and_asks_attach_intent():
     # A video has no text, so there is nothing to decide: it attaches and the
     # bot asks for the one thing it actually needs, the doctor's account.
     assert result == AWAIT_CASE_INPUT
-    assert context.user_data["_pending_doc"]["kind"] == "video"
-    assert context.user_data["_pending_doc"]["name"] == "portfolio-video.mp4"
+    attached = context.user_data["attachments"][0]
+    assert attached["kind"] == "video"
+    assert attached["name"] == "portfolio-video.mp4"
+    # Attached means nothing is pending: a leftover marker would route the
+    # doctor's next reply to a document choice that has no buttons.
+    assert "_pending_doc" not in context.user_data
+    assert "_pending_docs" not in context.user_data
     assert context.user_data["_pending_doc_context"] == update.message.caption
-    assert os.path.exists(context.user_data["_pending_doc"]["path"])
+    assert os.path.exists(attached["path"])
     assert sim.get_last_buttons() == []
     assert any("attached to this case" in t for _, t, _ in sim.messages_sent if t)
 
-    path = context.user_data["_pending_doc"]["path"]
+    path = attached["path"]
     if os.path.exists(path):
         os.unlink(path)
 
@@ -232,9 +237,10 @@ async def test_video_sent_as_document_uses_video_intent_not_voice_transcription(
     assert result == AWAIT_CASE_INPUT
     transcribe_mock.assert_not_called()
     document_extract.assert_not_called()
-    pending_doc = context.user_data["_pending_doc"]
+    pending_doc = context.user_data["attachments"][0]
     assert pending_doc["kind"] == "video"
     assert pending_doc["name"] == "portfolio-video.mp4"
+    assert "_pending_doc" not in context.user_data
     assert context.user_data["_pending_doc_context"] == update.message.caption
     assert sim.get_last_buttons() == []
     assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
@@ -1584,11 +1590,11 @@ async def test_album_shows_one_prompt_that_updates_not_three():
 
     first, second, third = _ack(1), _ack(2), _ack(3)
 
-    bot._queue_pending_media(context, {"path": "/tmp/a.mp4", "name": "a.mp4", "kind": "video"})
-    await bot._show_pending_media_prompt(context, first, single="🎞️ Video received")
+    bot._queue_pending_media(context, {"path": "/tmp/a.pdf", "name": "a.pdf", "kind": "document"})
+    await bot._show_pending_media_prompt(context, first, single="📄 Document received")
 
-    bot._queue_pending_media(context, {"path": "/tmp/b.mp4", "name": "b.mp4", "kind": "video"})
-    await bot._show_pending_media_prompt(context, second, single="🎞️ Video received")
+    bot._queue_pending_media(context, {"path": "/tmp/b.pdf", "name": "b.pdf", "kind": "document"})
+    await bot._show_pending_media_prompt(context, second, single="📄 Document received")
 
     bot._queue_pending_media(
         context,
@@ -1609,7 +1615,7 @@ async def test_album_shows_one_prompt_that_updates_not_three():
     assert context.bot.edit_message_text.await_count == 2
     final = context.bot.edit_message_text.await_args.kwargs
     assert final["message_id"] == 1
-    assert "2 videos and 1 image" in final["text"]
+    assert "2 documents and 1 image" in final["text"]
 
 
 @pytest.mark.asyncio
@@ -1787,3 +1793,82 @@ def test_a_vanished_temp_file_is_not_queued():
     context = sim._make_context()
     assert bot._cache_and_queue_attachment(context, "/tmp/gone.jpg", "gone.jpg", "image") is False
     assert bot._case_attachments(context) == []
+
+
+@pytest.mark.asyncio
+async def test_unreadable_files_are_attached_and_leave_nothing_pending():
+    """An ECG/X-ray photo or a video has no text, so it attaches straight away.
+
+    Leaving it pending routed the doctor's next reply to a document choice with
+    no buttons, and Save died there.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    ack = MagicMock()
+    ack.chat_id = 99
+    ack.message_id = 1
+    ack.edit_text = AsyncMock()
+
+    bot._queue_pending_media(
+        context, {"path": "/tmp/ecg.jpg", "name": "portfolio-image.jpg", "kind": "image", "text": ""}
+    )
+    state = await bot._show_pending_media_prompt(context, ack, single="📷 Image received")
+
+    assert state == bot.AWAIT_CASE_INPUT
+    assert [a["path"] for a in context.user_data["attachments"]] == ["/tmp/ecg.jpg"]
+    assert "_pending_doc" not in context.user_data
+    assert "_pending_docs" not in context.user_data
+
+    # The next file of the album is numbered after the one already attached.
+    assert bot._numbered_media_name(context, "portfolio-image", ".jpg") == "portfolio-image-2.jpg"
+
+
+@pytest.mark.asyncio
+async def test_caption_on_attached_video_still_reaches_the_case():
+    import bot
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["_pending_doc_context"] = "POCUS clip, findings below"
+
+    merged = bot._merge_pending_video_context(context, "RUQ view, free fluid in Morison's pouch")
+
+    assert merged.startswith("POCUS clip, findings below")
+    assert "_pending_doc_context" not in context.user_data
+
+
+@pytest.mark.asyncio
+async def test_image_sent_as_file_takes_the_photo_path_and_keeps_case_on_oversize():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import bot
+    from bot import AWAIT_FORM_CHOICE, handle_case_input
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = "Earlier case text already captured"
+    update = sim._make_text_update('')
+    document = MagicMock()
+    document.file_name = "xray.PNG"
+    document.mime_type = "image/png"
+    document.file_size = 30 * 1024 * 1024
+    document.get_file = AsyncMock()
+    update.message.text = None
+    update.message.voice = None
+    update.message.audio = None
+    update.message.photo = []
+    update.message.video = None
+    update.message.document = document
+
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 10, 'free'))):
+        result = await handle_case_input(update, context)
+
+    assert result == AWAIT_FORM_CHOICE
+    document.get_file.assert_not_awaited()
+    assert context.user_data["case_text"] == "Earlier case text already captured"
+    assert any("download limit" in t for _, t, _ in sim.messages_sent if t)

@@ -1187,6 +1187,46 @@ def _guard_profile_admin_backfill(fields: dict) -> dict:
     return out
 
 
+# Schema fields with no DOM control of their own that are still handled by a
+# dedicated step (curriculum ticking, the stage widget, procedural-skill
+# selects). They are not "unfiled" even though FORM_FIELD_MAP has no entry.
+_HANDLED_ELSEWHERE_FIELDS = frozenset({
+    "curriculum_links",
+    "key_capabilities",
+    "stage_of_training",
+    "accs_procedural_skill",
+    "intermediate_procedural_skill",
+    "higher_procedural_skill",
+})
+
+
+def unfiled_schema_fields(form_type: str, fields: dict, field_map: dict) -> list[str]:
+    """Non-empty schema fields that have no DOM target and no merge rule.
+
+    The fill loop only walks ``field_map``, so a field the doctor supplied
+    that has nowhere to go (e.g. AUDIT reflection) would otherwise vanish while
+    the bot reports a clean save. Returning them lets the caller list each one
+    as a gap the doctor can add in Kaizen.
+    """
+    from extractor import schema_form_type
+    from form_schemas import FORM_SCHEMAS
+
+    try:
+        schema = FORM_SCHEMAS[schema_form_type(form_type)]
+    except KeyError:
+        return []
+    gaps = []
+    for field in schema["fields"]:
+        key = field["key"]
+        if key in field_map or key in _HANDLED_ELSEWHERE_FIELDS:
+            continue
+        value = (fields or {}).get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        gaps.append(key)
+    return gaps
+
+
 def required_field_handling(form_type: str, field_key: str) -> str | None:
     form_type = canonical_form_type(form_type)
     handling_key = form_type[:-5] if form_type.endswith("_2021") else form_type
@@ -4927,11 +4967,15 @@ async def file_to_kaizen(
             await page.goto(reuse_draft_url, wait_until="domcontentloaded", timeout=40000)
             await asyncio.sleep(4)
             if not _saved_draft_url(page.url):
-                return _early_filing_failure(
+                failure = _early_filing_failure(
                     form_type,
-                    "Couldn't reopen the draft from the last attempt. "
-                    "Please check your Kaizen drafts before trying again.",
+                    "Couldn't reopen the earlier draft, so Retry will start "
+                    "a fresh one. Check your Kaizen drafts for the older copy.",
                 )
+                # The caller must forget the dead address, or every Retry
+                # would try to reopen it again.
+                failure["reopen_failed"] = True
+                return failure
             reused_draft = True
 
         if not reused_draft:
@@ -5015,6 +5059,10 @@ async def file_to_kaizen(
         if answered_proc:
             filled.append(f"procedural_skills ({len(answered_proc)})")
         for gap in unresolved_proc:
+            if gap not in skipped:
+                skipped.append(gap)
+
+        for gap in unfiled_schema_fields(form_type, fields, field_map):
             if gap not in skipped:
                 skipped.append(gap)
 

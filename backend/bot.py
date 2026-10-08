@@ -1488,6 +1488,34 @@ def _document_looks_like_video(document) -> bool:
     return mime_type.startswith("video/") or file_name.endswith(_VIDEO_DOCUMENT_EXTENSIONS)
 
 
+_IMAGE_DOCUMENT_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _document_looks_like_image(document) -> bool:
+    """A JPG/PNG/WebP sent as a file rather than as a compressed photo."""
+    if not document:
+        return False
+    file_name = (getattr(document, "file_name", None) or "").lower()
+    mime_type = (getattr(document, "mime_type", None) or "").lower()
+    return file_name.endswith(_IMAGE_DOCUMENT_EXTENSIONS) or mime_type in (
+        "image/jpeg", "image/png", "image/webp",
+    )
+
+
+def _image_media_from_message(message):
+    """The photo (largest size) or the image sent as a file, else None."""
+    photo = getattr(message, "photo", None)
+    if photo:
+        return photo[-1]
+    document = getattr(message, "document", None)
+    return document if _document_looks_like_image(document) else None
+
+
+def _image_media_suffix(media) -> str:
+    suffix = os.path.splitext(getattr(media, "file_name", None) or "")[1].lower()
+    return suffix if suffix in _IMAGE_DOCUMENT_EXTENSIONS else ".jpg"
+
+
 def _video_media_from_message(message):
     """Return a video attachment, including MP4s Telegram sends as documents."""
     video = getattr(message, "video", None)
@@ -1851,6 +1879,44 @@ def _clear_filing_retry_state(context) -> None:
         "retry_filing_requested", "last_filing_uncertain",
     ):
         context.user_data.pop(key, None)
+
+
+def _forget_last_filing(context) -> None:
+    """A new case is starting: the previous filing no longer describes it.
+
+    Left in place, "did it save?" would answer about the old case and end the
+    conversation mid-case, and a short "file as DOPS" could silently reload
+    the old case text instead of belonging to the new one.
+    """
+    _clear_filing_retry_state(context)
+    context.user_data.pop("last_filed_case_text", None)
+
+
+def _case_is_open(context) -> bool:
+    """True while a case is being gathered, chosen, drafted or reviewed."""
+    user_data = context.user_data
+    return bool(
+        user_data.get("case_text")
+        or user_data.get("pending_case_bundle")
+        or user_data.get("chosen_form")
+        or _gathering_case_active(context)
+        or _load_draft(context)
+        or _load_pending_draft(context)
+    )
+
+
+def _state_after_media_rejection(context) -> int:
+    """Where a rejected upload leaves the doctor: back at whatever was open."""
+    if context.user_data.get("_pending_doc"):
+        return AWAIT_DOC_INTENT
+    return _content_state_while_media_pending(context)
+
+
+def _state_after_filing_status_answer(context) -> int:
+    """Answering "did it save?" must not end a case that is still open."""
+    if _case_is_open(context):
+        return _content_state_while_media_pending(context)
+    return ConversationHandler.END
 
 
 def _last_filing_retryable(context) -> bool:
@@ -9287,7 +9353,8 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
     # An old "same case" button must not wipe a newer case that is still open.
     open_case = (context.user_data.get("case_text") or "").strip()
     last_filed = (context.user_data.get("last_filed_case_text") or "").strip()
-    if open_case and last_filed and open_case != last_filed:
+    # With no filed case remembered (a newer case cleared it) any open case is newer.
+    if open_case and (not last_filed or open_case != last_filed):
         await _retire_clicked_keyboard(query)
         return await _resume_paused_flow(update, context, "📝 You already have a newer case open.")
 
@@ -11963,7 +12030,7 @@ def _numbered_media_name(context, stem: str, suffix: str) -> str:
     shows identically and which the filer's per-filename upload check cannot
     tell apart.
     """
-    position = len(_pending_media_items(context)) + 1
+    position = len(_pending_media_items(context)) + len(_case_attachments(context)) + 1
     return f"{stem}{suffix}" if position == 1 else f"{stem}-{position}{suffix}"
 
 
@@ -11993,6 +12060,10 @@ async def _show_pending_media_prompt(context, ack, *, single: str) -> int:
                     context, item["path"], item.get("name"), item.get("kind") or "document"
                 )
         context.user_data["attachment_upload_confirmed"] = True
+        # Attached, so nothing is pending any more. Left set, the next reply
+        # would route to a document choice that has no buttons and Save dies.
+        context.user_data.pop("_pending_doc", None)
+        context.user_data.pop("_pending_docs", None)
         count = len(_case_attachments(context))
         noun = "file" if count == 1 else "files"
         text = (
@@ -12339,6 +12410,8 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     context.user_data["case_input_source"] = input_source
     _remember_case_context_source(context, input_source)
     context.user_data.pop("awaiting_source_detail", None)
+    if input_source != "same case":
+        _forget_last_filing(context)
 
     explicit_form = extract_explicit_form_type(case_text)
     if explicit_form and _normalise_form_type(explicit_form) in _excluded_form_types(context):
@@ -12837,7 +12910,9 @@ def _merge_pending_video_context(context: ContextTypes.DEFAULT_TYPE, text: str) 
     """Move user-authored video context into the case while retaining cached bytes."""
     user_data = context.user_data or {}
     pending = user_data.get("_pending_doc") or {}
-    if pending.get("kind") != "video":
+    # An image/document choice still pending keeps its caption for that choice;
+    # a video, or a file already attached, hands its caption to the case.
+    if pending and pending.get("kind") != "video":
         return text
     caption = user_data.pop("_pending_doc_context", "").strip()
     return f"{caption}\n\n{text}".strip() if caption else text
@@ -13919,9 +13994,16 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # too", etc. We must route this BEFORE extraction — otherwise the LLM
     # would try to extract clinical fields from the instruction text and
     # hallucinate content. See feedback-no-fabrication memory.
+    # Only when no case is open and the message carries no case of its own:
+    # otherwise "file as a DOPS" typed mid-case would swap in the last filed
+    # case. The 🔁 button is the way to reuse a case while another is open.
     if update.message and update.message.text and context.user_data.get("last_filed_case_text"):
         raw_text = update.message.text.strip()
-        if is_reuse_request(raw_text):
+        if (
+            is_reuse_request(raw_text)
+            and not _case_is_open(context)
+            and not _has_rich_clinical_evidence(raw_text)
+        ):
             return await _handle_reuse_request(update, context, user_id, raw_text)
 
     # Clear post_reset flag if set (belt and braces)
@@ -14009,7 +14091,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(
                     f"❌ {form_name} did not complete. Try again from the latest draft or start fresh."
                 )
-            return ConversationHandler.END
+            return _state_after_filing_status_answer(context)
 
         # Missing-field recovery: "you didn't fill the rest of the details for
         # this ticket" must NOT reset to idle copy. Preserve the just-filed
@@ -14035,6 +14117,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     _case_text_with_reply_context(raw_text, reply_text),
                     "text",
                 )
+            _forget_last_filing(context)
             context.user_data["chosen_form"] = explicit_start_form
             context.user_data["awaiting_detail"] = True
             context.user_data["awaiting_detail_at"] = time.time()
@@ -14043,7 +14126,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if explicit_start_form:
             ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
             _track_latest_message(context, ack)
-            return await _process_case_text(update.message, context, user_id, raw_text, "text")
+            return await _process_case_text(
+                update.message, context, user_id,
+                _merge_pending_video_context(context, raw_text), "text",
+            )
 
         if context.user_data.get("pending_case_bundle"):
             if _looks_like_new_case_start(raw_text) and _pending_case_bundle_is_stale(context):
@@ -14315,14 +14401,23 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    elif update.message.photo:
+    elif _image_media_from_message(update.message):
+        image_media = _image_media_from_message(update.message)
+        image_suffix = _image_media_suffix(image_media)
+        if _media_exceeds_telegram_download_limit(image_media):
+            await update.message.reply_text(
+                f"⚠️ That image is over Telegram's {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB bot download limit, "
+                "so I can't read it here. Your case so far is untouched.\n\n"
+                "Send it as a normal photo, or describe it in text."
+            )
+            return _state_after_media_rejection(context)
         bundling = bool(context.user_data.get("pending_case_bundle"))
         _audit_event(
             context,
             "media_document_flow",
             action="photo_received",
             bundling=bundling,
-            photo_count=len(update.message.photo or []),
+            photo_count=len(update.message.photo or []) or 1,
             has_caption=bool((update.message.caption or "").strip()),
         )
         if bundling:
@@ -14335,9 +14430,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             tmp_path = None
             try:
-                photo = update.message.photo[-1]
-                photo_file = await photo.get_file()
-                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                photo_file = await image_media.get_file()
+                with tempfile.NamedTemporaryFile(suffix=image_suffix, delete=False) as tmp:
                     tmp_path = tmp.name
                     await photo_file.download_to_drive(tmp_path)
                     case_text, _removed_labels = await _read_image_text(tmp_path)
@@ -14398,15 +14492,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         tmp_path = None
         try:
             import shutil
-            photo = update.message.photo[-1]
-            photo_file = await photo.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            photo_file = await image_media.get_file()
+            with tempfile.NamedTemporaryFile(suffix=image_suffix, delete=False) as tmp:
                 tmp_path = tmp.name
                 await photo_file.download_to_drive(tmp_path)
 
             cache_dir = os.path.join(tempfile.gettempdir(), "portfolio_guru_cache")
             os.makedirs(cache_dir, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=".jpg", delete=False) as cached_file:
+            with tempfile.NamedTemporaryFile(dir=cache_dir, suffix=image_suffix, delete=False) as cached_file:
                 cached_path = cached_file.name
             shutil.copy2(tmp_path, cached_path)
 
@@ -14428,7 +14521,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             _queue_pending_media(context, {
                 "path": cached_path,
-                "name": _numbered_media_name(context, "portfolio-image", ".jpg"),
+                "name": _numbered_media_name(context, "portfolio-image", image_suffix),
                 "kind": "image",
                 "text": image_text,
                 "read_failed": not image_text,
@@ -14444,7 +14537,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "media_document_flow",
                 action="photo_cached_for_intent",
                 attachment_kind="image",
-                file_name="portfolio-image.jpg",
+                file_name=f"portfolio-image{image_suffix}",
                 has_caption=bool(caption),
             )
 
@@ -14636,6 +14729,14 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
 
+        if _media_exceeds_telegram_download_limit(doc):
+            await update.message.reply_text(
+                f"⚠️ That file is over Telegram's {TELEGRAM_BOT_API_DOWNLOAD_LIMIT_MB} MB bot download limit, "
+                "so I can't read it here. Your case so far is untouched.\n\n"
+                "Send a smaller copy, or describe it in text."
+            )
+            return _state_after_media_rejection(context)
+
         await _delete_previous_gathering_message(context)
         ack = await update.message.reply_text("📄 Receiving document…")
         tmp_path = None
@@ -14661,11 +14762,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 action="document_cache_failed",
                 error=type(e).__name__,
             )
-            context.user_data.clear()
             await ack.edit_text(
-                "⚠️ Couldn't receive that document. Try again or describe the case in text."
+                "⚠️ Couldn't receive that document. Your case so far is untouched. "
+                "Try again or describe the case in text."
             )
-            return ConversationHandler.END
+            return _state_after_media_rejection(context)
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -14717,7 +14818,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if previous_case:
             case_text = f"{previous_case}\n\n{case_text}".strip()
 
-    if update.message.photo:
+    if _image_media_from_message(update.message):
         input_source = "photo"
     elif _voice_media_from_message(update.message):
         input_source = "voice"
@@ -14726,7 +14827,9 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         input_source = "text"
 
-    if input_source in {"text", "voice"} and _pending_media_label(context) == "video":
+    if input_source in {"text", "voice"} and (
+        _pending_media_label(context) == "video" or not context.user_data.get("_pending_doc")
+    ):
         case_text = _merge_pending_video_context(context, case_text)
 
     if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
@@ -16069,7 +16172,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             retry_typing_stop.set()
             retry_typing_task.cancel()
 
-    if result.get("draft_url"):
+    if result.get("reopen_failed"):
+        # The remembered draft is gone; keeping it would make every Retry
+        # try the same dead address.
+        for key in ("kaizen_draft_url", "amend_draft_url", "last_amend_draft_url"):
+            context.user_data.pop(key, None)
+    elif result.get("draft_url"):
         context.user_data["kaizen_draft_url"] = result["draft_url"]
 
     defaulted_fields = set(result.get("defaulted_fields") or [])
@@ -17282,7 +17390,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             await update.message.reply_text(
                 f"❌ {form_name} did not complete. Try again from the latest draft or start fresh."
             )
-        return ConversationHandler.END
+        return _state_after_filing_status_answer(context)
 
     phase = _workflow_phase_for_text_turn(context, has_draft=has_draft, in_flow=in_flow)
     turn = decide_workflow_turn(

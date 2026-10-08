@@ -50,7 +50,9 @@ def producer_digest():
 # Reviewed consent callback ownership: case_conv stores the resumed state.
 # Wording and payload branches are unchanged; offline dispatch tests cover
 # photo -> consent -> document intent and non-resuming state preservation.
-PRODUCER_DIGEST = '637cb7cd7c6145a0c9c0d3184485a2a2e195b1bb41a4dffa9a7829f7931ffe36'
+# Batch A (stop losing work): bot.py state/clean-up changes only; no keyboard
+# or callback payload added, removed or reworded.
+PRODUCER_DIGEST = 'fcab38c8b9c1d0486e97ed20f16da9fd2c3250f03d11d7544f1da278771b2c8c'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
