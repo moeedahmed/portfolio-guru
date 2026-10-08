@@ -292,6 +292,7 @@ async def test_draft_save_never_clicks_an_input_button_labelled_send_or_submit(l
 @pytest.mark.parametrize("namer", (
     '<span id="name">Save and send to assessor</span>',
     '<span id="name" aria-label="Send to assessor">Save</span>',
+    '<label for="save" aria-label="Send to assessor">Save</label><span id="name">Save</span>',
 ))
 async def test_draft_save_never_clicks_a_save_button_named_send_by_another_element(namer):
     """A button's visible "Save" can be overridden by an aria-labelledby name."""
@@ -301,9 +302,9 @@ async def test_draft_save_never_clicks_a_save_button_named_send_by_another_eleme
             page = await browser.new_page()
             await page.set_content(
                 namer +
-                '<div role="button" aria-labelledby="name" onclick="window.clicked = true">Save</div>'
+                '<button id="save" type="button" aria-labelledby="name" onclick="window.clicked = true">Save</button>'
             )
-            saved = await filer._try_save_selectors(page, ['[role="button"]:has-text("Save")'], True)
+            saved = await filer._try_save_selectors(page, ['#save'], True)
             assert saved is False
             assert await page.evaluate("window.clicked === true") is False
         finally:

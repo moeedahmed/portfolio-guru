@@ -3350,12 +3350,13 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
 
 _SAVE_LABEL_JS = """
 el => {
+  const names = n => [n.textContent, n.value, n.getAttribute('aria-label'), n.getAttribute('title')];
   const parts = [el.innerText, el.value, el.getAttribute('aria-label'), el.getAttribute('title')];
   for (const id of (el.getAttribute('aria-labelledby') || '').split(/\\s+/)) {
     const ref = id && document.getElementById(id);
-    if (ref) parts.push(ref.textContent, ref.value, ref.getAttribute('aria-label'), ref.getAttribute('title'));
+    if (ref) parts.push(...names(ref));
   }
-  for (const label of el.labels || []) parts.push(label.textContent);
+  for (const label of el.labels || []) parts.push(...names(label));
   return parts.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim()).join(' ');
 }
 """
