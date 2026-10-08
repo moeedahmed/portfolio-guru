@@ -975,6 +975,7 @@ def _make_save_page(available_selectors: dict):
         else:
             first.count = AsyncMock(return_value=1)
             first.inner_text = AsyncMock(return_value=text)
+            first.evaluate = AsyncMock(return_value=text)
 
             async def _click():
                 clicked.append((selector, text))
