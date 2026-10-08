@@ -14,9 +14,12 @@ Usage:
 from kaizen_offline import require_online
 
 import asyncio
+import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,6 +32,104 @@ from model_config import browser_fallback_model, gemini_fast_model
 logger = logging.getLogger(__name__)
 
 BROWSER_USE_LOG_DIR = data_path("browser-use-logs")
+
+# Safety guards, following Anthropic's "Run the toolset safely" checklist for
+# browser agents. The agent reads untrusted page text, so it only ever gets a
+# fresh browser holding one doctor's own session, reaches only the platform's
+# own hosts, and cannot run script in the page or touch local files.
+
+# Exact hosts per platform. "*.host" covers subdomains of that host only.
+_PLATFORM_HOSTS = {
+    "kaizen": ("eportfolio.rcem.ac.uk", "kaizenep.com", "*.kaizenep.com"),
+}
+
+# Ops escape hatch for a host Kaizen starts to need (comma-separated, exact
+# names or "*.name"). Empty by default.
+_EXTRA_HOSTS_ENV = "PG_BROWSER_USE_EXTRA_HOSTS"
+
+# Actions the agent never gets: running JavaScript in the page, uploading or
+# reading/writing local files, and web search (which leaves the allowlist).
+EXCLUDED_ACTIONS = (
+    "evaluate",
+    "upload_file",
+    "read_file",
+    "write_file",
+    "replace_file",
+    "save_as_pdf",
+    "search",
+)
+
+# browser-use sends usage telemetry (including the full task text, which holds
+# the case details, and the URLs visited) to its vendor by default, and cloud
+# sync follows the same switch. Both stay off for every run.
+_TELEMETRY_OFF = {"ANONYMIZED_TELEMETRY": "false", "BROWSER_USE_CLOUD_SYNC": "false"}
+
+
+def _disable_vendor_telemetry() -> None:
+    os.environ.update(_TELEMETRY_OFF)
+
+
+# Set on import too: browser-use builds its telemetry client once per process,
+# so the first Agent anywhere in the process decides it.
+_disable_vendor_telemetry()
+
+_WORK_DIR_PREFIX = "pg-browser-use-"
+_STALE_WORK_DIR_SECONDS = 3600
+
+
+def _sweep_stale_work_dirs() -> None:
+    """Remove throwaway browser dirs a crashed run left behind (they hold a
+    decrypted session)."""
+    cutoff = datetime.now().timestamp() - _STALE_WORK_DIR_SECONDS
+    for path in Path(tempfile.gettempdir()).glob(f"{_WORK_DIR_PREFIX}*"):
+        try:
+            if path.is_dir() and path.stat().st_mtime < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            continue
+
+
+_HOST_PATTERN = re.compile(r"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$")
+
+
+def allowed_hosts(platform: str, platform_url: str) -> list[str]:
+    """Hosts the agent may load, for this platform only. Empty means refuse."""
+    hosts = list(_PLATFORM_HOSTS.get((platform or "").lower(), ()))
+    if not hosts:
+        parsed = urlparse(platform_url or "")
+        if parsed.scheme == "https" and parsed.hostname:
+            hosts = [parsed.hostname.lower()]
+    extra = os.environ.get(_EXTRA_HOSTS_ENV, "")
+    hosts.extend(h.strip().lower() for h in extra.split(",") if h.strip())
+    return [h for h in dict.fromkeys(hosts) if _HOST_PATTERN.match(h)]
+
+
+def url_is_allowed(url: str, hosts: list[str]) -> bool:
+    """https URL whose host is listed exactly, or under a listed "*.host"."""
+    try:
+        parsed = urlparse((url or "").replace("\\", "/"))
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        return False
+    for pattern in hosts:
+        if pattern.startswith("*."):
+            if host.endswith(pattern[1:]):
+                return True
+        elif host == pattern:
+            return True
+    return False
+
+
+def host_resolver_rule(hosts: list[str]) -> str:
+    """Chrome flag value that fails DNS for every host not on the list.
+
+    This covers what a navigation check cannot see: images, scripts, fetches,
+    websockets and service workers a page starts on its own.
+    """
+    excludes = ", ".join(f"EXCLUDE {h}" for h in hosts)
+    return f"MAP * ~NOTFOUND, {excludes}"
 
 
 # Field key → human-readable label mapping for task prompt
@@ -236,9 +337,14 @@ async def file_with_browser_use(
     curriculum_links: Optional[List[str]] = None,
     model: Optional[str] = None,
     platform: str = "unknown",
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     File a form using browser-use AI agent.
+
+    Runs only in a fresh, throwaway browser seeded with this doctor's own saved
+    Kaizen session; it never attaches to the shared CDP Chrome, which may be
+    signed in to another doctor's account.
 
     Args:
         platform_url: Login URL for the e-portfolio (e.g. "https://eportfolio.rcem.ac.uk")
@@ -250,6 +356,7 @@ async def file_with_browser_use(
         curriculum_links: SLO codes to tick
         model: LLM model to use for navigation
         platform: Platform name for logging (e.g. "kaizen", "horus")
+        telegram_user_id: Whose saved session to load. Required.
 
     Returns:
         {
@@ -263,17 +370,40 @@ async def file_with_browser_use(
         }
     """
     require_online()
-    from browser_use import Agent
+    _disable_vendor_telemetry()
+    from browser_use import Agent, Tools
     from browser_use.browser import BrowserProfile, BrowserSession
 
-    # Extract domain for allowed_domains
-    parsed = urlparse(platform_url)
-    base_domain = parsed.hostname or ""
-    # Allow the base domain and common subdomains
-    allowed_domains = [f"*{base_domain.split('.')[-2]}.{base_domain.split('.')[-1]}*"]
-    if "rcem" in base_domain:
-        allowed_domains = ["*rcem*", "*kaizenep*", "*kaizen*"]
+    skipped = list(
+        k for k, v in fields.items()
+        if v is not None and v != "" and v != []
+        and k not in ("curriculum_links", "key_capabilities", "form_type", "uuid")
+    )
 
+    def _refused(error: str) -> Dict[str, Any]:
+        return {
+            "status": "failed",
+            "filled": [],
+            "skipped": skipped,
+            "error": error,
+            "method": "browser-use",
+            "model_used": model,
+            "selectors_log": None,
+            "discovered_uuids": {},
+        }
+
+    hosts = allowed_hosts(platform, platform_url)
+    if not hosts:
+        return _refused("No allowed hosts for this platform; browser-use refused.")
+    for url in (platform_url, form_url):
+        if url and not url_is_allowed(url, hosts):
+            return _refused("Form address is outside the platform's allowed hosts; browser-use refused.")
+
+    session_state = _load_doctor_session(telegram_user_id, credentials, platform)
+    if session_state is None:
+        return _refused(
+            "No saved session for this doctor; browser-use never borrows the shared browser."
+        )
     # Set up selector logging and UUID discovery
     sel_logger = SelectorLogger(platform, form_type)
     step_count = [0]
@@ -321,13 +451,6 @@ async def file_with_browser_use(
         curriculum_links=curriculum_links,
     )
 
-    # Set up browser profile using CDP (persistent Chrome with saved login session)
-    browser_profile = BrowserProfile(
-        headless=True,
-        allowed_domains=allowed_domains,
-        cdp_url=os.environ.get("KAIZEN_CDP_URL", "http://localhost:18800"),
-    )
-
     # Create LLM based on model choice
     model = model or gemini_fast_model()
     llm = _create_llm(model)
@@ -343,18 +466,39 @@ async def file_with_browser_use(
     conversation_path = str(log_dir / f"{timestamp}_conversation.json")
 
     filled = []
-    skipped = list(
-        k for k, v in fields.items()
-        if v is not None and v != "" and v != []
-        and k not in ("curriculum_links", "key_capabilities", "form_type", "uuid")
-    )
 
+    # Fresh, throwaway browser per filing: its own profile directory, this
+    # doctor's cookies only, no CDP attach to the shared Chrome, and DNS
+    # blocked for every host off the allowlist. The directory holds the
+    # decrypted session, so it is private and always removed.
+    _sweep_stale_work_dirs()
+    work_dir = tempfile.mkdtemp(prefix=_WORK_DIR_PREFIX)
+    browser_session = None
     try:
+        os.chmod(work_dir, 0o700)
+        state_path = Path(work_dir) / "state.json"
+        state_path.touch(mode=0o600)
+        state_path.write_text(json.dumps(session_state))
+        browser_profile = BrowserProfile(
+            headless=True,
+            user_data_dir=str(Path(work_dir) / "profile"),
+            storage_state=str(state_path),
+            allowed_domains=hosts,
+            block_ip_addresses=True,
+            keep_alive=False,
+            accept_downloads=False,
+            auto_download_pdfs=False,
+            downloads_path=str(Path(work_dir) / "downloads"),
+            args=[f"--host-resolver-rules={host_resolver_rule(hosts)}"],
+        )
+        browser_session = BrowserSession(browser_profile=browser_profile)
         agent = Agent(
             task=task,
             llm=llm,
             fallback_llm=fallback_llm,
-            browser_profile=browser_profile,
+            browser_session=browser_session,
+            tools=Tools(exclude_actions=list(EXCLUDED_ACTIONS)),
+            available_file_paths=[],
             use_vision=True,
             step_timeout=180,
             max_steps=40,
@@ -468,6 +612,25 @@ async def file_with_browser_use(
             "selectors_log": sel_logger.save(),
             "discovered_uuids": discovered_uuids,
         }
+    finally:
+        if browser_session is not None:
+            try:
+                await browser_session.kill()
+            except Exception:
+                pass
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _load_doctor_session(
+    telegram_user_id: Optional[int],
+    credentials: Dict[str, str],
+    platform: str,
+) -> Optional[dict]:
+    """This doctor's own saved Kaizen session, or None (refuse the run)."""
+    if telegram_user_id is None or (platform or "").lower() != "kaizen":
+        return None
+    from kaizen_form_filer import load_session_state
+    return load_session_state(telegram_user_id, (credentials or {}).get("username"))
 
 
 def _create_llm(model: str):
