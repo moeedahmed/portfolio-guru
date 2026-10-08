@@ -126,10 +126,8 @@ READ_KC_JS = r"""target => {
             if (cb) return {value: cb.checked};
         }
     }
-    // Explicit saved tag labels only; a non-zero Add tags count is not identity proof.
-    for (const tag of document.querySelectorAll('.tag, [data-tag], [ng-repeat*="tag"]')) {
-        if (matches(tag.textContent) && !tag.querySelector('input')) return {value: true};
-    }
+    // Tag-style elements are not used: an unselected suggestion looks the same
+    // as a saved tag, so only a ticked checkbox counts as proof.
     return {missing: true};
 }"""
 
