@@ -3348,6 +3348,19 @@ async def _save_form(page: Page, as_draft: bool) -> bool:
     return False
 
 
+_SAVE_LABEL_JS = """
+el => {
+  const parts = [el.innerText, el.value, el.getAttribute('aria-label'), el.getAttribute('title')];
+  for (const id of (el.getAttribute('aria-labelledby') || '').split(/\\s+/)) {
+    const ref = id && document.getElementById(id);
+    if (ref) parts.push(ref.textContent);
+  }
+  for (const label of el.labels || []) parts.push(label.textContent);
+  return parts.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim()).join(' ');
+}
+"""
+
+
 async def _try_save_selectors(
     page: Page, selectors: list[str], as_draft: bool
 ) -> bool:
@@ -3356,16 +3369,10 @@ async def _try_save_selectors(
         try:
             el = page.locator(selector).first
             if await el.count() > 0:
-                # An <input> has no inner text: its label is the value attribute,
-                # so check every label source before deciding it is a plain save.
-                el_text = " ".join(
-                    part.strip() for part in [
-                        await el.inner_text(),
-                        await el.get_attribute("value") or "",
-                        await el.get_attribute("aria-label") or "",
-                        await el.get_attribute("title") or "",
-                    ] if part and part.strip()
-                )
+                # An <input> has no inner text and a button can be named by
+                # another element, so check every label source before deciding
+                # it is a plain save.
+                el_text = await el.evaluate(_SAVE_LABEL_JS)
                 if any(danger in el_text.lower() for danger in ["submit", "send", "sign", "approve", "reject", "delete"]):
                     if not as_draft and "send to assessor" in el_text.lower():
                         pass

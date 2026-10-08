@@ -46,8 +46,10 @@ def main(argv=None) -> int:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--result", choices=("pass", "fail"))
     parser.add_argument("--note")
-    parser.add_argument("--risk", choices=("internal", "telegram", "broad"), default="broad")
+    parser.add_argument("--risk", choices=("internal", "telegram", "broad"))
     args = parser.parse_args(argv)
+    if args.action == "gate" and not args.risk:
+        parser.error("gate requires --risk")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         parser.error("--sha requires a full 40-hex commit")
     sha = args.sha.lower()
