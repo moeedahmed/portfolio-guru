@@ -4,8 +4,10 @@ Filer router — single entry point for all form filing.
 Routing strategy (canonical — see AGENTS.md § Filing Routing Discipline):
 - DOM-mapped forms → deterministic Playwright via browser-harness CDP only.
   Never escalate to browser-use. If Playwright returns partial, fix the DOM map.
-- Unknown form types (no DOM mapping) → browser-use via CDP (localhost:18800).
-  Credentials never enter LLM prompts — the persistent Chrome session handles auth.
+- Unknown form types (no DOM mapping) → browser-use, off by default. It runs in
+  a fresh throwaway browser seeded with the doctor's own saved session (never
+  the shared CDP Chrome), limited to the platform's hosts. Credentials never
+  enter LLM prompts.
 - Unknown platforms → browser-harness + domain skills is the default.
   browser-use is an emergency bridge, replaced by written domain skills.
 
@@ -227,7 +229,7 @@ async def _route_filing_unbounded(
     # Strategy:
     # - Forms with DOM mappings → always try Playwright. Never escalate to browser-use.
     #   If Playwright returns partial, the DOM map gap is logged and returned — fix the map.
-    # - Forms without DOM mappings → use browser-use (CDP-connected, no credentials in prompts).
+    # - Forms without DOM mappings → use browser-use (fresh per-doctor browser, no credentials in prompts).
     # - Unknown platforms → browser-use path.
 
     supported_forms = set(platform_config.get("supported_forms", [])) if platform_config else set()
@@ -340,6 +342,7 @@ async def _route_filing_unbounded(
         fields=fields,
         credentials=credentials,
         curriculum_links=curriculum_links,
+        telegram_user_id=telegram_user_id,
     )
 
     # Record browser-use run
@@ -407,6 +410,7 @@ async def _route_browser_use(
     fields: Dict[str, Any],
     credentials: Dict[str, str],
     curriculum_links: Optional[List[str]],
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Route to the browser-use AI filer."""
     from browser_filer import file_with_browser_use
@@ -420,5 +424,6 @@ async def _route_browser_use(
         form_type=form_type,
         curriculum_links=curriculum_links,
         platform=platform,
+        telegram_user_id=telegram_user_id,
     )
     return result
