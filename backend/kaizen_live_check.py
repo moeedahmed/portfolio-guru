@@ -78,14 +78,14 @@ def draft_url(value):
     """Only an exact Kaizen saved-document address, never a login or new form."""
     parsed = urlsplit(value or "")
     if (parsed.scheme != "https" or parsed.netloc != "kaizenep.com"
-            or parsed.fragment or not re.fullmatch(r"/events/(?:fillin/[A-Za-z0-9-]+|view-section/?)", parsed.path)):
+            or parsed.fragment or not re.fullmatch(r"/events/(?:(?:fillin|new-section)/[A-Za-z0-9-]+|view-section/?)", parsed.path)):
         raise GuardRefusal("The filer did not return a safe saved-draft URL.")
     query = parse_qs(parsed.query, keep_blank_values=True)
     if any(key not in {"doc", "autosave", "autosaveId"} for key in query):
         raise GuardRefusal("The saved-draft URL has unexpected parameters.")
     if any(not re.fullmatch(r"[A-Za-z0-9-]+", v) for values in query.values() for v in values):
         raise GuardRefusal("The saved-draft URL has unexpected parameters.")
-    if "view-section" in parsed.path and not query.get("doc"):
+    if ("view-section" in parsed.path or "new-section" in parsed.path) and not query.get("doc"):
         raise GuardRefusal("The saved-draft URL lacks a document identity.")
     return value
 
@@ -105,6 +105,8 @@ def skipped_fields(form_type, skipped):
             rows.append({"field": "unclassified_filer_skip", "classification": "not-mapped", "reason": "filer_skipped_unmapped_field"})
     return rows
 
+
+READ_POST_PATH = re.compile(r"/token|/elastic/[a-z_]+/?|/[a-z]+/changes")
 
 READ_FIELD_JS = """id => {
     const el = document.getElementById(id);
@@ -160,16 +162,31 @@ async def read_back(form_type, fields, url, username):
             context = await browser.new_context(storage_state=state, service_workers="block")
             async def read_only(route):
                 request = route.request
-                host = urlsplit(request.url).hostname
-                if request.method not in {"GET", "HEAD"} or host not in {"kaizenep.com", "auth.kaizenep.com", "eportfolio.rcem.ac.uk"}:
+                parts = urlsplit(request.url)
+                host = parts.hostname
+                # Real Kaizen reads through POSTs too: the sign-in /token exchange,
+                # elastic searches and /<collection>/changes sync. Only those
+                # paths are let through; every other write stays blocked.
+                read_post = request.method == "POST" and bool(READ_POST_PATH.fullmatch(parts.path))
+                if (request.method not in {"GET", "HEAD"} and not read_post) or not (host == "kaizenep.com" or (host or "").endswith(".kaizenep.com") or host == "eportfolio.rcem.ac.uk"):
                     await route.abort()
                 else:
                     await route.fallback()
             await context.route("**/*", read_only)
             await context.route_web_socket("**/*", lambda ws: ws.close())
             page = await context.new_page()
+            # The first visit runs the sign-in hop and lands on the timeline;
+            # the second opens the draft, which Kaizen shows at /events/fillin/<doc>.
             await page.goto(url, wait_until="load", timeout=30000)
-            if page.url != url:
+            await page.wait_for_timeout(5000)
+            await page.goto(url, wait_until="load", timeout=30000)
+            doc = (parse_qs(urlsplit(url).query).get("doc") or [urlsplit(url).path.rsplit("/", 1)[-1]])[0]
+            # Kaizen changes the address client-side, so poll rather than wait for a navigation.
+            for _ in range(40):
+                if urlsplit(page.url).hostname == "kaizenep.com" and doc in urlsplit(page.url).path:
+                    break
+                await page.wait_for_timeout(500)
+            else:
                 raise GuardRefusal("Read-back redirected away from the saved draft.")
             # Angular can render after load; a missing control remains a reported gap.
             try:
