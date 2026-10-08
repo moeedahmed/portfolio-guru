@@ -130,3 +130,11 @@ def test_missing_stored_connection_refuses(monkeypatch):
     monkeypatch.setattr(credentials, "get_credentials", lambda uid: None)
     with pytest.raises(check.GuardRefusal, match="no stored password connection"):
         asyncio.run(check.run_check())
+
+
+def test_readback_accepts_real_kaizen_new_section_draft_address():
+    # Shape of the address real Kaizen returned after a DOPS draft save (8 Oct 2026).
+    url = "https://kaizenep.com/events/new-section/27a300c6-245a-4fed-943e-fe2976686d0d?doc=ebda7b06-b7ac-4436-8219-e128d6596882"
+    assert check.draft_url(url) == url
+    with pytest.raises(check.GuardRefusal):
+        check.draft_url("https://kaizenep.com/events/new-section/27a300c6-245a-4fed-943e-fe2976686d0d")

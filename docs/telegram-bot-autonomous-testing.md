@@ -72,12 +72,16 @@ results persist.
 Every mapped field, common header and one synthetic SLO6 KC1 tick is supplied.
 The title/description says `PG CHECK - synthetic test draft, safe to delete`.
 Read-back launches another isolated browser with that check's authenticated
-session and opens the exact saved URL. It performs DOM reads, blocks non-GET/HEAD
-requests and WebSockets, and never clicks or fills controls. Each field reports
+session and opens the saved draft twice (the first visit runs the sign-in hop and
+lands on the timeline). It performs DOM reads only, never clicks or fills controls,
+blocks WebSockets and non-Kaizen hosts, and blocks every POST except Kaizen's read
+POSTs (`/token`, `/elastic/<index>`, `/<collection>/changes`), which real Kaizen
+needs to render a draft (found on the first real run, 8 Oct 2026). Each field reports
 landed, empty, mismatch or not-mapped, with the filer's skipped fields and
 `safe_skip` reasons. Dates compare as UK dates, dropdowns by value/selected
 label, and narrative text includes the normal AI declaration. Curriculum proof
-requires the exact checked capability or an explicit saved tag label: a tag
+requires the exact checked capability (tag-style elements are ignored, since an
+unselected suggestion looks the same as a saved tag); a tag
 count alone cannot pass. A tree/tag identity hidden by Kaizen's read-only view
 stays a reported gap, rather than being inferred or opened through a write flow.
 Raw DOM values, decrypted credentials, cookies and provider errors are omitted.
