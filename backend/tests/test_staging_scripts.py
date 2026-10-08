@@ -28,6 +28,8 @@ def executable(path, text):
 def test_receipts_reset_pass_and_human_approval(monkeypatch, tmp_path):
     monkeypatch.setenv('PORTFOLIO_GURU_STAGING_PROOF_DIR', str(tmp_path))
     assert proof.main(['gate', '--sha', SHA]) == 1
+    # Internal changes never need the test bot, even with no receipt at all.
+    assert proof.main(['gate', '--sha', SHA, '--risk', 'internal']) == 0
     assert proof.main(['deploy', '--sha', SHA, '--result', 'pass']) == 0
     assert proof.main(['gate', '--sha', SHA]) == 1
     assert proof.main(['automated', '--sha', SHA, '--result', 'pass']) == 0

@@ -46,12 +46,16 @@ def main(argv=None) -> int:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--result", choices=("pass", "fail"))
     parser.add_argument("--note")
-    parser.add_argument("--risk", choices=("internal", "telegram", "broad"), default="internal")
+    parser.add_argument("--risk", choices=("internal", "telegram", "broad"), default="broad")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.sha):
         parser.error("--sha requires a full 40-hex commit")
     sha = args.sha.lower()
     now = datetime.now(timezone.utc).isoformat()
+    # Moeed, 8 Oct 2026: changes doctors never see ship on the offline checks
+    # (plus the real Kaizen check when filing code changes), not the test bot.
+    if args.action == "gate" and args.risk == "internal":
+        return 0
     try:
         if args.action == "deploy":
             if not args.result:

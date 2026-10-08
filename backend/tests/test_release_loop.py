@@ -2805,11 +2805,11 @@ if __name__ == "__main__":
 
 
 @pytest.mark.parametrize('risk,field,value,next_command', [
-    ('internal', 'smoke', 'fail', 'deploy'),
-    ('internal', 'automated', 'fail', 'smoke'),
+    ('telegram', 'smoke', 'fail', 'deploy'),
+    ('telegram', 'automated', 'fail', 'smoke'),
     ('telegram', 'moeed_approved', False, 'approve'),
     ('broad', 'moeed_approved', False, 'approve'),
-    ('internal', 'sha', OTHER_SHA, 'deploy'),
+    ('telegram', 'sha', OTHER_SHA, 'deploy'),
 ])
 def test_staging_gate_blocks_before_remote_mutation(ship_harness, risk, field, value, next_command):
     proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
@@ -2828,10 +2828,19 @@ def test_staging_gate_blocks_before_remote_mutation(ship_harness, risk, field, v
 def test_missing_staging_receipt_names_exact_deploy_command(ship_harness):
     proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
     proof.unlink()
-    result = _ship(ship_harness)
+    _prepared(ship_harness, 'telegram')
+    result = _ship(ship_harness, risk='telegram', skip_prepare=True)
     assert result.returncode == 1
     assert f'scripts/stage.sh deploy --sha {PUSHED_SHA}' in result.stdout + result.stderr
     assert 'push ' not in ship_harness['git_log'].read_text()
+
+
+def test_internal_change_ships_without_any_test_bot_receipt(ship_harness):
+    proof = Path(ship_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{PUSHED_SHA}.json'
+    proof.unlink()
+    result = _ship(ship_harness)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'FINAL_RELEASE_STATE=live' in result.stdout
 
 
 def test_internal_staging_needs_no_owner_tap(ship_harness):

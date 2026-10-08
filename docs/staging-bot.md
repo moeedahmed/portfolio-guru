@@ -77,8 +77,10 @@ Proofs live in
 Redeploying resets automated smoke and owner approval; rerunning smoke clears a
 previous pass and approval before testing. Missing credentials or interrupted tests
 cannot leave passing proof. Approval records the human Ship tap; agents must never
-invent it. Internal changes use `--risk internal`, skip the human tap and promote
-after automated smoke. Telegram/broad changes require the tap for that exact SHA.
+invent it. Internal changes (nothing a doctor sees) use `--risk internal` and skip
+the test bot entirely (Moeed, 8 Oct 2026): the gate passes without a receipt, and
+they ship on `verify_release.sh` plus the real Kaizen check when filing code
+changes. Telegram/broad changes require smoke and the tap for that exact SHA.
 
 Fresh `release_loop.sh --mode ship` checks deploy smoke and automated smoke for
 its exact approved SHA before any remote mutation. Telegram/broad risk also checks
