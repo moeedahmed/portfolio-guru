@@ -45,7 +45,7 @@ def controls(form_type):
     return result
 
 
-def form_page(form_type, values=None):
+def form_page(form_type, values=None, *, curriculum=False):
     values = values or {}
     elements = []
     for dom_id, spec in controls(form_type).items():
@@ -68,6 +68,16 @@ def form_page(form_type, values=None):
             # Kaizen dates are text inputs, not HTML ISO-only date controls.
             control = f'<input {attrs} value="{escape(value)}" type="text">'
         elements.append(f'<div><label for="{escape(dom_id)}">{escape(spec["key"])}</label>{control}</div>')
+    if curriculum:
+        checked = ' checked' if values.get("_kc_slo6kc1") == "1" else ''
+        count = 1 if checked else 0
+        elements.append(f'''<button type="button" ng-click="addTags()">Add tags ({count})</button>
+<button type="button">Close</button>
+<ul kz-tree><li><a>2021 EM Curriculum (2025 Update)</a><ul><li>
+<a>Specialty Learning Outcomes - Higher</a><ul><li><a class="ng-binding">Higher SLO6: procedural skills</a>
+<ul><li><span class="ng-binding">SLO6 KC1: synthetic curriculum check</span>
+<input type="checkbox" name="_kc_slo6kc1" value="1"{checked}></li></ul>
+</li></ul></li></ul></li></ul>''')
     return f'''<!doctype html><html><body><p>Saved draft</p>
 <form method="post" action="/save/{FORM_UUIDS[form_type]}">
 {''.join(elements)}
@@ -82,6 +92,8 @@ class FakeKaizen:
         self.submit_clicks = 0
         self.drafts = []
         self.requests = []
+        self.include_curriculum = False
+        self.saved_overrides = {}  # Persistence faults, independent of filer input.
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -120,12 +132,12 @@ class FakeKaizen:
                     uuid = path.rsplit("/", 1)[1]
                     form_type = next((ft for ft, form_uuid in FORM_UUIDS.items() if form_uuid == uuid), None)
                     if form_type:
-                        return self.respond(form_page(form_type))
+                        return self.respond(form_page(form_type, curriculum=owner.include_curriculum))
                 if path.startswith("/events/fillin/"):
                     doc_id = path.rsplit("/", 1)[1]
                     draft = next((d for d in owner.drafts if d["doc_id"] == doc_id), None)
                     if draft:
-                        return self.respond(form_page(draft["form_type"], draft["values"]))
+                        return self.respond(form_page(draft["form_type"], draft["values"], curriculum=owner.include_curriculum))
                 self.respond(status=404)
 
             def do_POST(self):
@@ -148,7 +160,8 @@ class FakeKaizen:
                     uuid = self.path.rsplit("/", 1)[1]
                     form_type = next(ft for ft, form_uuid in FORM_UUIDS.items() if form_uuid == uuid)
                     specs = controls(form_type)
-                    received = {key: vals if specs[key]["kind"] == "widget" else vals[0].replace("\r\n", "\n") for key, vals in values.items()}
+                    received = {key: vals if specs.get(key, {}).get("kind") == "widget" else vals[0].replace("\r\n", "\n") for key, vals in values.items()}
+                    received.update(owner.saved_overrides)
                     for key, spec in specs.items():
                         if spec["kind"] == "widget":
                             received.setdefault(key, [])

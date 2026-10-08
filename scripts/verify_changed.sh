@@ -79,6 +79,7 @@ JOURNEY_TESTS=(
   tests/test_ai_declaration.py
   tests/test_filing_reliability.py
   tests/test_kaizen_fake_browser.py
+  tests/test_kaizen_live_check.py
   tests/test_filing_attempt_log.py
   tests/test_curriculum_filing_recovery.py
   tests/test_esle_domains.py
