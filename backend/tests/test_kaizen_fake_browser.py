@@ -289,14 +289,18 @@ async def test_draft_save_never_clicks_an_input_button_labelled_send_or_submit(l
             await browser.close()
 
 
-async def test_draft_save_never_clicks_a_save_button_named_send_by_another_element():
+@pytest.mark.parametrize("namer", (
+    '<span id="name">Save and send to assessor</span>',
+    '<span id="name" aria-label="Send to assessor">Save</span>',
+))
+async def test_draft_save_never_clicks_a_save_button_named_send_by_another_element(namer):
     """A button's visible "Save" can be overridden by an aria-labelledby name."""
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         try:
             page = await browser.new_page()
             await page.set_content(
-                '<span id="name">Save and send to assessor</span>'
+                namer +
                 '<div role="button" aria-labelledby="name" onclick="window.clicked = true">Save</div>'
             )
             saved = await filer._try_save_selectors(page, ['[role="button"]:has-text("Save")'], True)

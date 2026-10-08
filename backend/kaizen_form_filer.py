@@ -3353,7 +3353,7 @@ el => {
   const parts = [el.innerText, el.value, el.getAttribute('aria-label'), el.getAttribute('title')];
   for (const id of (el.getAttribute('aria-labelledby') || '').split(/\\s+/)) {
     const ref = id && document.getElementById(id);
-    if (ref) parts.push(ref.textContent);
+    if (ref) parts.push(ref.textContent, ref.value, ref.getAttribute('aria-label'), ref.getAttribute('title'));
   }
   for (const label of el.labels || []) parts.push(label.textContent);
   return parts.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim()).join(' ');
