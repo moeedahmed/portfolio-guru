@@ -269,3 +269,21 @@ async def test_operator_check_detects_dropped_or_altered_persistence(fake_browse
     assert f"clinical_reasoning: {classification}" in (tmp_path / "summary.md").read_text()
     assert USERNAME not in (tmp_path / "results.json").read_text()
     assert PASSWORD not in (tmp_path / "results.json").read_text()
+
+
+@pytest.mark.parametrize("label", ("Save and Send to assessor", "Submit", "Save and sign"))
+async def test_draft_save_never_clicks_an_input_button_labelled_send_or_submit(label):
+    """An <input> has no inner text, so its value attribute must pass the same guard."""
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(
+                f'<form onsubmit="return false"><input type="submit" value="{label}" '
+                'onclick="window.clicked = true"></form>'
+            )
+            saved = await filer._try_save_selectors(page, ['input[type="submit"][value*="Save" i]', 'input[type="submit"]'], True)
+            assert saved is False
+            assert await page.evaluate("window.clicked === true") is False
+        finally:
+            await browser.close()

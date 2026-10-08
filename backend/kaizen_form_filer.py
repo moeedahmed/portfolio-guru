@@ -3316,7 +3316,16 @@ async def _try_save_selectors(
         try:
             el = page.locator(selector).first
             if await el.count() > 0:
-                el_text = (await el.inner_text()).strip()
+                # An <input> has no inner text: its label is the value attribute,
+                # so check every label source before deciding it is a plain save.
+                el_text = " ".join(
+                    part.strip() for part in [
+                        await el.inner_text(),
+                        await el.get_attribute("value") or "",
+                        await el.get_attribute("aria-label") or "",
+                        await el.get_attribute("title") or "",
+                    ] if part and part.strip()
+                )
                 if any(danger in el_text.lower() for danger in ["submit", "send", "sign", "approve", "reject", "delete"]):
                     if not as_draft and "send to assessor" in el_text.lower():
                         pass
