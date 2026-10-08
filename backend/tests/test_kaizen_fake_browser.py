@@ -225,3 +225,47 @@ async def test_routes_abort_non_fake_hosts_and_socket_guard_stays_closed(fake_br
     with pytest.raises(pytest.fail.Exception, match="attempted a socket connection"):
         socket.create_connection(("example.invalid", 443))
     assert fake.requests == []
+
+
+@pytest.mark.parametrize("form_type", ("CBD", "DOPS_2021", "REFLECT_LOG_2021", "MINI_CEX"))
+async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, monkeypatch, tmp_path, form_type):
+    import credentials
+    import kaizen_live_check as check
+    fake, _ = fake_browser
+    fake.include_curriculum = True
+    monkeypatch.setenv("KAIZEN_LIVE_CHECK_APPROVED", "operator-own-account")
+    requested = []
+    def own_connection(user_id):
+        requested.append(user_id)
+        return USERNAME, PASSWORD
+    monkeypatch.setattr(credentials, "get_credentials", own_connection)
+    report, code = await check.run_check((form_type,))
+    assert code == 0, report
+    entry = report["forms"][0]
+    assert entry["draft_url"] == fake.drafts[0]["url"]
+    assert all(row["classification"] == "landed" for row in entry["fields"])
+    assert any(row["field"] == "kc:SLO6 KC1" for row in entry["fields"])
+    assert requested == [check.OPERATOR_USER_ID]
+    assert fake.submit_clicks == 0
+    assert len(fake.drafts) == 1  # Read-back never saves a second draft.
+    # Reopened URL, not the page left in memory immediately after filling.
+    assert sum(path.startswith("/events/fillin/") for _, path in fake.requests) >= 2
+
+
+@pytest.mark.parametrize("replacement, classification", [("", "empty"), ("altered saved text", "mismatch")])
+async def test_operator_check_detects_dropped_or_altered_persistence(fake_browser, monkeypatch, tmp_path, replacement, classification):
+    import credentials
+    import kaizen_live_check as check
+    fake, _ = fake_browser
+    fake.include_curriculum = True
+    fake.saved_overrides[filer.FORM_FIELD_MAP["CBD"]["clinical_reasoning"]] = replacement
+    monkeypatch.setenv("KAIZEN_LIVE_CHECK_APPROVED", "operator-own-account")
+    monkeypatch.setattr(credentials, "get_credentials", lambda uid: (USERNAME, PASSWORD))
+    report, code = await check.run_check(("CBD",))
+    assert code == check.PARTIAL, report
+    row = next(r for r in report["forms"][0]["fields"] if r["field"] == "clinical_reasoning")
+    assert row["classification"] == classification
+    check.write_report(report, tmp_path)
+    assert f"clinical_reasoning: {classification}" in (tmp_path / "summary.md").read_text()
+    assert USERNAME not in (tmp_path / "results.json").read_text()
+    assert PASSWORD not in (tmp_path / "results.json").read_text()

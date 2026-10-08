@@ -37,6 +37,62 @@ A missing browser may skip locally; `PG_REQUIRE_BROWSER=1` makes it fail and is
 set by CI and `verify_release.sh`. A present browser that cannot start always
 fails. The lane also runs in `verify_changed.sh` and the full offline suite.
 
+## On-demand operator Kaizen filing check
+
+`scripts/kaizen_live_check.py` is a separate, hand-run lane. It writes real
+synthetic **drafts** on the fixed operator account only, using
+`credentials.get_credentials(bot.ADMIN_USER_ID)`. It never looks up another
+user, accepts account/login arguments, fetches BWS Kaizen logins, submits to
+assessors or deletes drafts. This is not CI, a scheduled job or release proof.
+
+From the repository root on the live Mac, in a shell with the existing bot's
+database configuration and Fernet decryption key available (or in
+`backend/.env`), the exact command is:
+
+```sh
+KAIZEN_LIVE_CHECK_APPROVED=operator-own-account \
+  "$HOME/.local/share/portfolio-guru/venv/bin/python3" scripts/kaizen_live_check.py
+```
+
+Add `--forms CBD MINI_CEX` to select a subset. Defaults are CBD, DOPS_2021,
+REFLECT_LOG_2021 and MINI_CEX. Approval must already be in the foreground
+environment before dotenv is loaded. Staging/offline flags are checked again
+after dotenv. A missing stored password connection refuses the run; this lane
+does not borrow shared Chrome's login or provide a password-free login flow.
+
+The production `file_to_kaizen(..., submit=False)` chooses either CDP or a
+new headless Chromium browser according to its `KAIZEN_USE_CDP` constant. This
+child process forces the existing headless branch and uses a temporary encrypted
+session cache. It neither connects to shared CDP Chrome on port 18800 nor writes
+or invalidates the bot's cached sessions, so no filing lock is needed. No
+production filer code or field map changes. The child suppresses diagnostic
+logging/prints and the filer's unfiltered NDJSON logger; only sanitised check
+results persist.
+
+Every mapped field, common header and one synthetic SLO6 KC1 tick is supplied.
+The title/description says `PG CHECK - synthetic test draft, safe to delete`.
+Read-back launches another isolated browser with that check's authenticated
+session and opens the exact saved URL. It performs DOM reads, blocks non-GET/HEAD
+requests and WebSockets, and never clicks or fills controls. Each field reports
+landed, empty, mismatch or not-mapped, with the filer's skipped fields and
+`safe_skip` reasons. Dates compare as UK dates, dropdowns by value/selected
+label, and narrative text includes the normal AI declaration. Curriculum proof
+requires the exact checked capability or an explicit saved tag label: a tag
+count alone cannot pass. A tree/tag identity hidden by Kaizen's read-only view
+stays a reported gap, rather than being inferred or opened through a write flow.
+Raw DOM values, decrypted credentials, cookies and provider errors are omitted.
+
+JSON and Markdown go under gitignored
+`.artifacts/kaizen-live-check/<UTC-stamp>/`. Exit codes: 0 = every save and field
+confirmed, 2 = partial, 3 = filing/read-back failure, 4 = guard refusal. Failed
+attempts retain a safe draft URL when available; autosaves can leave a draft
+even when the save was not confirmed. No cleanup/deletion is performed in Kaizen.
+
+Offline proof extends `test_kaizen_fake_browser.py` with optional curriculum
+controls and independent persistence faults, plus guard/output tests in
+`test_kaizen_live_check.py`; both are in `verify_changed.sh`. Real-browser
+success remains unverified when Chromium cannot start in a sandbox.
+
 ## Launch Gate
 
 Before launching or widening testing of a Telegram bot:
