@@ -287,11 +287,14 @@ def _run_bot_qa(tmp_path, env_lines, **env):
         ["bash", str(BOT_QA)],
         capture_output=True,
         text=True,
+        timeout=30,
         env={
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(tmp_path),
             "PORTFOLIO_GURU_APP_DIR": str(tmp_path),
             "TELEGRAM_BOT_QA_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
+            # This empty fake backend tests shell guards, not pytest plugins.
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
             **env,
         },
     )
