@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from dops_filing import (  # noqa: E402
     derive_dops_curriculum_links,
     normalise_dops_placement,
+    normalise_dops_procedure,
     normalise_dops_fields,
     suggest_dops_kc_breadth,
 )
@@ -148,6 +149,74 @@ def test_normalise_dops_placement_returns_exact_kaizen_option():
 
     assert normalise_dops_placement("ED Resus", options) == "Emergency Medicine"
     assert normalise_dops_placement("ITU", options) == "Intensive Care Unit"
+
+
+# Option labels read from the live 2021 DOPS form on 9 Oct 2026.
+DOPS_2021_PROCEDURES = [
+    "",
+    "Paediatric sedation (ST3-ST6 2021)",
+    "Advanced airway management (ST3-ST6 2021)",
+    "ED management of life threatening haemorrhage (ST3-ST6 2021)",
+    "Point of care Ultrasound (ST3-ST6 2021)",
+    "Other (ST3-ST6 2021)",
+]
+DOPS_2021_PLACEMENTS = ["", "Emergency Medicine", "Anaesthetics", "Critical Care", "Internal Medicine", "Paediatric"]
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("Advanced airway management", "Advanced airway management (ST3-ST6 2021)"),
+    ("ED management of life-threatening haemorrhage", "ED management of life threatening haemorrhage (ST3-ST6 2021)"),
+    ("PoCUS - Shock Assessment", "Point of care Ultrasound (ST3-ST6 2021)"),
+    ("paediatric sedation", "Paediatric sedation (ST3-ST6 2021)"),
+])
+def test_normalise_dops_procedure_picks_the_2021_option_for_the_same_skill(value, expected):
+    assert normalise_dops_procedure(value, DOPS_2021_PROCEDURES) == expected
+
+
+DOPS_2025_POCUS = [
+    "PoCUS - Focused Assessment for AAA",
+    "PoCUS - eFAST / FAFF",
+    "Point of care Ultrasound (pre-Aug 2025 evidence)",
+]
+
+
+@pytest.mark.parametrize("value", ["PoCUS-AAA", "PoCUS-eFAST/FAFF"])
+def test_normalise_dops_procedure_never_picks_legacy_pocus_on_a_list_with_modules(value):
+    assert normalise_dops_procedure(value, DOPS_2025_POCUS) != "Point of care Ultrasound (pre-Aug 2025 evidence)"
+
+
+def test_normalise_dops_procedure_never_turns_an_unlisted_skill_into_other():
+    # Adult sedation is not on the 2021 list; saving "Other" would file a
+    # different procedure from the one the doctor described.
+    assert normalise_dops_procedure("Adult sedation", DOPS_2021_PROCEDURES) == "Adult sedation"
+
+
+def test_normalise_dops_placement_maps_onto_the_2021_placements():
+    assert normalise_dops_placement("Emergency Department", DOPS_2021_PLACEMENTS) == "Emergency Medicine"
+    assert normalise_dops_placement("Intensive Care Unit", DOPS_2021_PLACEMENTS) == "Critical Care"
+
+
+def test_dops_2021_maps_its_own_procedure_list():
+    procedure_2021 = "9384be94-f038-4c3f-897c-52b7876a8cc0"
+    assert FORM_FIELD_MAP["DOPS_2021"]["procedure_name"] == procedure_2021
+    assert FORM_FIELD_MAP["DOPS_2021"]["procedural_skill"] == procedure_2021
+    assert FORM_FIELD_MAP["DOPS"]["procedure_name"] == "8def931e-3a00-43ac-8529-44cdaf34be2d"
+    shared = {k: v for k, v in FORM_FIELD_MAP["DOPS_2021"].items() if k not in {"procedure_name", "procedural_skill"}}
+    assert shared == {k: v for k, v in FORM_FIELD_MAP["DOPS"].items() if k not in {"procedure_name", "procedural_skill"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["DOPS", "DOPS_2021"])
+async def test_dops_select_fill_uses_the_rendered_option_on_both_dops_forms(form_type):
+    from kaizen_form_filer import _is_dops_form, _normalise_dops_select_value
+    assert _is_dops_form(form_type)
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value=DOPS_2021_PLACEMENTS)
+    assert await _normalise_dops_select_value(page, "placement", "x", "ED") == "Emergency Medicine"
+    page.evaluate = AsyncMock(return_value=DOPS_2021_PROCEDURES)
+    assert await _normalise_dops_select_value(page, "procedure_name", "x", "Advanced airway management") == (
+        "Advanced airway management (ST3-ST6 2021)"
+    )
 
 
 def test_normalise_dops_is_idempotent():

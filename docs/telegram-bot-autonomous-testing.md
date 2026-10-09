@@ -55,7 +55,7 @@ KAIZEN_LIVE_CHECK_APPROVED=operator-own-account \
 ```
 
 Add `--forms CBD MINI_CEX` to select a subset. Defaults are CBD, DOPS_2021,
-REFLECT_LOG_2021 and MINI_CEX. Approval must already be in the foreground
+REFLECT_LOG and MINI_CEX (the 2021 Reflection form is not on the operator account; Kaizen redirects it and the bot reports that cleanly). Reflection links capabilities as tags, and a saved draft shows only how many tags it holds, so that row is reported as `count-only`, never `landed`. Approval must already be in the foreground
 environment before dotenv is loaded. Staging/offline flags are checked again
 after dotenv. A missing stored password connection refuses the run; this lane
 does not borrow shared Chrome's login or provide a password-free login flow.

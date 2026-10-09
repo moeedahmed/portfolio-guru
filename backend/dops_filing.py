@@ -131,6 +131,49 @@ def normalise_dops_placement(value: str, options: Iterable[str] | None = None) -
     return raw
 
 
+_DOPS_PROCEDURE_ALIASES: tuple[tuple[str, str], ...] = (
+    # The 2021 list folds every PoCUS module into one option. Only used when
+    # the list has no separate PoCUS modules, so a 2025 list never gets its
+    # legacy "pre-Aug 2025 evidence" option instead of the named module.
+    ("pocus", "point of care ultrasound"),
+    ("point of care ultrasound", "point of care ultrasound"),
+)
+
+
+def normalise_dops_procedure(value: str, options: Iterable[str] | None = None) -> str:
+    """Return the rendered Kaizen procedure option that names the same skill.
+
+    Kaizen labels the same procedure differently per curriculum: the 2021 DOPS
+    list adds a "(ST3-ST6 2021)" suffix and drops hyphens ("life threatening"),
+    and the 2025 list has its own spelling. Matching ignores case, punctuation
+    and that suffix. An option is only returned when it names the same skill;
+    a procedure the list does not offer stays unmatched rather than becoming
+    "Other", so the bot reports it instead of saving a different procedure.
+    """
+    raw = _str(value)
+    option_list = [_str(option) for option in (options or []) if _str(option)]
+    if not raw or not option_list:
+        return raw
+
+    def core(text: str) -> str:
+        text = text.split("(", 1)[0] if "(" in text and text.rstrip().endswith(")") else text
+        return _compact_for_match(text)
+
+    wanted = core(raw)
+    for option in option_list:
+        if core(option) == wanted:
+            return option
+    if any(core(option).startswith(_compact_for_match("pocus")) for option in option_list):
+        return raw
+    for prefix, target in _DOPS_PROCEDURE_ALIASES:
+        if _compact_for_match(raw).startswith(_compact_for_match(prefix)):
+            target_compact = _compact_for_match(target)
+            for option in option_list:
+                if core(option) == target_compact:
+                    return option
+    return raw
+
+
 # ─── Field-map adapter ───────────────────────────────────────────────────────
 
 

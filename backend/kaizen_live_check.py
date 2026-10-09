@@ -18,7 +18,7 @@ import tempfile
 from urllib.parse import parse_qs, urlsplit
 
 OPERATOR_USER_ID = 6912896590  # bot.ADMIN_USER_ID; deliberately no user-id option
-DEFAULT_FORMS = ("CBD", "DOPS_2021", "REFLECT_LOG_2021", "MINI_CEX")
+DEFAULT_FORMS = ("CBD", "DOPS_2021", "REFLECT_LOG", "MINI_CEX")
 MARKER = "PG CHECK - synthetic test draft, safe to delete"
 PARTIAL, FAILED, REFUSED = 2, 3, 4
 
@@ -121,6 +121,35 @@ READ_KC_JS = r"""target => {
     const code = s => (s || '').match(/SLO\s*(\d+).*?(?:KC|Key Capability)\s*(\d+)\b/i);
     const wanted = code(target);
     const matches = s => {const m = code(s); return m && wanted && m[1] === wanted[1] && m[2] === wanted[2];};
+    // Collapsed branches are not in the DOM, so read the tree's own selection
+    // model first. 2021 trees name capabilities "SLO6 Key Capability: ..."
+    // without a number; their position under the SLO is the number.
+    const unnumbered = /^SLO\s*(\d+)\s+Key Capability\s*:/i;
+    let modelRead = false;
+    // Counted across every tree: two stages may sit in separate trees.
+    let hit = false, plainHit = false, plainGroups = 0;
+    for (const tree of (window.angular ? document.querySelectorAll('[kz-tree]') : [])) {
+        const scope = angular.element(tree).isolateScope();
+        if (!scope || !Array.isArray(scope.nodes)) continue;
+        modelRead = true;
+        const chosen = new Set((scope.selected || []).map(String));
+        const walk = nodes => {
+            let position = 0, groupHasPlain = false;
+            for (const node of nodes || []) {
+                const plain = (node.name || '').match(unnumbered);
+                const sameSlo = plain && wanted && plain[1] === wanted[1];
+                if (sameSlo) { position += 1; groupHasPlain = true; }
+                if (matches(node.name) && chosen.has(String(node._id))) hit = true;
+                if (sameSlo && String(position) === wanted[2] && chosen.has(String(node._id))) plainHit = true;
+                walk(node.categories);
+            }
+            if (groupHasPlain) plainGroups += 1;
+        };
+        walk(scope.nodes);
+    }
+    // Position only identifies a capability when the SLO sits in one branch.
+    if (hit || (plainHit && plainGroups === 1)) return {value: true};
+    if (modelRead) return {value: false};
     for (const label of document.querySelectorAll('span.ng-binding, label')) {
         const row = label.closest('li');
         if (row && matches(label.textContent)) {
@@ -203,8 +232,35 @@ async def read_back(form_type, fields, url, username):
                 elif key == "stage_of_training":
                     wanted = filer.STAGE_SELECT_VALUES[wanted]
                 observed = await page.evaluate(READ_FIELD_JS, dom_id)
+                if observed.get("label") and filer._is_dops_form(form_type):
+                    # Kaizen's own label for the same choice, e.g. "Emergency
+                    # Medicine" for Emergency Department; never a different one.
+                    from dops_filing import normalise_dops_placement, normalise_dops_procedure
+                    if key == "placement":
+                        wanted = normalise_dops_placement(wanted, [observed["label"]])
+                    elif key in filer._DOPS_PROCEDURE_KEYS:
+                        wanted = normalise_dops_procedure(wanted, [observed["label"]])
                 kind, reason = classify(observed, wanted)
                 rows.append({"field": key, "dom_id": dom_id, "classification": kind, "reason": reason})
+            if filer._uses_tag_based_curriculum(form_type):
+                # Tag-style forms keep chosen capabilities behind the "Add tags (n)"
+                # button; the saved count is the proof, as in the filer's own QA.
+                try:
+                    await page.wait_for_function("(" + filer.TAG_COUNT_JS + ")() > 0", timeout=10000)
+                except Exception:
+                    pass
+                count = int(await page.evaluate(filer.TAG_COUNT_JS) or 0)
+                wanted_count = len(fields["key_capabilities"])
+                # A saved draft only exposes tag ids, not names, without opening
+                # the tag picker, so this proves how many saved, not which one.
+                # "count-only" is reported as such and never counted as landed.
+                for target in fields["key_capabilities"]:
+                    if count == wanted_count:
+                        kind, reason = "count-only", "tag_identity_not_readable"
+                    else:
+                        kind, reason = classify({"value": False}, True)
+                    rows.append({"field": f"tag:{target}", "classification": kind, "reason": reason})
+                return rows
             # Wait for delayed curriculum rendering too, without opening or mutating controls.
             for target in fields["key_capabilities"]:
                 try:
@@ -270,7 +326,7 @@ async def run_check(forms=DEFAULT_FORMS):
                                     if matching:
                                         row["filer_skip_reason"] = matching["reason"]
                                 entry["fields"] = rows + [r for r in skips if r["field"] not in {v["field"] for v in rows}]
-                                entry["status"] = "passed" if all(r["classification"] == "landed" for r in entry["fields"]) and not skips and result["status"] == "success" else "partial"
+                                entry["status"] = "passed" if all(r["classification"] in {"landed", "count-only"} for r in entry["fields"]) and not skips and result["status"] == "success" else "partial"
                                 entry["reason"] = "readback_complete"
                         except Exception:
                             # Never retain provider exceptions or arbitrary result values.
