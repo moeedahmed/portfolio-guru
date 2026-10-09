@@ -217,8 +217,11 @@ async def _media_ready_draft_to_cancel(client, path, kind):
         reply = await _wider_click(client, transcript, reply, form,
                                    expect_buttons=True, expect_button_any=("Save to Kaizen", "Save draft to Kaizen"))
         if classify_post_click_draft_state(reply) == "draft_with_gaps":
-            assert re.search(r"still needed:\s*level of supervision\.\s*reply", reply.raw_text or "", re.I), "Unreviewed draft gap"
-            detail = "Level of supervision: indirect. I discussed the case with my senior registrar."
+            # The recommended form decides the gap (supervision for CBD, the
+            # learning point for a reflection); the bot must name it and ask.
+            assert re.search(r"still needed:.+?reply", reply.raw_text or "", re.I | re.S), "Unreviewed draft gap"
+            detail = ("Level of supervision: indirect. I discussed the case with my senior registrar. "
+                      "What I learned: I will repeat the ECG at 15 minutes for ongoing chest pain.")
             fingerprint = message_fingerprint(reply)
             await client.send_message(BOT_USERNAME, detail)
             reply = await _wider_wait(client, transcript, f"send:{detail}", before=fingerprint,

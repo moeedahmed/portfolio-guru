@@ -3199,7 +3199,8 @@ Pre-preview quality check:
 
 
 _KC_EDIT_DROP_FIELD = "dropped_key_capabilities"
-_KC_REVIEW_TIMEOUT_SECONDS = 8.0
+# The review regenerates the whole extraction; 3.5 Flash needs well over 8s.
+_KC_REVIEW_TIMEOUT_SECONDS = 20.0
 # CBD callers allow 45 seconds; reserve five for final normalisation/return.
 _KC_REVIEW_DEADLINE_SECONDS = 40.0
 
