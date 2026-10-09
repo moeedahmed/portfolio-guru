@@ -68,6 +68,8 @@ def test_formal_course_checks_each_required_reflection_field(missing):
     fields.update({key: "" for key in missing})
     draft = FormDraft(form_type="FORMAL_COURSE", fields=fields)
     context = BotSimulator()._make_context()
+    source = "\n".join(value for value in fields.values() if value)
+    context.user_data.update(case_text=source, case_input_source="text", case_user_text=[source])
     bot._store_draft(context, draft)
     assert {gap["key"] for gap in bot._draft_gaps(context)} == set(missing)
 
@@ -244,7 +246,9 @@ async def test_document_followup_preserves_case_and_attachment_then_previews():
     assert context.user_data["attachment_kind"] == "photo"
     assert context.user_data["chosen_form"] == "CBD"
     text = sim.get_last_text()
-    assert "still need" not in text.lower()
+    assert "still needed:" in text.lower()
+    assert "your reflection" in text.lower()
+    assert bot._load_draft(context).fields["reflection"] == "", "document OCR is not the doctor's reflection"
     buttons = {data for _, data in sim.get_last_buttons()}
     assert "APPROVE|draft" in buttons
 

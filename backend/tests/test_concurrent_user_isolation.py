@@ -27,6 +27,8 @@ def test_active_drafts_are_isolated_per_user_context():
 
     user_a = _context()
     user_b = _context()
+    user_a.user_data["case_user_text"] = ["A reflection"]
+    user_b.user_data["case_user_text"] = ["B reflection"]
 
     bot._store_draft(
         user_a,

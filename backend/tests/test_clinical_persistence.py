@@ -15,6 +15,9 @@ import clinical_persistence as cp
 
 
 CASE = "68F, sudden severe headache, worst of life, GCS 14. SAH suspected."
+AUTHOR_WORDS = "Synthetic doctor learning: I will escalate a sudden severe headache earlier."
+PENDING_WORDS = "Synthetic pending reply: I reassessed the patient's reduced consciousness."
+AMEND_WORDS = "Synthetic amendment history: I discussed the headache with the senior doctor."
 
 
 def _user_data():
@@ -22,6 +25,9 @@ def _user_data():
         "case_text": CASE,
         "last_filed_case_text": CASE,
         "last_amend_case_text": CASE,
+        "case_user_text": [AUTHOR_WORDS],
+        "pending_new_case_user_text": [PENDING_WORDS],
+        "last_amend_case_user_text": [AMEND_WORDS],
         "last_amend_draft": {"fields": {"reflection": CASE}},
         "last_draft_preview": f"Draft preview: {CASE}",
         "draft_data": {"_type": "CBD", "clinical_reasoning": CASE},
@@ -36,6 +42,7 @@ def test_scrub_removes_clinical_keys_and_keeps_operational_state():
     scrubbed = cp.scrub(_user_data())
 
     assert CASE not in repr(scrubbed), "case narrative survived the scrub"
+    assert all(words not in repr(scrubbed) for words in (AUTHOR_WORDS, PENDING_WORDS, AMEND_WORDS))
     assert scrubbed == {
         "user_tier": "pro_plus",
         "last_filing_status": "success",
@@ -52,6 +59,9 @@ def test_scrub_does_not_mutate_the_live_user_data():
 
     assert live["case_text"] == CASE
     assert live["last_amend_draft"]["fields"]["reflection"] == CASE
+    assert live["case_user_text"] == [AUTHOR_WORDS]
+    assert live["pending_new_case_user_text"] == [PENDING_WORDS]
+    assert live["last_amend_case_user_text"] == [AMEND_WORDS]
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +79,7 @@ async def test_persistence_writes_no_clinical_content_to_disk(tmp_path):
 
     on_disk = path.read_bytes()
     assert CASE.encode() not in on_disk, "case narrative was written to the pickle"
+    assert all(words.encode() not in on_disk for words in (AUTHOR_WORDS, PENDING_WORDS, AMEND_WORDS))
     assert b"clinical_reasoning" not in on_disk
 
     # Round-trip through a fresh instance to prove what a restart would restore.
@@ -78,6 +89,7 @@ async def test_persistence_writes_no_clinical_content_to_disk(tmp_path):
     assert stored["user_tier"] == "pro_plus", "operational state must survive"
     assert "last_amend_draft" not in stored
     assert "last_filed_case_text" not in stored
+    assert "last_amend_case_user_text" not in stored
 
 
 @pytest.mark.asyncio
@@ -91,12 +103,16 @@ async def test_case_in_progress_survives_a_restart_encrypted(tmp_path):
 
     for f in cp.working_case_dir().iterdir():
         assert CASE.encode() not in f.read_bytes(), "working case must be encrypted"
+        assert all(words.encode() not in f.read_bytes() for words in (AUTHOR_WORDS, PENDING_WORDS, AMEND_WORDS))
 
     restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
     assert restored["case_text"] == CASE
     assert restored["draft_data"]["clinical_reasoning"] == CASE
+    assert restored["case_user_text"] == [AUTHOR_WORDS]
+    assert restored["pending_new_case_user_text"] == [PENDING_WORDS]
     assert "last_filed_case_text" not in restored, "an undated filed case is not restored"
     assert "last_amend_case_text" not in restored, "amend history stays memory-only"
+    assert "last_amend_case_user_text" not in restored, "amend author words stay memory-only"
 
 
 @pytest.mark.asyncio
@@ -108,6 +124,7 @@ async def test_last_filed_case_survives_a_restart_for_another_form(tmp_path):
     path = tmp_path / "bot_persistence"
     filed = {
         "last_filed_case_text": CASE,
+        "case_user_text": [AUTHOR_WORDS],
         "last_filed_at": datetime.now(timezone.utc),
         "last_filed_form_type": "DOPS",
         "last_amend_draft": {"fields": {"reflection": CASE}},
@@ -117,11 +134,14 @@ async def test_last_filed_case_survives_a_restart_for_another_form(tmp_path):
     await persistence.flush()
 
     assert CASE.encode() not in path.read_bytes(), "pickle stays free of case text"
+    assert AUTHOR_WORDS.encode() not in path.read_bytes()
     for f in cp.working_case_dir().iterdir():
         assert CASE.encode() not in f.read_bytes(), "filed case must be encrypted"
+        assert AUTHOR_WORDS.encode() not in f.read_bytes()
 
     restored = (await cp.ClinicalScrubbingPersistence(filepath=path).get_user_data())[4242]
     assert restored["last_filed_case_text"] == CASE
+    assert restored["case_user_text"] == [AUTHOR_WORDS]
     assert "last_amend_draft" not in restored
 
 
@@ -133,12 +153,26 @@ def test_last_filed_case_expires_after_ttl_even_if_file_is_fresh():
         "last_filed_case_text": CASE,
         "last_filed_at": now - timedelta(hours=25),
         "case_text": "newer case in progress",
+        "case_user_text": ["Newer active-case authored words"],
     })
 
     restored = cp.load_working_cases(now=now)[7]
     assert "last_filed_case_text" not in restored
     assert "last_filed_at" not in restored
     assert restored["case_text"] == "newer case in progress"
+    assert restored["case_user_text"] == ["Newer active-case authored words"]
+
+
+def test_last_filed_author_words_expire_with_filed_source_even_when_file_is_fresh():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    cp.save_working_case(7, {
+        "last_filed_case_text": CASE,
+        "last_filed_at": now - timedelta(hours=25),
+        "case_user_text": [AUTHOR_WORDS],
+    })
+    assert 7 not in cp.load_working_cases(now=now), "expired filed words cannot restart without their source"
 
 
 def test_reset_erases_the_last_filed_case():
@@ -200,6 +234,7 @@ def test_purge_strips_clinical_keys_from_an_existing_file(tmp_path):
     assert result["removed"]["last_filed_case_text"] == 1
     payload = pickle.loads(path.read_bytes())
     assert CASE.encode() not in path.read_bytes()
+    assert all(words.encode() not in path.read_bytes() for words in (AUTHOR_WORDS, PENDING_WORDS, AMEND_WORDS))
     assert payload["user_data"][4242]["user_tier"] == "pro_plus"
     assert payload["user_data"][9001] == {"user_tier": "free"}
 
@@ -225,7 +260,7 @@ def test_every_case_bearing_key_in_bot_is_declared_clinical():
     assigned = set(re.findall(r'user_data\["([a-z_]+)"\]\s*=', source))
     case_bearing = {
         key for key in assigned
-        if ("case_text" in key or key.endswith("_draft") or key.endswith("draft_data")
+        if ("case_text" in key or "case_user_text" in key or key.endswith("_draft") or key.endswith("draft_data")
             or key.endswith("draft_preview"))
     }
 

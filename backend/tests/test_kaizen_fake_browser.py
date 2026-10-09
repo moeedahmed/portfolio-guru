@@ -157,6 +157,13 @@ def mapped_bot_conversation(monkeypatch, tmp_path):
             "and reviewed the outcome with the team. I learnt to communicate the "
             "plan clearly and will repeat an early structured review next time."
         )
+        # 9 Oct 2026: the fake provider may only structure reflection words
+        # actually supplied by this synthetic doctor, just as in production.
+        source_fields = bot._draft_fields_for_review(draft)
+        reflection_values = [str(source_fields[key]) for key in
+                             bot._find_reflection_keys(source_fields, form_type)
+                             if source_fields.get(key)]
+        text = "\n\n".join([text, *reflection_values])
         assert await bot.handle_case_input(sim._make_text_update(text), context) == bot.AWAIT_FORM_CHOICE
         assert "FORM|best" in {data for _, data in sim.get_last_buttons()}
         assert context.user_data["case_text"] == text
@@ -1026,6 +1033,12 @@ async def test_login_journey_session_failure_reconnect_resumes_save(handoff_jour
     draft = {"_type": "FORM", "form_type": "CBD", "uuid": filer.FORM_UUIDS["CBD"], "fields": synthetic_fields("CBD")}
     j.ctx.user_data["draft_data"] = draft
     j.ctx.user_data["case_text"] = LOGIN_CASE + " I learned to escalate chest pain early; next time I will document my reasoning."
+    source_fields = draft["fields"]
+    reflection_values = [str(source_fields[key]) for key in
+                         bot._find_reflection_keys(source_fields, "CBD")
+                         if source_fields.get(key)]
+    j.ctx.user_data["case_text"] = "\n\n".join([j.ctx.user_data["case_text"], *reflection_values])
+    j.ctx.user_data["case_user_text"] = [j.ctx.user_data["case_text"]]
     approval = bot._build_approval_keyboard(context=j.ctx)
     approve_callback = approval.inline_keyboard[0][0].callback_data
     assert unstamp(approve_callback) == "APPROVE|draft" and approve_callback != "APPROVE|draft"

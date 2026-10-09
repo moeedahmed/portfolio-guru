@@ -1989,6 +1989,8 @@ def _restore_retryable_draft(context) -> bool:
     amend_case = context.user_data.get("last_amend_case_text")
     if amend_case and not context.user_data.get("case_text"):
         context.user_data["case_text"] = amend_case
+        if "last_amend_case_user_text" in context.user_data:
+            context.user_data["case_user_text"] = list(context.user_data["last_amend_case_user_text"])
     amend_form = context.user_data.get("last_amend_chosen_form")
     if amend_form and not context.user_data.get("chosen_form"):
         context.user_data["chosen_form"] = amend_form
@@ -1997,6 +1999,7 @@ def _restore_retryable_draft(context) -> bool:
 
 def _store_pending_draft(context, draft) -> None:
     """Store the analysed draft used during template review."""
+    draft = _without_unsupported_reflection(context, draft)
     context.user_data["pending_draft_data"] = _serialise_draft(draft)
 
 
@@ -2075,6 +2078,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
         "paused_flow_rebuild",
         "pending_draft_data",
         "pending_new_case_text",
+        "pending_new_case_user_text",
         "template_prompt_message_id",
         "template_prompt_chat_id",
         "explicit_form_choice",
@@ -2093,6 +2097,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     if not keep_case:
         for key in (
             "case_text",
+            "case_user_text",
             "draft_data",
             "current_draft",
             "pending_new_case_text",
@@ -2106,6 +2111,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
             "last_amend_draft",
             "last_amend_draft_url",
             "last_amend_case_text",
+            "last_amend_case_user_text",
             "last_amend_chosen_form",
             "last_bot_msg_id",
             "last_bot_chat_id",
@@ -2357,6 +2363,8 @@ async def _handle_incomplete_draft_complaint(message, context) -> int | None:
         amend_case = context.user_data.get("last_amend_case_text")
         if amend_case and not context.user_data.get("case_text"):
             context.user_data["case_text"] = amend_case
+            if "last_amend_case_user_text" in context.user_data:
+                context.user_data["case_user_text"] = list(context.user_data["last_amend_case_user_text"])
         form_type = context.user_data.get("last_amend_chosen_form") or form_type
         if form_type:
             context.user_data["chosen_form"] = form_type
@@ -2668,6 +2676,8 @@ def _pending_case_bundle_is_stale(context) -> bool:
 
 
 def _append_pending_case_bundle(context, text: str, source: str) -> None:
+    _remember_case_context_source(context, source,
+                                  user_text=text if source in {"text", "voice", "audio"} else None)
     text = (text or "").strip()
     if not text:
         return
@@ -2732,7 +2742,8 @@ def _append_gathering_case(context, text: str, source: str) -> None:
     text = (text or "").strip()
     if not text:
         return
-    _remember_case_context_source(context, source)
+    _remember_case_context_source(context, source,
+                                  user_text=text if source in {"text", "voice", "audio"} else None)
     now = time.time()
     case = context.user_data.setdefault(
         _GATHERING_CASE_KEY,
@@ -5745,9 +5756,11 @@ async def _show_open_case_new_case_gate(
     incoming_text: str,
     *,
     edit: bool = False,
+    user_words: list[str] | None = None,
 ) -> int:
     """Hold explicit new-case input when an unresolved draft/case is open."""
     context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    context.user_data["pending_new_case_user_text"] = [incoming_text] if user_words is None else user_words
     prompt_text = (
         "This looks like a new case, but your current draft is still open.\n\n"
         "Start a separate case, or add this detail to the current draft?"
@@ -5769,6 +5782,7 @@ async def _show_stale_open_draft_gate(target, context, incoming_text: str) -> in
     draft until the doctor says this message belongs to it.
     """
     context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    context.user_data["pending_new_case_user_text"] = [incoming_text]
     form_name = _form_display_name(context.user_data.get("chosen_form", ""))
     prompt_text = (
         f"Your {form_name} draft from earlier is still open.\n\n"
@@ -5784,9 +5798,11 @@ async def _show_failed_filing_input_gate(
     incoming_text: str,
     *,
     edit: bool = False,
+    user_words: list[str] | None = None,
 ) -> int:
     """Ask whether new input after a failed filing is retry/edit/new/cancel."""
     context.user_data["pending_new_case_text"] = (incoming_text or "").strip()
+    context.user_data["pending_new_case_user_text"] = [incoming_text] if user_words is None else user_words
     form_name = context.user_data.get("last_filing_form_name") or _form_display_name(context.user_data.get("chosen_form", ""))
     form_line = f" for the {form_name}" if form_name else ""
     prompt_text = (
@@ -6111,7 +6127,8 @@ def _find_reflection_keys(fields: dict, form_type: str | None = None) -> list[st
     if not isinstance(fields, dict):
         return []
     if schema_form_type(form_type or "") == "FORMAL_COURSE":
-        return [key for key in ("reflective_notes", "resources_used", "lessons_learned") if key in fields]
+        # Resources are factual evidence, not the doctor's reflective act.
+        return [key for key in ("reflective_notes", "lessons_learned") if key in fields]
 
     keys: list[str] = []
     if "reflection" in fields:
@@ -6318,6 +6335,7 @@ def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
 
 
 def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
+    draft = _without_unsupported_reflection(context, draft)
     form_type = context.user_data.get("chosen_form") or _draft_form_type(draft)
     if not _draft_has_reflection_fields(draft):
         return False
@@ -6325,65 +6343,79 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
     # one must not hold up a save the way a CBD's required reflection does.
     if not _form_requires_reflection(form_type, draft):
         return False
-    # OCR learning points belong to the image's author, not necessarily the
-    # doctor. Provenance beats cached/model judgements of that same OCR text.
-    if _case_lacks_user_context(context):
-        return True
-
-    case_text = str(context.user_data.get("case_text") or "").strip()
-    if case_text:
-        # The model's semantic reading of the doctor's own words is the
-        # judgement (cached by `_essentials_gate_before_draft` for this exact
-        # case and form). `has_personal_reflective_input` remains only as the
-        # deterministic fallback for a case that was never assessed — a model
-        # outage must not silently drop RCEM's authentic-reflection gate.
-        judged = _model_reflection_judgement(context, case_text, form_type)
-        if judged is None:
-            judged = has_personal_reflective_input(case_text)
-        context.user_data["rcem_personal_reflection_confirmed"] = judged
-
-    # Existing persisted drafts created before this control may not retain the
-    # original case text. Preserve their explicit review/save path; every new
-    # draft has case_text and is evaluated above.
-    confirmed = context.user_data.get("rcem_personal_reflection_confirmed")
-    if confirmed is False:
-        return True
-    return not bool(_draft_reflection_text(draft).strip())
+    # The field already passed provenance. A second judgement of its wording
+    # must not erase the doctor's visible reflection at the filing boundary.
+    confirmed = bool(_draft_reflection_text(draft).strip())
+    context.user_data["rcem_personal_reflection_confirmed"] = confirmed
+    return not confirmed
 
 
-def _case_lacks_user_context(context) -> bool:
-    if "case_has_user_context" in context.user_data:
-        return not context.user_data["case_has_user_context"]
-    source = str(context.user_data.get("case_input_source") or "").strip().lower()
-    return source in {"photo", "image", "document", "mixed"}
+def _case_user_words(context) -> list[str]:
+    """Authored input only; old unmixed text/voice cases can recover their source."""
+    if "case_user_text" in context.user_data:
+        return list(context.user_data["case_user_text"])
+    source = str(context.user_data.get("case_input_source") or "text").strip().lower()
+    if source in {"text", "voice", "audio"} and context.user_data.get("case_has_user_context") is not False:
+        text = str(context.user_data.get("case_text") or "").strip()
+        return [text] if text else []
+    return []
 
 
 def _without_unsupported_reflection(context, draft):
-    return _without_reflection_text(draft) if _case_lacks_user_context(context) else draft
+    # 9 Oct 2026: a narrative or caption cannot legitimise unrelated OCR learning.
+    # Reuse the extractor's existing wording-similarity judgement per field,
+    # against separately retained authored input, for optional fields too.
+    from extractor import _fields_are_repetitive, _normalise_for_similarity
+
+    words = _case_user_words(context)
+    sources = [part.strip() for text in words
+               for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+    exact_sources = [*sources, *words, "\n\n".join(words)]
+    reflection_markers = _SOURCE_OUTCOME_OR_REFLECTION_MARKERS[_SOURCE_OUTCOME_OR_REFLECTION_MARKERS.index("learned"):]
+    sources = [source for source in sources if has_personal_reflective_input(source)
+               or any(marker in source.lower() for marker in reflection_markers)]
+    sources += ["\n\n".join(sources)] if sources else []
+    # Similarity is for restructuring actual reflection, not creating a
+    # reflective act from narrative or reversing a doctor's negative statement.
+    negations = {"not", "no", "never", "nothing", "cannot", "without", "t"}
+    fields = _draft_fields_for_review(draft)
+    updates = {}
+    for key in _find_reflection_keys(fields, _draft_form_type(draft)):
+        value = str(fields.get(key) or "").strip()
+        if not value:
+            continue
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", value) if part.strip()]
+        if not all(any(_normalise_for_similarity(sentence) in _normalise_for_similarity(source)
+                       for source in exact_sources)
+                   or any((set(_normalise_for_similarity(sentence).split()) & negations)
+                          == (set(_normalise_for_similarity(source).split()) & negations)
+                          and _fields_are_repetitive(sentence, source)
+                          for source in sources)
+                   for sentence in sentences):
+            updates[key] = ""
+    if not updates:
+        return draft
+    if isinstance(draft, FormDraft):
+        return draft.model_copy(update={"fields": {**draft.fields, **updates}})
+    return draft.model_copy(update=updates)
 
 
 def _remember_case_context_source(
     context,
     input_source: str | None,
     *,
-    has_user_context: bool | None = None,
+    user_text: str | None = None,
 ) -> None:
-    """One case-level provenance signal, set only by text, voice or captions.
-
-    9 Oct 2026: OCR/document text and a mixed source label cannot set it;
-    more media cannot erase the doctor's earlier input. New-case cleanup resets it.
-    """
+    """Retain actual authored words, never OCR/document extraction or a label."""
     source = str(input_source or "").strip().lower()
     if source == "same case":
-        return  # Reuse retains the saved flag; its label grants no new provenance.
-    # Older text/voice cases may predate this flag. Their recorded source is
-    # still doctor input; a media follow-up must not overwrite that provenance.
-    previous_source = context.user_data.get("case_input_source")
-    context.user_data.setdefault("case_has_user_context", bool(context.user_data.get("case_text"))
-                                 and previous_source in {"text", "voice", "audio"})
-    own_words = has_user_context if has_user_context is not None else source in {"text", "voice", "audio"}
-    if own_words:
-        context.user_data["case_has_user_context"] = True
+        return  # Reuse retains the saved words; its label grants no new provenance.
+    words = context.user_data.setdefault("case_user_text", _case_user_words(context))
+    text = str(user_text or "").strip()
+    if text and text not in words:
+        words.append(text)
+    # Kept as compatibility metadata; reflection decisions use the words above.
+    context.user_data["case_has_user_context"] = bool(words)
 
 
 def _without_reflection_text(draft):
@@ -6956,25 +6988,6 @@ def _cached_essential_statuses(
         return None
     statuses = cached.get("statuses")
     return dict(statuses) if isinstance(statuses, dict) else None
-
-
-def _model_reflection_judgement(
-    context: ContextTypes.DEFAULT_TYPE,
-    case_text: str,
-    form_type: str,
-) -> bool | None:
-    """Whether the model judged the doctor's own reflective input present.
-
-    ``None`` means this case and form were never assessed (model outage, or
-    a draft restored from an older session), not that reflection is absent.
-    """
-    statuses = _cached_essential_statuses(context, case_text, form_type)
-    if not statuses:
-        return None
-    reflection_keys = _find_reflection_keys(statuses, form_type)
-    if not reflection_keys:
-        return None
-    return any(statuses.get(key) == ESSENTIAL_PRESENT for key in reflection_keys)
 
 
 def _form_requires_reflection(form_type: str, draft=None) -> bool:
@@ -9393,7 +9406,7 @@ async def handle_same_case_another(update: Update, context: ContextTypes.DEFAULT
 
     # Selective cleanup — preserve conversation handler state keys
     for key in list(context.user_data.keys()):
-        if key not in ("case_text", "excluded_form_type", "case_has_user_context"):
+        if key not in ("case_text", "excluded_form_type", "case_has_user_context", "case_user_text"):
             del context.user_data[key]
     context.user_data["case_text"] = case_text
     context.user_data["excluded_form_type"] = filed_form
@@ -12409,7 +12422,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
     filed_form = context.user_data.get("last_filed_form_type", "")
     filed_forms = _filed_form_types_for_last_case(context)
     filed_at = context.user_data.get("last_filed_at")
-    has_user_context = context.user_data.get("case_has_user_context")
+    user_words = _case_user_words(context)
     # The reuse phrase IS the intent — match form codes without the standard
     # intent-phrase gate so "use the same case for DOPS" picks up DOPS.
     explicit_form = extract_explicit_form_type(raw_text, require_intent=False)
@@ -12418,8 +12431,8 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.clear()
     context.user_data["case_text"] = last_case
     context.user_data["last_filed_case_text"] = last_case
-    if has_user_context is not None:
-        context.user_data["case_has_user_context"] = has_user_context
+    context.user_data["case_user_text"] = user_words
+    context.user_data["case_has_user_context"] = bool(user_words)
     if filed_at:
         context.user_data["last_filed_at"] = filed_at
     context.user_data["last_filed_form_type"] = filed_form
@@ -12473,9 +12486,10 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
     )
     # Only automatic refusal left: genuinely empty input. Everything else goes
     # to the model, which decides whether there is a case to draft from.
+    _remember_case_context_source(context, input_source,
+                                  user_text=case_text if input_source in {"text", "voice", "audio"} else None)
     context.user_data["case_text"] = case_text
     context.user_data["case_input_source"] = input_source
-    _remember_case_context_source(context, input_source)
     context.user_data.pop("awaiting_source_detail", None)
     if input_source != "same case":
         _forget_last_filing(context)
@@ -12856,10 +12870,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "CASE|new":
         await query.answer()
         new_text = context.user_data.pop("pending_new_case_text", "")
+        user_words = context.user_data.pop("pending_new_case_user_text", [])
         context.user_data.clear()
+        context.user_data["case_user_text"] = user_words
         if new_text:
             user_id = update.effective_user.id
-            return await _process_case_text(query.message, context, user_id, new_text, "text")
+            return await _process_case_text(query.message, context, user_id, new_text, "mixed")
         await query.edit_message_text("This case is closed.", reply_markup=None)
         await query.message.reply_text(
             "Send me the new case whenever you're ready.",
@@ -12871,6 +12887,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         old_case = context.user_data.get("case_text", "")
         new_detail = context.user_data.pop("pending_new_case_text", "")
+        for text in context.user_data.pop("pending_new_case_user_text", []):
+            _remember_case_context_source(context, "text", user_text=text)
+        user_words = _case_user_words(context)
         merged = f"{old_case}\n\nAdditional context:\n{new_detail}"
         chosen_form = context.user_data.get("chosen_form")
         user_id = update.effective_user.id
@@ -12891,7 +12910,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await _show_draft_review(query.message, context, draft, chosen_form)
         else:
             context.user_data.clear()
-            return await _process_case_text(query.message, context, user_id, merged, "text")
+            context.user_data["case_user_text"] = user_words
+            return await _process_case_text(query.message, context, user_id, merged, "mixed")
 
     elif data.startswith("DOCUSE|"):
         return await handle_document_intent(update, context)
@@ -13091,6 +13111,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("_pending_docs", None)
     context.user_data.pop("_pending_media_prompt", None)
     pending_doc_context = context.user_data.pop("_pending_doc_context", "")
+    doctor_context = pending_doc_context
     # Capture provenance before sibling OCR is folded into the drafting text.
     has_user_context = bool(pending_doc_context.strip())
 
@@ -13241,6 +13262,15 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         )
         return AWAIT_CASE_INPUT
 
+    _remember_case_context_source(context, attachment_kind, user_text=doctor_context)
+    if mode == "attach" and doctor_context.strip():
+        if _gathering_enabled(context) and not context.user_data.get("chosen_form"):
+            _append_gathering_case(context, doctor_context, "text")
+            context.user_data["case_text"], context.user_data["case_input_source"] = _combined_gathering_case(context)
+        else:
+            context.user_data["case_text"] = combine_case_inputs(
+                context.user_data.get("case_text", ""), [doctor_context])
+
     if mode in {"attach", "both"}:
         _add_case_attachment(context, file_path, file_name, attachment_kind)
         context.user_data.pop("attachment_upload_confirmed", None)
@@ -13300,8 +13330,6 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
         return AWAIT_CASE_INPUT
 
     read_icon = "📷" if is_image_attachment else "📄"
-    _remember_case_context_source(context, "photo" if is_image_attachment else "document",
-                                  has_user_context=has_user_context)
     await query.edit_message_text(f"{read_icon} Reading {attachment_label}…")
     try:
         if is_image_attachment:
@@ -13438,7 +13466,7 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
                 context.user_data["attachment_name"] = existing_attachment_name
                 context.user_data["attachment_kind"] = existing_attachment_kind
         # New-case cleanup above removes provenance along with the old draft.
-        _remember_case_context_source(context, input_source, has_user_context=has_user_context)
+        _remember_case_context_source(context, input_source, user_text=doctor_context)
         _append_gathering_case(context, case_text, input_source)
         reply_text, reply_markup = _gathering_reply(context)
         await query.edit_message_text(reply_text, reply_markup=reply_markup)
@@ -13453,7 +13481,8 @@ async def handle_document_intent(update: Update, context: ContextTypes.DEFAULT_T
 
 # === IMPLICIT CASE ACCUMULATION ===
 
-async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE, new_text: str) -> int:
+async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE, new_text: str,
+                                  *, input_source: str = "text") -> int:
     """Append new_text to accumulated case context and re-extract the template."""
     user_id = update.effective_user.id
     chosen_form = context.user_data.get("chosen_form", "")
@@ -13462,7 +13491,13 @@ async def _accumulate_and_refresh(update: Update, context: ContextTypes.DEFAULT_
     if not chosen_form or not initial_case:
         return await handle_case_input(update, context)
     if _looks_like_explicit_new_case_request(new_text):
-        return await _show_open_case_new_case_gate(update.message, context, new_text)
+        caption = (update.message.caption or "").strip()
+        return await _show_open_case_new_case_gate(
+            update.message, context, new_text,
+            user_words=[new_text] if input_source in {"text", "voice", "audio"} else ([caption] if caption else []))
+
+    _remember_case_context_source(context, input_source,
+                                  user_text=new_text if input_source in {"text", "voice", "audio"} else None)
 
     # Track accumulation additions
     additions = context.user_data.get("accumulation_additions", [])
@@ -13531,13 +13566,13 @@ async def _regenerate_active_draft_with_feedback(
         await msg.reply_text("I couldn't read any useful extra detail from that. Try again with text, voice, image, or document.")
         return AWAIT_APPROVAL
 
+    _remember_case_context_source(context, input_source,
+                                  user_text=feedback_text if input_source in {"text", "voice", "audio"} else None)
     if append_to_case:
         case_text = combine_case_inputs(case_text, [feedback_text])
         context.user_data["case_text"] = case_text
         previous_source = context.user_data.get("case_input_source", "text")
         context.user_data["case_input_source"] = previous_source if previous_source == input_source else "mixed"
-    if input_source in {"text", "voice", "audio"}:
-        context.user_data["case_has_user_context"] = True
 
     ack = progress_message or await msg.reply_text("✏️ Regenerating draft with your extra information…")
 
@@ -13735,8 +13770,8 @@ async def handle_template_review_media(update: Update, context: ContextTypes.DEF
     if msg.caption and not msg.photo:
         extracted_text = combine_case_inputs(msg.caption.strip(), [extracted_text])
     _remember_case_context_source(context, "voice" if voice_media else "document",
-                                  has_user_context=bool(voice_media or (msg.caption or "").strip()))
-    return await _accumulate_and_refresh(update, context, extracted_text)
+                                  user_text=extracted_text if voice_media else caption)
+    return await _accumulate_and_refresh(update, context, extracted_text, input_source="voice" if voice_media else "media")
 
 
 async def handle_approval_media_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -13851,18 +13886,20 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
         await msg.reply_text("Send text, voice, image, or a document with the extra detail.")
         return AWAIT_APPROVAL
 
+    user_words = [extracted_text] if voice_media and extracted_text else ([caption] if caption else [])
+    if caption and not msg.photo:
+        extracted_text = combine_case_inputs(caption, [extracted_text or ""])
     if _has_retryable_failed_filing_draft(context):
         return await _show_failed_filing_input_gate(
             ack,
             context,
             extracted_text or "",
             edit=True,
+            user_words=user_words,
         )
 
-    if caption and not msg.photo:
-        extracted_text = combine_case_inputs(caption, [extracted_text or ""])
     _remember_case_context_source(context, input_source,
-                                  has_user_context=bool(voice_media or caption))
+                                  user_text=extracted_text if voice_media else caption)
     return await _regenerate_active_draft_with_feedback(
         update,
         context,
@@ -13972,6 +14009,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
         has_draft = bool(context.user_data.get("current_draft") or context.user_data.get("case_text"))
         if has_draft:
             context.user_data["pending_new_case_text"] = raw_text
+            context.user_data["pending_new_case_user_text"] = [raw_text]
             prompt_text = "Looks like a new case — start fresh or fold it into the current one?"
             markup = InlineKeyboardMarkup([[
                 InlineKeyboardButton("➕ New case", callback_data="CASE|new"),
@@ -14085,6 +14123,10 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
+    if (context.user_data.get("last_filed_case_text") and not _case_is_open(context)
+            and not context.user_data.get("_pending_doc")):
+        # A fresh capture cannot borrow the previous case's reflective act.
+        context.user_data.pop("case_user_text", None)
 
     # Clear stale status state from previous sessions, but keep active prompts
     # editable while the user is adding bundle/source-detail context, or
@@ -14185,6 +14227,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if explicit_start_form and _explicit_form_start_needs_details(raw_text):
             reply_text = _reply_context_text(update.message)
             if reply_text and _has_rich_clinical_evidence(reply_text):
+                _remember_case_context_source(context, "text", user_text=raw_text)
+                replied_author = getattr(update.message.reply_to_message, "from_user", None)
+                if (getattr(replied_author, "id", None) == user_id
+                        and getattr(replied_author, "is_bot", True) is False):
+                    _remember_case_context_source(context, "text", user_text=reply_text)
                 ack = await update.message.reply_text(CAPTURED_ACK, parse_mode="Markdown")
                 _track_latest_message(context, ack)
                 return await _process_case_text(
@@ -14192,7 +14239,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     context,
                     user_id,
                     _case_text_with_reply_context(raw_text, reply_text),
-                    "text",
+                    "mixed",
                 )
             _forget_last_filing(context)
             context.user_data["chosen_form"] = explicit_start_form
@@ -14528,6 +14575,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     await ack.edit_text("This image doesn't look like a clinical case. Send a text description or a photo of clinical notes/findings.")
                     return AWAIT_CASE_INPUT
                 caption = (update.message.caption or "").strip()
+                _remember_case_context_source(context, "photo", user_text=caption)
                 if caption:
                     case_text = f"{caption}\n\n{case_text}".strip()
                 _append_pending_case_bundle(context, case_text, "photo")
@@ -14902,6 +14950,8 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _mark_missing_essentials_replay_done(context, update, gate_result)
         return gate_result
 
+    authored_input = (case_text if _voice_media_from_message(update.message)
+                      else (update.message.text or update.message.caption or ""))
     # If the user is refining a chosen template, keep the original wording and append the new detail.
     if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
         previous_case = context.user_data.get("case_text", "").strip()
@@ -14917,7 +14967,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         input_source = "text"
 
-    _remember_case_context_source(context, input_source)
+    _remember_case_context_source(context, input_source, user_text=authored_input)
     if input_source in {"text", "voice"} and (
         _pending_media_label(context) == "video" or not context.user_data.get("_pending_doc")
     ):
@@ -14975,6 +15025,7 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         existing_attachment_kind = context.user_data.get("attachment_kind")
         if not _gathering_case_active(context):
             _clear_case_review_state(context, keep_case=False)
+        _remember_case_context_source(context, input_source, user_text=authored_input)
         if attachment_path_to_save:
             _add_case_attachment(
                 context, attachment_path_to_save, attachment_name_to_save, "document"
@@ -16340,7 +16391,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             user_id=user_id,
         )
     filed_case_text = context.user_data.get("case_text", "")
-    filed_has_user_context = not _case_lacks_user_context(context)
+    filed_user_words = _case_user_words(context)
     if status in ("success", "partial") and not uncertain_save:
         # Forms already saved from this same case (set by "Another form") plus
         # this one, so the next "Another form" skips all of them.
@@ -16351,7 +16402,8 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.clear()
         if filed_case_text:
             context.user_data["last_filed_case_text"] = filed_case_text
-            context.user_data["case_has_user_context"] = filed_has_user_context
+            context.user_data["case_user_text"] = filed_user_words
+            context.user_data["case_has_user_context"] = bool(filed_user_words)
             # Dates the encrypted restart copy so it expires on its own.
             context.user_data["last_filed_at"] = datetime.now(UTC)
             context.user_data["last_filed_form_type"] = form_type
@@ -16360,6 +16412,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["last_draft_preview"] = draft_preview_text
         context.user_data["last_amend_draft"] = amend_draft_data
         context.user_data["last_amend_case_text"] = amend_case_text
+        context.user_data["last_amend_case_user_text"] = filed_user_words
         context.user_data["last_amend_chosen_form"] = amend_chosen_form_type
         # Amending later updates this same Kaizen draft instead of adding one.
         if result.get("draft_url"):
@@ -17148,6 +17201,8 @@ async def handle_amend_draft(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Reload the draft data
     context.user_data["case_text"] = amend_case
+    if "last_amend_case_user_text" in context.user_data:
+        context.user_data["case_user_text"] = list(context.user_data["last_amend_case_user_text"])
     context.user_data["chosen_form"] = amend_form
     context.user_data["draft_data"] = amend_draft
     context.user_data["amend_mode"] = True
@@ -17228,6 +17283,10 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await msg.reply_text("💬 Send text, a voice note, or a photo with your feedback.")
         return AWAIT_EDIT_VALUE
 
+    if photo and (msg.caption or "").strip():
+        caption = msg.caption.strip()
+        _remember_case_context_source(context, "photo", user_text=caption)
+        feedback = combine_case_inputs(caption, [feedback])
     return await _regenerate_active_draft_with_feedback(
         update,
         context,
@@ -17400,7 +17459,6 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         return AWAIT_DOC_INTENT
 
     if context.user_data.pop("awaiting_reflection_detail", False) and has_draft and case_text:
-        context.user_data["case_has_user_context"] = True
         return await _regenerate_active_draft_with_feedback(
             update,
             context,
@@ -17575,6 +17633,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
             return await _accumulate_and_refresh(update, context, added_detail)
         context.user_data["case_text"] = f"{case_text.strip()}\n\n{added_detail}".strip()
+        _remember_case_context_source(context, "text", user_text=added_detail)
         return await _answer_mid_flow_question(
             update,
             context,
@@ -17663,7 +17722,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 # edits, and reassess it before accepting doctor-owned facts.
                 case_text = combine_case_inputs(case_text, [raw_text])
                 context.user_data["case_text"] = case_text
-                context.user_data["case_has_user_context"] = True
+                _remember_case_context_source(context, "text", user_text=raw_text)
                 previous_source = context.user_data.get("case_input_source", "text")
                 context.user_data["case_input_source"] = "text" if previous_source == "text" else "mixed"
                 gate = await _essentials_gate_before_draft(
@@ -17746,12 +17805,13 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
         ):
             combined_case = f"{case_text.strip()}\n\n{raw_text}".strip()
+            _remember_case_context_source(context, "text", user_text=raw_text)
             return await _process_case_text(
                 update.message,
                 context,
                 update.effective_user.id,
                 combined_case,
-                context.user_data.get("case_input_source", "text"),
+                "mixed",
             )
 
         # new_case — looks like a new case
@@ -17872,6 +17932,7 @@ def _pending_consent_input_from_update(update: Update) -> dict | None:
                 "kind": "document",
                 "file_id": file_id,
                 "file_name": file_name,
+                "caption": (getattr(message, "caption", None) or "").strip(),
                 "suffix": os.path.splitext(file_name)[1] or ".tmp",
             }
 

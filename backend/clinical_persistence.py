@@ -54,10 +54,13 @@ logger = logging.getLogger(__name__)
 CLINICAL_USER_DATA_KEYS: frozenset[str] = frozenset({
     # Raw case narrative, in-flight and retained.
     "case_text",
+    "case_user_text",
     "pending_new_case_text",
+    "pending_new_case_user_text",
     "accumulation_additions",
     "last_filed_case_text",
     "last_amend_case_text",
+    "last_amend_case_user_text",
     # Drafted clinical content.
     "draft_data",
     "pending_draft_data",
@@ -86,7 +89,9 @@ def scrub(data: dict[str, Any] | None) -> dict[str, Any]:
 # Filed-case history (last_*) and voice examples stay memory-only.
 WORKING_CASE_KEYS: frozenset[str] = frozenset({
     "case_text",
+    "case_user_text",
     "pending_new_case_text",
+    "pending_new_case_user_text",
     "accumulation_additions",
     "draft_data",
     "pending_draft_data",
@@ -95,7 +100,8 @@ WORKING_CASE_KEYS: frozenset[str] = frozenset({
 })
 # The last filed case, kept so "Another form" survives a restart. Expires
 # ``PG_WORKING_CASE_TTL_HOURS`` after ``last_filed_at`` (a UTC datetime).
-FILED_CASE_KEYS: frozenset[str] = frozenset({"last_filed_case_text", "last_filed_at"})
+# 9 Oct 2026: authored words expire with their case and never enter plaintext.
+FILED_CASE_KEYS: frozenset[str] = frozenset({"last_filed_case_text", "last_filed_at", "case_user_text"})
 _RESTART_KEYS = WORKING_CASE_KEYS | FILED_CASE_KEYS
 # In-flight guards that only mean something while this process runs. Written
 # to disk they outlived a crash and blocked every later Save ("Already saving").
@@ -183,7 +189,8 @@ def _drop_stale_filed_case(data: dict[str, Any], now: datetime) -> dict[str, Any
     if "last_filed_case_text" in data and not (
         isinstance(filed_at, datetime) and now - filed_at <= _working_case_ttl()
     ):
-        data = {k: v for k, v in data.items() if k not in FILED_CASE_KEYS}
+        expired_keys = FILED_CASE_KEYS - {"case_user_text"} if data.get("case_text") else FILED_CASE_KEYS
+        data = {k: v for k, v in data.items() if k not in expired_keys}
     return data
 
 

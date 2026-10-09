@@ -568,7 +568,7 @@ class TestFlowWalker:
 
         sim = BotSimulator()
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_text'] = SAMPLE_CASES['valid'] + ' ' + thin_draft.fields['reflection']
         update = sim._make_callback_update('FORM|CBD')
 
         with patch(
@@ -658,7 +658,7 @@ class TestFlowWalker:
 
         sim = BotSimulator()
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_text'] = SAMPLE_CASES['valid'] + ' ' + lat_draft.fields['reflection']
         context.user_data['form_recommendations'] = [
             FormTypeRecommendation(
                 form_type='LAT',
@@ -1129,6 +1129,8 @@ class TestFlowWalker:
         context = sim._make_context()
         context.user_data['case_input_source'] = 'photo'
         context.user_data['case_has_user_context'] = True
+        context.user_data['case_user_text'] = [strong_draft.fields['reflection']]
+        context.user_data['case_text'] = strong_draft.fields['reflection']
 
         assert _set_reflection_detail_gate(context, strong_draft) is False
         buttons = {
@@ -1173,7 +1175,8 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_user_text'] = [thin_draft.fields['reflection'], improved.fields['reflection']]
+        context.user_data['case_text'] = '\n\n'.join([SAMPLE_CASES['valid'], *context.user_data['case_user_text']])
         context.user_data['case_input_source'] = 'voice'
         context.user_data['draft_data'] = {
             '_type': 'FORM',
@@ -1235,7 +1238,8 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_user_text'] = [thin_draft.fields['reflection'], improved.fields['reflection']]
+        context.user_data['case_text'] = '\n\n'.join([SAMPLE_CASES['valid'], *context.user_data['case_user_text']])
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'CBD',
@@ -1264,8 +1268,8 @@ class TestFlowWalker:
             fields={
                 'stage_of_training': 'Higher/ST4-ST6',
                 'project_description': 'I completed the ATLS Course for Doctors.',
-                'reflective_notes': '',
-                'resources_used': '',
+                'reflective_notes': 'I learned to use a clearer primary survey under pressure.',
+                'resources_used': 'ATLS course manual and simulated trauma scenarios.',
                 'lessons_learned': '',
             },
         )
@@ -1290,6 +1294,11 @@ class TestFlowWalker:
             'I completed ATLS and learned to use a clearer primary survey under pressure. '
             'I will use that structure when leading trauma assessments.'
         )
+        context.user_data['case_user_text'] = [
+            original.fields['reflective_notes'], original.fields['resources_used'],
+            improved.fields['reflective_notes'], improved.fields['lessons_learned'],
+        ]
+        context.user_data['case_text'] += '\n\n' + '\n\n'.join(context.user_data['case_user_text'])
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'FORMAL_COURSE',
@@ -1330,7 +1339,8 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_user_text'] = [thin_draft.fields['reflection'], improved.fields['reflection']]
+        context.user_data['case_text'] = '\n\n'.join([SAMPLE_CASES['valid'], *context.user_data['case_user_text']])
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'CBD',
@@ -1386,7 +1396,7 @@ class TestFlowWalker:
         sim = BotSimulator()
         update = sim._make_callback_update('IMPROVE|reflection')
         context = sim._make_context()
-        context.user_data['case_text'] = SAMPLE_CASES['valid']
+        context.user_data['case_text'] = SAMPLE_CASES['valid'] + ' ' + thin_draft.fields['reflection']
         context.user_data['draft_data'] = {
             '_type': 'FORM',
             'form_type': 'CBD',
@@ -2952,7 +2962,7 @@ class TestFlowWalker:
             'uuid': thin_draft.uuid,
         }
         context.user_data['chosen_form'] = thin_draft.form_type
-        context.user_data['case_text'] = 'short context'
+        context.user_data['case_text'] = 'short context ' + thin_draft.fields['reflection']
 
         with patch('bot.classify_intent', new=AsyncMock(return_value='edit_detail')), \
              patch('bot.extract_field_updates', new=AsyncMock(return_value={})), \
@@ -2996,7 +3006,7 @@ class TestFlowWalker:
             'fields': {**thin_draft.fields, 'reflection': 'Updated with leadership learning.'}
         })
         text_update = sim._make_text_update(
-            'Add that I escalated to the consultant, delegated nursing tasks, and reflected on leadership.'
+            'Add that I escalated to the consultant, delegated nursing tasks, and reflected on leadership. Updated with leadership learning.'
         )
         with patch('bot.classify_intent', new=AsyncMock(return_value='new_case')), \
              patch('bot.extract_cbd_data', new=AsyncMock(return_value=updated)), \

@@ -23,6 +23,7 @@ def _context(case_text: str, *, source: str = "text", has_user_context: bool = T
             "case_text": case_text,
             "case_input_source": source,
             "case_has_user_context": has_user_context,
+            "case_user_text": [case_text] if has_user_context else [],
         }
     )
 
@@ -268,12 +269,14 @@ def test_footer_names_what_is_still_needed_and_how_to_add_it():
     assert "still needed" in footer and "reflection" in footer
     assert "reply with" in footer and "save now" in footer
 
+    supplied_reflection = "I learned to escalate earlier and will do so in future."
+    context.user_data["case_text"] = supplied_reflection
+    context.user_data["case_user_text"].append(supplied_reflection)
     bot._store_draft(context, CBDData(
         date_of_encounter="2026-03-17", patient_presentation="Chest pain", clinical_setting="Emergency Department",
         stage_of_training="Higher/ST4-ST6", trainee_role="Assessed", clinical_reasoning="Assessed the patient.",
         reflection="I learned to escalate earlier.", level_of_supervision="Indirect",
     ))
-    context.user_data["case_text"] = "I learned to escalate earlier and will do so in future."
     footer = _draft_reply_hint(context).lower()
     assert "still needed" not in footer
     assert "use the buttons below to save" in footer
@@ -295,6 +298,8 @@ def test_refinement_clears_stale_reflection_gate_after_initial_block():
     context.user_data["case_text"] = (
         "I realised I had anchored early. In future I will reopen the differential sooner."
     )
+    context.user_data["case_user_text"].append(context.user_data["case_text"])
+    draft = draft.model_copy(update={"reflection": context.user_data["case_text"]})
     assert _set_reflection_detail_gate(context, draft) is False
     assert "needs_reflection_detail" not in context.user_data
 
@@ -448,7 +453,8 @@ async def test_stale_improve_callback_without_draft_cannot_extract():
     ("   ", True),
 ])
 def test_photo_reflection_hint_checks_the_draft_fields(learned, needs_prompt):
-    context = _context("Photo notes about a referral.", source="photo", has_user_context=True)
+    narrative = "I referred the patient to the surgical team."
+    context = _context(f"{narrative} {learned}".strip(), source="photo", has_user_context=True)
     context.user_data.update(chosen_form="REFLECT_LOG", needs_reflection_detail=True)
     draft = FormDraft(form_type="REFLECT_LOG", fields={
         "date_of_encounter": "2026-10-09",
@@ -560,6 +566,383 @@ async def _capture_approved_fields(sim, context, *, status="failed"):
 
 
 @pytest.mark.asyncio
+async def test_typed_case_then_uncaptioned_dops_image_cannot_supply_reflection(tmp_path, monkeypatch):
+    """Doctor-authored clinical facts do not make later OCR their reflection."""
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    clinical_text = (
+        "I reduced a displaced distal radius fracture under sedation in the ED "
+        "with the consultant present and documented the neurovascular examination."
+    )
+    reflection = "I learned to escalate earlier next time."
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))):
+        assert await bot.handle_case_input(sim._make_text_update(clinical_text), context) == bot.AWAIT_GATHERING
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
+        assert await bot.handle_gathering_input(sim._make_text_update("done"), context) == bot.AWAIT_FORM_CHOICE
+    first_draft = FormDraft(form_type="DOPS", fields={
+        "procedure_name": "Fracture / Dislocation manipulation", "indication": clinical_text,
+        "trainee_performance": clinical_text, "reflection": "",
+    })
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=first_draft)):
+        assert await bot.handle_form_choice(sim._make_callback_update("FORM|DOPS"), context) == bot.AWAIT_APPROVAL
+
+    media_path = tmp_path / "synthetic.jpg"
+    media_path.write_bytes(b"synthetic media")
+    bot._queue_pending_media(context, {"path": str(media_path), "name": media_path.name,
+                                      "kind": "image", "text": reflection})
+    context.user_data["awaiting_detail"] = True
+    extracted = first_draft.model_copy(update={"fields": {**first_draft.fields, "reflection": reflection}})
+    with patch("bot._read_image_text", new=AsyncMock(return_value=(reflection, []))), \
+         patch("bot._analyse_selected_form", new=AsyncMock(return_value=extracted)):
+        assert await bot.handle_document_intent(sim._make_callback_update("DOCUSE|both"), context) == bot.AWAIT_APPROVAL
+
+    assert reflection in context.user_data["case_text"], "OCR remains useful case evidence"
+    assert clinical_text in context.user_data["case_user_text"]
+    assert reflection not in "\n".join(context.user_data["case_user_text"])
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert reflection not in sim.get_last_text()
+    assert context.user_data.get("needs_reflection_detail") is not True, "DOPS reflection is optional"
+    # Persisted pre-fix drafts must get the same filtering at the save boundary.
+    context.user_data["draft_data"] = bot._serialise_draft(extracted)
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"] == ""
+
+
+@pytest.mark.asyncio
+async def test_course_resources_do_not_mask_empty_required_reflection():
+    sim = BotSimulator()
+    context = sim._make_context()
+    source = "I attended a simulation course and used the course handbook and resuscitation guidelines."
+    context.user_data.update(_context(source).user_data)
+    context.user_data["chosen_form"] = "FORMAL_COURSE"
+    draft = FormDraft(form_type="FORMAL_COURSE", fields={
+        "project_description": "Simulation course", "resources_used": "course handbook and resuscitation guidelines",
+        "reflective_notes": "", "lessons_learned": "",
+    })
+    await bot._show_draft_review(sim._make_text_update(source).message, context, draft, "FORMAL_COURSE", edit=False)
+    assert bot._load_draft(context).fields["reflective_notes"] == ""
+    assert bot._load_draft(context).fields["lessons_learned"] == ""
+    assert bot._load_draft(context).fields["resources_used"] == draft.fields["resources_used"]
+    assert bot._draft_reflection_text(bot._load_draft(context)).strip() == ""
+    assert "Still needed:" in sim.get_last_text()
+    assert "Reflective notes from experience" in sim.get_last_text()
+    assert "Lessons learned" in sim.get_last_text()
+    assert context.user_data.get("needs_reflection_detail") is True
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["resources_used"] == draft.fields["resources_used"]
+    assert fields["reflective_notes"] == fields["lessons_learned"] == ""
+
+
+@pytest.mark.asyncio
+async def test_reflection_fields_are_grounded_individually_in_doctor_words():
+    sim = BotSimulator()
+    context = sim._make_context()
+    own_reflection = "Next time I will escalate earlier."
+    ocr_reflection = "I learned to check understanding before ending a referral."
+    context.user_data.update(
+        case_text=f"{own_reflection}\n\nDocument text:\n{ocr_reflection}",
+        case_input_source="mixed", case_has_user_context=True,
+        case_user_text=[own_reflection], chosen_form="REFLECT_LOG",
+    )
+    draft = FormDraft(form_type="REFLECT_LOG", fields={
+        "reflection": "", "learned": ocr_reflection,
+        "replay_differently": own_reflection,
+    })
+    await bot._show_draft_review(sim._make_text_update(own_reflection).message,
+                                 context, draft, "REFLECT_LOG", edit=False)
+    stored = bot._load_draft(context)
+    assert stored.fields["replay_differently"] == own_reflection
+    assert stored.fields["learned"] == ""
+    assert own_reflection in sim.get_last_text()
+    assert ocr_reflection not in sim.get_last_text()
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["replay_differently"].startswith(own_reflection)
+    assert fields["learned"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reflection", [
+    "I learned to check understanding before ending a referral.", "Escalate earlier.",
+])
+async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(reflection):
+    sim = BotSimulator()
+    context = sim._make_context()
+    source = "Synthetic ED chest pain assessed with senior review."
+    context.user_data.update(_context(source, source="photo", has_user_context=False).user_data)
+    context.user_data["chosen_form"] = "CBD"
+    draft = CBDData(clinical_reasoning=source, reflection="")
+    await bot._show_draft_review(sim._make_text_update(source).message, context, draft, "CBD", edit=False)
+    assert "Still needed:" in sim.get_last_text()
+    context.user_data["awaiting_reflection_detail"] = True
+    with patch("bot.extract_cbd_data", new=AsyncMock(return_value=draft.model_copy(update={"reflection": reflection}))), \
+         patch("bot.get_voice_profile", return_value=""), \
+         patch("bot.assess_form_essentials", new=AsyncMock(return_value={
+             item["key"]: bot.ESSENTIAL_PRESENT for item in bot._form_essential_requirements("CBD")
+         })):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(reflection), context) == bot.AWAIT_APPROVAL
+    assert reflection in "\n".join(context.user_data["case_user_text"])
+    assert source not in "\n".join(context.user_data["case_user_text"])
+    assert bot._load_draft(context).reflection == reflection
+    assert "your reflection" not in sim.get_last_text()
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"].startswith(reflection)
+
+
+@pytest.mark.asyncio
+async def test_genuine_plural_learning_has_the_same_reflection_in_preview_and_filing():
+    sim = BotSimulator()
+    context = sim._make_context()
+    reflection = "We learned to check the ECG before discharge."
+    context.user_data.update(_context(reflection).user_data)
+    context.user_data["chosen_form"] = "CBD"
+    draft = CBDData(clinical_reasoning="Synthetic chest pain case.", reflection=reflection)
+    await bot._show_draft_review(sim._make_text_update(reflection).message, context, draft, "CBD", edit=False)
+    assert bot._load_draft(context).reflection == reflection
+    assert reflection in sim.get_last_text()
+    assert "your reflection" not in sim.get_last_text()
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"].startswith(reflection)
+    assert fields["reflection"].endswith(AI_USE_DECLARATION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("narrative,ocr_reflection", [
+    ("I communicated clearly with the family.", "I learned to communicate clearly with the family."),
+    ("I reviewed the ECG before discharge.", "I learned to review the ECG before discharge."),
+    ("I will not escalate earlier next time.", "I will escalate earlier next time."),
+    ("I learned to escalate earlier next time. I communicated clearly with the family.",
+     "I learned to communicate clearly with the family."),
+])
+async def test_similar_doctor_narrative_does_not_authenticate_ocr_learning(narrative, ocr_reflection):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(
+        case_text=f"{narrative}\n\nDocument text:\n{ocr_reflection}",
+        case_input_source="mixed", case_has_user_context=True,
+        case_user_text=[narrative], chosen_form="DOPS",
+    )
+    draft = FormDraft(form_type="DOPS", fields={"trainee_performance": narrative, "reflection": ocr_reflection})
+    await bot._show_draft_review(sim._make_text_update(narrative).message,
+                                 context, draft, "DOPS", edit=False)
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert ocr_reflection not in sim.get_last_text()
+    context.user_data["draft_data"] = bot._serialise_draft(draft)
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected_form", [True, False])
+async def test_improve_case_keeps_authored_reply_without_promoting_old_ocr(selected_form):
+    sim = BotSimulator()
+    context = sim._make_context()
+    old_ocr = "I learned to check understanding before ending a referral."
+    own_reflection = "Next time I will escalate earlier."
+    context.user_data.update(
+        case_text=f"Synthetic ED chest pain case. {old_ocr}", case_input_source="photo",
+        case_has_user_context=False, case_user_text=[],
+    )
+    if selected_form:
+        context.user_data["chosen_form"] = "REFLECT_LOG"
+    await bot._show_open_case_new_case_gate(
+        sim._make_text_update(own_reflection).message, context, own_reflection,
+    )
+    draft = FormDraft(form_type="REFLECT_LOG", fields={
+        "reflection": "", "learned": old_ocr, "replay_differently": own_reflection,
+    })
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)), \
+         patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
+        state = await bot.handle_callback(sim._make_callback_update("CASE|improve"), context)
+        if not selected_form:
+            assert state == bot.AWAIT_FORM_CHOICE
+            state = await bot.handle_form_choice(sim._make_callback_update("FORM|REFLECT_LOG"), context)
+    assert state == bot.AWAIT_APPROVAL
+    assert old_ocr in context.user_data["case_text"], "the case retains evidence for its narrative"
+    assert own_reflection in "\n".join(context.user_data["case_user_text"])
+    assert old_ocr not in "\n".join(context.user_data["case_user_text"])
+    assert bot._load_draft(context).fields["replay_differently"] == own_reflection
+    assert bot._load_draft(context).fields["learned"] == ""
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["replay_differently"].startswith(own_reflection)
+    assert fields["learned"] == ""
+
+
+@pytest.mark.asyncio
+async def test_document_caption_survives_preconsent_capture_and_resume(tmp_path, monkeypatch):
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    reflection = "I learned to escalate earlier next time."
+    clinical_text = "Synthetic ED chest pain case assessed with senior review."
+    update = sim._make_text_update("")
+    update.message.text = None
+    update.message.caption = reflection
+    update.message.document = SimpleNamespace(file_id="synthetic-document", file_name="synthetic.pdf")
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=False)):
+        await bot.handle_case_input(update, context)
+    pending = context.user_data["_consent_pending_input"]
+    assert pending["caption"] == reflection
+    assert not context.user_data.get("case_user_text"), "no processing before consent"
+    media_path = tmp_path / "synthetic.pdf"
+    media_path.write_bytes(b"synthetic media")
+    with patch("bot._download_pending_consent_file", new=AsyncMock(return_value=str(media_path))):
+        state = await bot._resume_pending_consent_input(
+            sim._make_callback_update("CONSENT|accept").callback_query, context, sim.user_id, pending,
+        )
+    assert state == bot.AWAIT_DOC_INTENT
+    assert context.user_data["_pending_doc_context"] == reflection
+    with patch("bot.extract_from_document", new=AsyncMock(return_value=clinical_text)):
+        assert await bot.handle_document_intent(sim._make_callback_update("DOCUSE|both"), context) == bot.AWAIT_GATHERING
+    stored = await _choose_cbd_from_gathering(sim, context, reflection)
+    assert stored.fields["reflection"] == reflection
+    assert context.user_data["case_user_text"] == [reflection]
+
+
+@pytest.mark.asyncio
+async def test_attach_only_caption_retains_author_words_for_same_case_reuse(tmp_path, monkeypatch):
+    isolate_bot_storage(monkeypatch, tmp_path)
+    monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
+    sim = BotSimulator()
+    context = sim._make_context()
+    clinical_text = "Synthetic ED chest pain case assessed with senior review."
+    reflection = "I learned to escalate earlier next time."
+    bot._append_gathering_case(context, clinical_text, "text")
+    media_path = tmp_path / "synthetic.jpg"
+    media_path.write_bytes(b"synthetic media")
+    bot._queue_pending_media(context, {"path": str(media_path), "name": media_path.name, "kind": "image"})
+    context.user_data["_pending_doc_context"] = reflection
+    read = AsyncMock()
+    with patch("bot._read_image_text", new=read):
+        assert await bot.handle_document_intent(sim._make_callback_update("DOCUSE|attach"), context) == bot.AWAIT_GATHERING
+    read.assert_not_awaited()
+    assert reflection in context.user_data["case_user_text"]
+    stored = await _choose_cbd_from_gathering(sim, context, reflection)
+    assert stored.fields["reflection"] == reflection
+    await _capture_approved_fields(sim, context, status="partial")
+    assert await bot._handle_reuse_request(
+        sim._make_text_update("Use the same case for DOPS"), context, sim.user_id, "Use the same case for DOPS",
+    ) == bot.AWAIT_FORM_CHOICE
+    bot._store_draft(context, FormDraft(form_type="DOPS", fields={"reflection": reflection}))
+    assert bot._load_draft(context).fields["reflection"] == reflection
+    assert reflection in context.user_data["case_user_text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["photo", "document", "mixed"])
+async def test_enrichment_before_form_choice_retains_only_actual_reply(source):
+    sim = BotSimulator()
+    context = sim._make_context()
+    old_ocr = "I learned to check understanding before ending a referral."
+    reply = "I reviewed the chest pain patient in the ED. Next time I will escalate earlier."
+    own_reflection = "Next time I will escalate earlier."
+    context.user_data.update(
+        case_text=f"Synthetic ED chest pain case. {old_ocr}", case_input_source=source,
+        case_has_user_context=False, case_user_text=[],
+    )
+    with patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(reply), context) == bot.AWAIT_FORM_CHOICE
+    assert context.user_data["case_user_text"] == [reply]
+    assert old_ocr in context.user_data["case_text"]
+    draft = FormDraft(form_type="REFLECT_LOG", fields={"learned": old_ocr, "replay_differently": own_reflection})
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
+        assert await bot.handle_form_choice(sim._make_callback_update("FORM|REFLECT_LOG"), context) == bot.AWAIT_APPROVAL
+    assert bot._load_draft(context).fields["learned"] == ""
+    assert bot._load_draft(context).fields["replay_differently"] == own_reflection
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("media_route", ["failed_filing", "template"])
+@pytest.mark.parametrize("choice", ["new", "improve"])
+async def test_media_case_choice_never_promotes_uncaptioned_ocr_to_author_words(media_route, choice):
+    sim = BotSimulator()
+    context = sim._make_context()
+    original = "Synthetic ED chest pain assessed with senior review."
+    ocr_reflection = "I learned to escalate earlier next time."
+    ocr = f"New case: synthetic patient with a fracture in the ED. {ocr_reflection}"
+    context.user_data.update(
+        case_text=original, case_input_source="photo", case_user_text=[],
+        case_has_user_context=False, chosen_form="DOPS",
+    )
+    if media_route == "failed_filing":
+        bot._store_draft(context, FormDraft(form_type="DOPS", fields={"trainee_performance": original}))
+        context.user_data["last_filing_status"] = "failed"
+    else:
+        bot._store_pending_draft(context, FormDraft(form_type="DOPS", fields={"trainee_performance": original}))
+    update = sim._make_text_update("")
+    update.message.text = None
+    update.message.photo = [SimpleNamespace(get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=AsyncMock())))]
+    with patch("bot._read_image_text", new=AsyncMock(return_value=(ocr, []))), \
+         patch("bot._cache_and_queue_attachment", return_value=None):
+        if media_route == "failed_filing":
+            assert await bot.handle_approval_media_feedback(update, context) == bot.AWAIT_APPROVAL
+        else:
+            assert await bot.handle_template_review_media(update, context) == bot.AWAIT_TEMPLATE_REVIEW
+    assert context.user_data["pending_new_case_text"] == ocr
+    extracted = FormDraft(form_type="DOPS", fields={"trainee_performance": original, "reflection": ocr_reflection})
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=[])), \
+         patch("bot._analyse_selected_form", new=AsyncMock(return_value=extracted)):
+        state = await bot.handle_callback(sim._make_callback_update(f"CASE|{choice}"), context)
+        if choice == "new":
+            assert state == bot.AWAIT_FORM_CHOICE
+            state = await bot.handle_form_choice(sim._make_callback_update("FORM|DOPS"), context)
+    assert state == bot.AWAIT_APPROVAL
+    assert ocr_reflection in context.user_data["case_text"]
+    assert not context.user_data.get("case_user_text")
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert ocr_reflection not in sim.get_last_text()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply_is_doctor", [True, False])
+async def test_form_request_reply_only_credits_the_current_doctors_own_message(reply_is_doctor):
+    sim = BotSimulator()
+    context = sim._make_context()
+    reflection = "I learned to escalate earlier next time."
+    replied = f"Synthetic ED chest pain assessed with senior review. {reflection}"
+    update = sim._make_text_update("File as DOPS")
+    update.message.reply_to_message = SimpleNamespace(
+        text=replied, caption=None,
+        from_user=SimpleNamespace(id=sim.user_id if reply_is_doctor else 12345, is_bot=not reply_is_doctor),
+    )
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))):
+        assert await bot.handle_case_input(update, context) == bot.AWAIT_FORM_CHOICE
+    authored = "\n".join(context.user_data["case_user_text"])
+    assert (reflection in authored) is reply_is_doctor
+    draft = FormDraft(form_type="DOPS", fields={"trainee_performance": "Synthetic assessment", "reflection": reflection})
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
+        assert await bot.handle_form_choice(sim._make_callback_update("FORM|DOPS"), context) == bot.AWAIT_APPROVAL
+    assert bot._load_draft(context).fields["reflection"] == (reflection if reply_is_doctor else "")
+
+
+@pytest.mark.asyncio
+async def test_fresh_case_does_not_inherit_previous_filed_author_words(monkeypatch):
+    monkeypatch.setenv("PG_GATHERING_MODE", "0")
+    sim = BotSimulator()
+    context = sim._make_context()
+    old_reflection = "I learned to escalate earlier next time."
+    context.user_data.update(last_filed_case_text=old_reflection, case_user_text=[old_reflection])
+    new_case = "I reduced a distal radius fracture in the ED under consultant supervision and documented the neurovascular examination."
+    with patch("bot.has_credentials", return_value=True), \
+         patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+         patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))), \
+         patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
+        assert await bot.handle_case_input(sim._make_text_update(new_case), context) == bot.AWAIT_FORM_CHOICE
+    assert context.user_data["case_user_text"] == [new_case]
+    draft = FormDraft(form_type="DOPS", fields={"trainee_performance": new_case, "reflection": old_reflection})
+    with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
+        assert await bot.handle_form_choice(sim._make_callback_update("FORM|DOPS"), context) == bot.AWAIT_APPROVAL
+    assert bot._load_draft(context).fields["reflection"] == ""
+    assert old_reflection not in sim.get_last_text()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind,context_input", [
     ("image", "caption"), ("document", "caption"),
     ("image", "text"), ("image", "voice"),
@@ -586,6 +969,9 @@ async def test_own_media_context_survives_gathering_preview_storage_and_filing(t
             sim._make_callback_update("DOCUSE|both"), context,
         ) == bot.AWAIT_GATHERING
     stored = await _choose_cbd_from_gathering(sim, context, reflection)
+    assert reflection in "\n".join(context.user_data["case_user_text"])
+    if context_input != "text":
+        assert clinical_text not in "\n".join(context.user_data["case_user_text"])
     assert stored.fields["reflection"] == reflection
     assert reflection in sim.get_last_text()
     fields = await _capture_approved_fields(sim, context)
@@ -614,6 +1000,7 @@ async def test_captionless_sibling_ocr_never_becomes_own_reflection(tmp_path, mo
             sim._make_callback_update("DOCUSE|both"), context,
         ) == bot.AWAIT_GATHERING
     stored = await _choose_cbd_from_gathering(sim, context, reflection)
+    assert not context.user_data.get("case_user_text")
     assert stored.fields["reflection"] == ""
     assert reflection not in sim.get_last_text()
     assert "Still needed:" in sim.get_last_text()

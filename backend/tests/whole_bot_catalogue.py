@@ -80,7 +80,9 @@ def producer_digest():
 # 2026-10-09: restored photo reflection provenance at preview/storage/filing;
 # required reflection fields checked individually. Existing controls unchanged.
 # 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
-PRODUCER_DIGEST = 'd9405d9543075fc202af8889a7fae128d5e24d6efea40f06357818bf624c1cab'
+# 9 Oct 2026: reflection provenance checks retained authored words per field;
+# captions/replies/reuse stay separate from OCR. Existing controls unchanged.
+PRODUCER_DIGEST = '8c9776e4c46810d9e50d7ba844aab423c9f769d9779d597c4faa03d22bb795ed'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
