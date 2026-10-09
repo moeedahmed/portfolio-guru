@@ -13,6 +13,139 @@ BOT_QA = REPO_ROOT / "scripts" / "telegram_bot_qa.sh"
 TARGET_REFUSED_EXIT = 21
 
 
+@pytest.fixture
+def wider_journey_harness(monkeypatch):
+    from collections import deque
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from tests import test_e2e as journeys
+
+    replies, clicks, artifacts = deque(), [], {}
+    client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=1)),
+                             send_file=AsyncMock(return_value=SimpleNamespace(id=2)))
+
+    def message(text, *controls):
+        buttons = []
+        for label, payload in controls:
+            async def click(value=payload):
+                clicks.append(value)
+            buttons.append(SimpleNamespace(text=label, data=payload.encode(), click=click))
+        return SimpleNamespace(id=10, raw_text=text, buttons=[buttons])
+
+    async def wait(*args, **kwargs):
+        reply = replies.popleft()
+        if isinstance(reply, Exception):
+            raise reply
+        assert kwargs.get('reject_fingerprint') != harness.message_fingerprint(reply)
+        return reply
+
+    monkeypatch.setattr(journeys, 'assert_live_telegram_guardrails', lambda target: None)
+    monkeypatch.setattr(journeys, 'wait_for_matching_message', wait)
+    monkeypatch.setattr(journeys, 'write_transcript_artifact',
+                        lambda transcript, *, filename: artifacts.update({filename: list(transcript)}))
+    return journeys, client, replies, clicks, artifacts, message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,route', [('photo', 'read-form'), ('voice', 'form-gap'), ('document', 'ready')])
+async def test_wider_media_stops_at_ready_draft_and_cancels(wider_journey_harness, tmp_path, kind, route):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled'))
+    if route == 'read-form':
+        replies.append(message('Read this note?', ('Read text', 'DOCUSE|info')))
+    if route != 'ready':
+        replies.append(message('Forms that fit', ('CBD', 'FORM|CBD')))
+    if route == 'form-gap':
+        replies.append(message('Draft. Still needed: Level of supervision. Reply with this detail.',
+                               ('Save draft to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')))
+    replies.extend([message('Ready draft', ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')),
+                    message('Cancelled after review'), message('Cancelled cleanup')])
+    await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
+    assert clicks[-1] == 'ACTION|cancel'
+    assert not any(value.startswith('APPROVE|') for value in clicks)
+    assert client.send_message.call_args_list[-1].args[1] == '/cancel'
+    upload = client.send_file.call_args
+    assert upload.kwargs['voice_note'] == (kind == 'voice')
+    assert upload.kwargs['force_document'] == (kind == 'document')
+    transcript = artifacts[f'portfolio-guru-{kind}-transcript.json']
+    assert any(exchange.received == 'Ready draft' for exchange in transcript)
+    assert transcript[-1].received == 'Cancelled cleanup'
+    assert not replies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bad_reply', ['wrong-save', 'wrong-cancel', 'extra-control', 'unknown-gap', 'timeout'])
+async def test_wider_media_failure_retains_transcript_and_cleans_up(wider_journey_harness, tmp_path, bad_reply):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    controls = [('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')]
+    text = 'Ready draft'
+    if bad_reply == 'wrong-save': controls[0] = ('Save to Kaizen', 'APPROVE|submit')
+    if bad_reply == 'wrong-cancel': controls[1] = ('Cancel', 'ACTION|delete')
+    if bad_reply == 'extra-control': controls.append(('Submit', 'APPROVE|submit'))
+    if bad_reply == 'unknown-gap':
+        text = 'Still needed: Patient presentation. Reply with this detail.'
+        controls[0] = ('Save draft to Kaizen', 'APPROVE|draft')
+    replies.extend([message('Cancelled'), TimeoutError() if bad_reply == 'timeout' else message(text, *controls),
+                    message('Cancelled cleanup')])
+    with pytest.raises((AssertionError, TimeoutError)):
+        await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', 'photo')
+    assert not clicks
+    assert client.send_message.call_args_list[-1].args[1] == '/cancel'
+    assert artifacts['portfolio-guru-photo-transcript.json'][-1].received == 'Cancelled cleanup'
+
+
+@pytest.mark.asyncio
+async def test_wider_settings_traverses_views_and_back_only(wider_journey_harness):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    def settings():
+        return message('Settings', ('Portfolio defaults', 'ACTION|portfolio_defaults'),
+                       ('Reminders', 'REMIND|menu'), ('Writing style', 'ACTION|voice'),
+                       ('Reset data', 'ACTION|delete'), ('Connect Kaizen', 'ACTION|setup'))
+    replies.extend([message('Cancelled'), settings()])
+    for title, back in [('Portfolio defaults', 'ACTION|settings'), ('Reminders', 'ACTION|settings'),
+                        ('Writing style setup', 'VOICE|back_to_settings')]:
+        replies.extend([message(title, ('Back', back)), settings()])
+    replies.append(message('Cancelled cleanup'))
+    await journeys.test_e2e_settings_read_only_journey(client)
+    assert clicks == ['ACTION|portfolio_defaults', 'ACTION|settings', 'REMIND|menu', 'ACTION|settings',
+                      'ACTION|voice', 'VOICE|back_to_settings']
+    assert artifacts['portfolio-guru-settings-transcript.json'][-1].received == 'Cancelled cleanup'
+    assert not replies
+
+
+def test_wider_synthetic_media_are_deterministic_and_pdf_text_is_readable(tmp_path):
+    from PIL import Image
+    from tests import test_e2e as journeys
+    photo = journeys._synthetic_photo(tmp_path / 'note.jpg')
+    first = photo.read_bytes()
+    assert journeys._synthetic_photo(photo).read_bytes() == first
+    with Image.open(photo) as image:
+        assert image.format == 'JPEG' and image.size == (1400, 1000)
+    pdf = journeys._synthetic_pdf(tmp_path / 'note.pdf')
+    first = pdf.read_bytes()
+    assert journeys._synthetic_pdf(pdf).read_bytes() == first
+    # The application has an optional pypdf text-extraction path. Do not add a
+    # parser dependency just for this local fixture check.
+    reader = pytest.importorskip('pypdf', reason='Optional PDF text parser unavailable').PdfReader(pdf)
+    assert len(reader.pages) == 1
+    assert ' '.join(reader.pages[0].extract_text().split()) == journeys.SYNTHETIC_CASE
+
+
+def test_wider_voice_skips_clearly_without_local_tools(monkeypatch, tmp_path):
+    from tests import test_e2e as journeys
+    monkeypatch.setattr(journeys.shutil, 'which', lambda name: None)
+    with pytest.raises(pytest.skip.Exception, match='local macOS say and ffmpeg'):
+        journeys._synthetic_voice(tmp_path / 'note.ogg')
+
+
+def test_wider_local_voice_is_deterministic_ogg_opus(tmp_path):
+    from tests import test_e2e as journeys
+    voice = journeys._synthetic_voice(tmp_path / 'note.ogg')
+    first = voice.read_bytes()
+    assert first.startswith(b'OggS') and b'OpusHead' in first
+    assert journeys._synthetic_voice(voice).read_bytes() == first
+
+
 def _set_base_live_env(monkeypatch):
     monkeypatch.setenv("TELETHON_SESSION", "session")
     monkeypatch.setenv("TELEGRAM_API_ID", "123")
@@ -489,6 +622,9 @@ def test_write_transcript_artifact_records_sent_and_received_content(tmp_path, m
     assert written[1]["action"].startswith("send:")
     assert written[2]["clicked_button"] == "CBD"
     assert written[3]["clicked_button"] == "Cancel"
+    harness.write_transcript_artifact(transcript[:1], filename="portfolio-guru-photo-transcript.json")
+    assert len(json.loads((tmp_path / "portfolio-guru-photo-transcript.json").read_text())) == 1
+    assert len(json.loads((tmp_path / "portfolio-guru-telegram-transcript.json").read_text())) == 4
 
 
 def test_write_transcript_artifact_is_a_noop_without_artifact_dir(tmp_path, monkeypatch):

@@ -213,3 +213,35 @@ def test_install_renders_isolated_plist_without_loading(deploy_harness):
     assert p['EnvironmentVariables']['PG_VERTEX_SA_SECRET_ID'] == 'synthetic-id'
     assert 'portfolio-guru-staging/bot.log' in p['StandardOutPath']
     assert not deploy_harness['log'].exists()  # no launchctl / network / secrets
+
+
+def test_stage_wider_smoke_selects_opt_in_mode(deploy_harness):
+    assert deploy(deploy_harness).returncode == 0
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, '--wider'],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'qa --wider-journeys' in deploy_harness['log'].read_text()
+    assert 'qa --focused-release' not in deploy_harness['log'].read_text()
+
+
+@pytest.mark.parametrize('action', ['deploy', 'approve', 'status'])
+def test_stage_wider_flag_is_smoke_only(deploy_harness, action):
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), action, '--sha', SHA, '--wider'],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 64
+    assert '--wider is only valid for smoke' in result.stderr
+    assert not deploy_harness['log'].exists()
+
+
+@pytest.mark.parametrize('override,args', [
+    ({}, ['--target', 'portfolio_guru_bot']),
+    ({'TELEGRAM_BOT_USERNAME': 'portfolio_guru_bot'}, []),
+    ({'RELEASE_LIVE_TARGET': 'other_bot'}, []),
+    ({'TELEGRAM_LIVE_ALLOWED_BOTS': 'portfolio_guru_test_bot,portfolio_guru_bot'}, []),
+    ({'RELEASE_LIVE_ALLOWLIST': 'portfolio_guru_bot'}, []),
+])
+def test_stage_wider_smoke_refuses_redirection_before_effects(deploy_harness, override, args):
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, '--wider', *args],
+        env={**deploy_harness['env'], **override}, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 21
+    assert not deploy_harness['log'].exists()

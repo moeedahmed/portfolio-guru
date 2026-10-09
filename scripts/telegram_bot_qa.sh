@@ -12,6 +12,7 @@ LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"
 DEFAULT_LIVE_ALLOWLIST="portfolio_guru_bot"
 FOCUSED_RELEASE=0
 WHOLE_BOT=0
+WIDER_JOURNEYS=0
 
 # Captured read-only before backend/.env is read. A release live proof is
 # approved for one exact bot and one frozen singleton allowlist; the environment
@@ -37,10 +38,39 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --focused-release) FOCUSED_RELEASE=1 ;;
     --whole-bot) WHOLE_BOT=1 ;;
+    --wider-journeys) WIDER_JOURNEYS=1 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
+
+if (( FOCUSED_RELEASE + WHOLE_BOT + WIDER_JOURNEYS > 1 )); then
+  echo "ERROR: --focused-release, --whole-bot and --wider-journeys are separate proof modes." >&2
+  exit 64
+fi
+
+wider_target_check() {
+  local name value
+  for name in TELEGRAM_BOT_USERNAME RELEASE_LIVE_TARGET; do
+    value="${!name:-portfolio_guru_test_bot}"
+    # A direct wider run must name its Telegram target explicitly.
+    if [[ "$name" == TELEGRAM_BOT_USERNAME ]]; then value="${!name:-portfolio_guru_bot}"; fi
+    [[ "${value#@}" == portfolio_guru_test_bot ]] || {
+      echo "ERROR: --wider-journeys refuses any target other than portfolio_guru_test_bot. Nothing was sent." >&2
+      exit 21
+    }
+  done
+  for name in TELEGRAM_LIVE_ALLOWED_BOTS RELEASE_LIVE_ALLOWLIST; do
+    value="${!name:-portfolio_guru_test_bot}"
+    if [[ "$name" == TELEGRAM_LIVE_ALLOWED_BOTS ]]; then value="${!name:-portfolio_guru_bot}"; fi
+    [[ "$value" == portfolio_guru_test_bot ]] || {
+      echo "ERROR: --wider-journeys requires the singleton test-bot allowlist. Nothing was sent." >&2
+      exit 21
+    }
+  done
+}
+if [[ "$WIDER_JOURNEYS" == 1 ]]; then wider_target_check; fi
+readonly WIDER_JOURNEYS
 
 # The focused release journey is required release proof, not optional
 # coverage: missing approval/credentials, an incomplete allowlist, or an
@@ -48,7 +78,7 @@ done
 # than exiting 0 having silently skipped the one live check the release gate
 # depends on. This overrides any caller-supplied REQUIRE_TELEGRAM_LIVE/
 # RUN_LIVE_TELEGRAM — a focused release cannot opt back into a skip.
-if [[ "$FOCUSED_RELEASE" == "1" || ( "$RUN_LIVE" != "0" && "$RUN_LIVE" != "false" ) ]]; then
+if [[ "$FOCUSED_RELEASE" == "1" || "$WIDER_JOURNEYS" == "1" || ( "$RUN_LIVE" != "0" && "$RUN_LIVE" != "false" ) ]]; then
   REQUIRE_LIVE=1
 fi
 
@@ -84,8 +114,10 @@ if [[ -f ".env" ]]; then
   # are dropped from the dotenv load rather than exported; they are reported so
   # a misconfigured .env is visible, but they can no longer move the target.
   PROTECTED_NAMES_IN_FORCE=""
-  if [[ -n "$APPROVED_LIVE_TARGET" ]]; then PROTECTED_NAMES_IN_FORCE="$DOTENV_PROTECTED_NAMES"; fi
-  eval "$(PROTECTED_NAMES="$PROTECTED_NAMES_IN_FORCE" FROZEN_TARGET="$APPROVED_LIVE_TARGET" "$PY" - <<'PY'
+  DOTENV_TARGET="$APPROVED_LIVE_TARGET"
+  if [[ "$WIDER_JOURNEYS" == 1 ]]; then DOTENV_TARGET=portfolio_guru_test_bot; fi
+  if [[ -n "$DOTENV_TARGET" ]]; then PROTECTED_NAMES_IN_FORCE="$DOTENV_PROTECTED_NAMES"; fi
+  eval "$(PROTECTED_NAMES="$PROTECTED_NAMES_IN_FORCE" FROZEN_TARGET="$DOTENV_TARGET" "$PY" - <<'PY'
 from pathlib import Path
 import os
 import re
@@ -123,7 +155,7 @@ for raw_line in Path(".env").read_text(encoding="utf-8").splitlines():
         print(f"dotenv: ignored protected name {key} during a release live proof", file=sys.stderr)
         continue
     if target and (key.startswith("APPROVED_") or key in {
-        "PY", "ROOT", "BACKEND", "FOCUSED_RELEASE", "RUN_LIVE", "REQUIRE_LIVE",
+        "PY", "ROOT", "BACKEND", "FOCUSED_RELEASE", "WHOLE_BOT", "WIDER_JOURNEYS", "RUN_LIVE", "REQUIRE_LIVE",
         "DEFAULT_LIVE_ALLOWLIST", "LIVE_APPROVAL_VALUE", "TARGET_REFUSED_EXIT",
         "DOTENV_PROTECTED_NAMES", "PROTECTED_NAMES_IN_FORCE", "BASH_ENV", "ENV",
         "SHELLOPTS", "BASHOPTS", "IFS", "CDPATH", "PYTHONPATH", "PYTHONHOME",
@@ -134,6 +166,8 @@ for raw_line in Path(".env").read_text(encoding="utf-8").splitlines():
 PY
 )"
 fi
+
+if [[ "$WIDER_JOURNEYS" == 1 ]]; then wider_target_check; fi
 
 allowlist_names_target() {
   local target="$1" list="$2" entry saved_ifs="$IFS"
@@ -233,7 +267,31 @@ if [[ "$RUN_LIVE" == "0" || "$RUN_LIVE" == "false" ]]; then
   fi
 elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
-  if [[ "$FOCUSED_RELEASE" == "1" ]]; then
+  if [[ "$WIDER_JOURNEYS" == "1" ]]; then
+    TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-wider "$PY" -m pytest \
+      tests/test_e2e.py::test_e2e_cbd_ready_draft_to_cancel_journey \
+      tests/test_e2e.py::test_e2e_photo_ready_draft_to_cancel_journey \
+      tests/test_e2e.py::test_e2e_voice_ready_draft_to_cancel_journey \
+      tests/test_e2e.py::test_e2e_document_ready_draft_to_cancel_journey \
+      tests/test_e2e.py::test_e2e_settings_read_only_journey \
+      -q -rs -m e2e --junitxml="$ARTIFACT_DIR/wider-journeys.xml"
+    # pytest succeeds when a local voice dependency is unavailable and skips
+    # that test. Preserve the reason in its log, but never record wider proof.
+    run_step wider-completeness "$PY" - "$ARTIFACT_DIR/wider-journeys.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+cases = ET.parse(sys.argv[1]).findall(".//testcase")
+expected = {
+    "test_e2e_cbd_ready_draft_to_cancel_journey",
+    "test_e2e_photo_ready_draft_to_cancel_journey",
+    "test_e2e_voice_ready_draft_to_cancel_journey",
+    "test_e2e_document_ready_draft_to_cancel_journey",
+    "test_e2e_settings_read_only_journey",
+}
+assert len(cases) == 5 and {case.get("name") for case in cases} == expected, "Incomplete wider journey report"
+assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "Wider journeys contain skipped, failed or missing proof"
+PY
+  elif [[ "$FOCUSED_RELEASE" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
       tests/test_e2e.py::test_e2e_cbd_ready_draft_to_cancel_journey \
       -q \

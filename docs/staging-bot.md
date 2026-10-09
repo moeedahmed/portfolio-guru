@@ -70,6 +70,15 @@ The only allowed target and singleton recipient allowlist are
 a redacted transcript under staging's `.artifacts/telegram-bot-qa/`.
 This sends test-bot messages when explicitly run; it is never routine CI.
 
+Opt in to broader proof with `scripts/stage.sh smoke --sha <full-40-hex-sha> --wider`.
+This runs the focused CBD plus synthetic photo, OGG/Opus voice and PDF cases to
+ready draft review, then Cancel, and read-only Settings views with Back.
+It never presses Save/Approve/Submit, changes settings or links Kaizen. The
+same test-bot-only target guard and runtime/receipt checks apply. Default smoke
+is unchanged. Voice requires local macOS `say` (Samantha) and `ffmpeg`/libopus;
+a skip is reported and cannot earn passing wider proof. Each new journey keeps
+its own redacted transcript on success or failure.
+
 Proofs live in
 `~/.openclaw/data/portfolio-guru-staging/staging-proofs/<sha>.json`.
 `PORTFOLIO_GURU_STAGING_PROOF_DIR` relocates receipts for deterministic tests.

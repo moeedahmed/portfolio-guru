@@ -449,14 +449,16 @@ def assert_transcript_is_sensible(transcript: list[TelegramExchange]) -> None:
         assert all(exchange.clicked_button for exchange in clicked), "Button click transcript missing button label"
 
 
-def write_transcript_artifact(transcript: list[TelegramExchange]) -> None:
+def write_transcript_artifact(
+    transcript: list[TelegramExchange], *, filename: str = "portfolio-guru-telegram-transcript.json"
+) -> None:
     from tests.whole_bot_identity import live_transcript
     artifact_dir = os.environ.get("TELEGRAM_E2E_ARTIFACT_DIR")
     if not artifact_dir:
         return
     path = Path(artifact_dir)
     path.mkdir(parents=True, exist_ok=True)
-    (path / "portfolio-guru-telegram-transcript.json").write_text(
+    (path / filename).write_text(
         json.dumps(live_transcript(redact_exploration([asdict(exchange) for exchange in transcript],
                                      (telethon_env()["session"], telethon_env()["api_hash"]))), indent=2),
         encoding="utf-8",

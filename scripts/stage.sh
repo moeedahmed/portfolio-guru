@@ -7,15 +7,18 @@ ACTION="${1:-}"
 SHA=""
 NOTE=""
 TARGET="portfolio_guru_test_bot"
+WIDER=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha) SHA="${2:?missing SHA}"; shift 2 ;;
     --note) NOTE="${2:?missing note}"; shift 2 ;;
     --target) TARGET="${2:?missing target}"; shift 2 ;;
+    --wider) WIDER=1; shift ;;
     *) echo "Unknown stage option: $1" >&2; exit 64 ;;
   esac
 done
-case "$ACTION" in deploy|smoke|approve|status) ;; *) echo "Usage: scripts/stage.sh deploy|smoke|approve|status [--sha <40hex>] [--note <line>]"; exit 64 ;; esac
+case "$ACTION" in deploy|smoke|approve|status) ;; *) echo "Usage: scripts/stage.sh deploy|smoke|approve|status [--sha <40hex>] [--note <line>] [--wider (smoke only)]"; exit 64 ;; esac
+if [[ "$WIDER" == 1 && "$ACTION" != smoke ]]; then echo "--wider is only valid for smoke" >&2; exit 64; fi
 # deploy, smoke and status default to HEAD. approve never does: the approval must
 # name the exact SHA Moeed tried, and HEAD may have moved since.
 if [[ "$ACTION" == approve && -z "$SHA" ]]; then echo "approve needs --sha <40hex>: the SHA Moeed tried on the test bot" >&2; exit 64; fi
@@ -90,10 +93,12 @@ PY
       TELETHON_API_HASH="$(bws_value c12e7352-2756-4d91-af4e-b41201443d74)"
       export TELETHON_SESSION TELETHON_API_ID TELETHON_API_HASH
     fi
+    QA_MODE=--focused-release
+    if [[ "$WIDER" == 1 ]]; then QA_MODE=--wider-journeys; fi
     if env -u PORTFOLIO_GURU_APP_DIR RELEASE_LIVE_TARGET=portfolio_guru_test_bot RELEASE_LIVE_ALLOWLIST=portfolio_guru_test_bot \
       TELEGRAM_BOT_USERNAME=portfolio_guru_test_bot TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_test_bot \
       TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved RUN_LIVE_TELEGRAM=1 \
-      bash "$STAGING_DIR/scripts/telegram_bot_qa.sh" --focused-release; then
+      bash "$STAGING_DIR/scripts/telegram_bot_qa.sh" "$QA_MODE"; then
       verify_staging
       python3 "$PROOF_TOOL" automated --sha "$SHA" --result pass
     else
