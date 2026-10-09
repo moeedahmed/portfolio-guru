@@ -34,6 +34,7 @@ patient feedback — is reported as something to check, never as a tick.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from calendar import monthrange
 from datetime import date, timedelta
 from typing import Iterable, Optional
 
@@ -41,13 +42,9 @@ from health_models import EvidenceItem
 
 # ── Shared rules ────────────────────────────────────────────────────────────
 
-# Gold Guide: evidence must be in the portfolio two weeks before the panel.
-ARCP_EVIDENCE_LEAD_DAYS = 14
 ARCP_ESLE_TARGET = 3
-# RCEM: MSF should be done in the first six months of the training year.
-MSF_EARLY_WINDOW_DAYS = 183
-# How close the evidence deadline must be before a missing ESR becomes an
-# action; ESRs are normally written shortly before the panel.
+# How close the review month must be before a missing ESR becomes an
+# action; the actual panel date and deadline still need confirmation.
 ESR_ACTION_WITHIN_DAYS = 84
 
 ALL_SLOS = tuple(range(1, 13))
@@ -96,7 +93,7 @@ def _form(item: EvidenceItem) -> str:
 
 
 def _in(item: EvidenceItem, start: date, end: date) -> bool:
-    return start <= item.event_date <= end
+    return item.event_date is not None and start <= item.event_date <= end
 
 
 def _years_before(day: date, years: int) -> date:
@@ -146,20 +143,20 @@ def compute_arcp_checklist(
     months when no review month is set.
     """
     if review_date:
-        cycle_end = review_date
-        deadline: Optional[date] = review_date - timedelta(days=ARCP_EVIDENCE_LEAD_DAYS)
+        cycle_end = review_date.replace(day=monthrange(review_date.year, review_date.month)[1])
     else:
         cycle_end = today
-        deadline = None
+    # A stored month is not a panel date. It supplies a counting window only.
+    deadline = None
     cycle_start = cycle_end - timedelta(days=365)
     done = [i for i in items if is_completed(i) and _in(i, cycle_start, cycle_end)]
 
     esr = _count(done, frozenset({"ESR"}), cycle_start, cycle_end)
     msf_dates = sorted(i.event_date for i in done if _form(i) == "MSF")
-    early_cutoff = cycle_start + timedelta(days=MSF_EARLY_WINDOW_DAYS)
     msf_first = msf_dates[0] if msf_dates else None
-    msf_late = bool(msf_first and msf_first > early_cutoff)
-    msf_overdue = not msf_dates and today > early_cutoff
+    # Neither a rolling window nor a review month establishes training start.
+    msf_late = False
+    msf_overdue = False
     reports = _count(done, SUPERVISOR_REPORT_FORMS, cycle_start, cycle_end)
     esles = _count(done, frozenset({"ESLE"}), cycle_start, cycle_end)
 
@@ -176,31 +173,27 @@ def compute_arcp_checklist(
     missing_slos = tuple(s for s in expected if s not in covered)
 
     actions: list[str] = []
+    review_soon = bool(review_date and 0 <= (cycle_end - today).days <= ESR_ACTION_WITHIN_DAYS)
+    if not msf_dates and review_soon:
+        actions.append("Check MSF timing with your programme")
+    if not esr and review_soon:
+        actions.append("Ask your educational supervisor about the ESR for your ARCP month")
     if accs:
         pass  # no ESLE quota in ACCS years
     elif esles < esle_target:
         need = esle_target - esles
         actions.append(
-            f"Book {need} more ESLE{'s' if need > 1 else ''}, one in PEM"
+            f"{need} more ESLE{'s' if need > 1 else ''} needed (arranged with your assessors in Kaizen)"
         )
     else:
         actions.append("Check at least one of your ESLEs this year was in PEM")
     if missing_slos:
         shown = ", ".join(str(s) for s in missing_slos[:3])
         actions.append(f"Get an assessment linked to SLO {shown}")
-    if not msf_dates:
-        actions.append(
-            "Start your MSF now; it is due in the first six months"
-            if msf_overdue
-            else "Start your MSF (due in the first 6 months)"
-        )
+    if not msf_dates and not review_soon:
+        actions.append("Check MSF timing with your programme")
     if not reports:
         actions.append("Ask your clinical supervisor for your placement report")
-    if not esr and deadline and (deadline - today).days <= ESR_ACTION_WITHIN_DAYS:
-        actions.append(
-            f"Ask your educational supervisor to complete the ESR before "
-            f"{deadline.strftime('%-d %b')}"
-        )
 
     return ArcpChecklist(
         cycle_start=cycle_start,
@@ -288,6 +281,8 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
     expiring = sum(1 for i in done if i.event_date < expiry_cutoff)
 
     actions: list[str] = []
+    if not msf_12m:
+        actions.append("Start an MSF; the GMC wants one from the last 12 months")
     gaps = sorted(
         (
             (CESR_PER_TYPE_TARGET - counts[code], label)
@@ -304,8 +299,7 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
     if esles_12m < CESR_ESLE_12M_TARGET or esles_3y < CESR_ESLE_3Y_TARGET:
         need = max(CESR_ESLE_12M_TARGET - esles_12m, CESR_ESLE_3Y_TARGET - esles_3y)
         actions.append(
-            f"Book {need} ESLE{'s' if need > 1 else ''}; the assessors can "
-            "also be your referees"
+            f"{need} more ESLE{'s' if need > 1 else ''} needed (arranged with your assessors in Kaizen)"
         )
     if reflections[0] < CESR_REFLECTIONS_PER_YEAR:
         actions.append(
@@ -317,8 +311,6 @@ def compute_cesr_checklist(items: list[EvidenceItem], *, today: date) -> CesrChe
             f"Log {CESR_PAEDS_REFLECTIONS_TARGET - paeds} more paediatric "
             "reflective cases, linked to SLO 5"
         )
-    if not msf_12m:
-        actions.append("Start an MSF; the GMC wants one from the last 12 months")
 
     return CesrChecklist(
         window_start=window_start,

@@ -65,7 +65,7 @@ class EvidenceItem(BaseModel):
     form_type: Optional[str] = None
     title: str
     summary: str
-    event_date: date
+    event_date: Optional[date]
     source: EvidenceSource
     source_ref: Optional[str] = None
     status: EvidenceStatus

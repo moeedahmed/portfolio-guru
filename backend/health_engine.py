@@ -1,5 +1,5 @@
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Optional
 
 from pathway_checklist import compute_cesr_checklist
 
@@ -63,7 +63,7 @@ def compute_health_score(items: list[EvidenceItem]) -> HealthScore:
     covered_domains = {item.domain for item in items if item.domain in CORE_DOMAINS}
     score = _score_from_domain_count(len(covered_domains))
 
-    stale_count = sum(1 for item in items if _age_days(item) > STALE_DAYS)
+    stale_count = sum(1 for item in items if item.event_date and _age_days(item) > STALE_DAYS)
     if stale_count > len(items) / 2:
         score = _drop_score(score)
 
@@ -167,7 +167,7 @@ def compute_gap_summary(items: list[EvidenceItem]) -> list[str]:
 
     for domain in CORE_DOMAINS:
         domain_items = [item for item in items if item.domain == domain]
-        if domain_items and all(_age_days(item) > AGEING_DAYS for item in domain_items):
+        if domain_items and all(item.event_date and _age_days(item) > AGEING_DAYS for item in domain_items):
             gaps.append(f"{_domain_label(domain)} evidence is over 3 years old")
 
     return gaps
@@ -232,8 +232,8 @@ def _drop_score(score: HealthScore) -> HealthScore:
     return HealthScore.grey
 
 
-def _age_days(item: EvidenceItem) -> int:
-    return (date.today() - item.event_date).days
+def _age_days(item: EvidenceItem) -> Optional[int]:
+    return (date.today() - item.event_date).days if item.event_date else None
 
 
 def _domain_label(domain: HealthDomain) -> str:
@@ -272,7 +272,7 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def _compute_pathway_readiness(items: list[EvidenceItem], pathway: Pathway) -> dict[str, object]:
     filed_or_better = {"filed", "reviewed", "accepted"}
-    recent_items = [item for item in items if _age_days(item) < RECENT_DAYS]
+    recent_items = [item for item in items if item.event_date and 0 <= _age_days(item) < RECENT_DAYS]
 
     if pathway != Pathway.cesr_portfolio:
         return {

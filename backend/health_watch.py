@@ -96,6 +96,8 @@ async def find_stuck_signoffs(
             continue
 
         event_date = _parse_kaizen_date(row.date_occurred_on)
+        if event_date is None:
+            continue
         days = (reference - event_date).days
         if days < min_days:
             continue

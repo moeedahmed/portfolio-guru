@@ -633,7 +633,7 @@ def test_untagged_items_are_disclosed_not_silently_dropped():
 def test_untagged_count_is_stated_even_when_it_is_zero():
     items = [_tagged([6], ident=f"a-{n}") for n in range(4)]
     _, curriculum = _curriculum(items)
-    assert "*Untagged:* none" in curriculum
+    assert "No untagged items found among forms previously tagged" in curriculum
 
 
 def test_untagged_count_excludes_forms_that_never_carry_tags():
@@ -726,7 +726,7 @@ def test_scan_info_carries_the_basis_review_timing_and_limits():
     assert "Confidence:" not in text
     assert "Scanned: Read-only Kaizen index: 12 visible evidence item(s)" in text
     assert "Refresh: 26 Aug 2026 09:00 — fresh within 24 hours" in text
-    assert "Next review: October 2026" in text
+    assert "Review month: October 2026." in text
     assert "*What this cannot see*" in text
     assert "Open lists use the Kaizen workflow states visible to this scan" in text
     assert "overdue" not in text.lower()
@@ -787,7 +787,7 @@ def test_about_keeps_partial_and_unconfirmed_freshness_limits_explicit():
 
     assert "partial" in partial.lower()
     assert "Partial scan: the Kaizen index was unavailable." in partial
-    assert "Read 3 items filed through Portfolio Guru only." in partial
+    assert "From 3 items in Portfolio Guru history." in partial
     assert "Freshness unconfirmed: recent Kaizen activity may be missing" in stale
     # Each fact is its own sentence on its own line, never run together.
     assert "partial local view.\nPartial scan: the Kaizen index was unavailable." in partial
@@ -874,3 +874,24 @@ def test_about_discloses_outside_core_items_and_trainee_only_limits():
     assert 'Form R or SLO 6 procedure sign-offs' in text
     assert 'Form R' not in format_about(basis=BASIS, scanned_items=12, core_items=12)
     assert 'other 0' not in format_about(basis=BASIS, scanned_items=12, core_items=12)
+
+
+def test_no_tag_history_does_not_claim_no_untagged_items():
+    _, text = _curriculum([_item()])
+    assert '*Untagged:* none' not in text
+    assert 'No untagged items found among forms previously tagged' in text
+
+
+def test_history_about_does_not_claim_to_read_kaizen_only():
+    text = format_about(basis='Scanned: Portfolio Guru filing history only: 3 visible evidence item(s)', limited_view=True)
+    assert 'Portfolio Guru history' in text
+    assert 'Reads Kaizen only' not in text
+
+
+def test_undated_open_items_stay_visible_without_an_invented_age():
+    item = _item(state='draft').model_copy(update={'event_date': None})
+    assessment = _assess([item])
+    assert len(assessment.open_drafts) == 1 and not assessment.stuck_drafts
+    text = format_action_queue(assessment, 'draft')
+    assert 'Undated' in text and 'undated' in text
+    assert '1 undated item' in format_coverage(assessment, today=TODAY)

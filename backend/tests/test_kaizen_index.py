@@ -358,3 +358,34 @@ def test_pending_signoff_counts_as_filed_not_drafted(kaizen_index):
     item = kaizen_index.evidence_row_to_health_item(row)
     assert item.status == "filed"
     assert item.source == "kaizen_filed"
+
+
+@pytest.mark.parametrize('raw', [None, '', '  ', 'not a date'])
+def test_unknown_item_dates_remain_undated_and_outside_windows(kaizen_index, raw):
+    from health_assessment import compute_health_assessment
+    from pathway_checklist import compute_arcp_checklist, compute_cesr_checklist, compute_appraisal_checklist
+    from health_engine import compute_snapshot
+    from health_models import HealthProfile, Pathway
+    from datetime import datetime, UTC
+    item = kaizen_index.evidence_row_to_health_item(_evidence_row(kaizen_index, date_occurred_on=raw, event_type='ESLE'))
+    assert item.event_date is None
+    from proactive_reminders import cesr_expiring_count
+    assert cesr_expiring_count([item], date(2026, 10, 20)) == 0
+    assessment = compute_health_assessment([item], today=date(2026, 10, 20))
+    assert assessment.items_last_year == 0 and assessment.newest_evidence is None
+    assert assessment.undated_items == 1 and assessment.scanned_items == 1
+    assert compute_arcp_checklist([item], today=date(2026, 10, 20)).esles == 0
+    assert compute_cesr_checklist([item], today=date(2026, 10, 20)).esles_12m == 0
+    assert compute_appraisal_checklist([item], today=date(2026, 10, 20)).cpd == 0
+    now = datetime.now(UTC)
+    profile = HealthProfile(user_id='42', pathway=Pathway.training_arcp, created_at=now, updated_at=now)
+    assert compute_snapshot(profile, [item]).pathway_readiness['recent_evidence_count'] == 0
+
+
+@pytest.mark.asyncio
+async def test_unparseable_date_is_not_a_stuck_signoff(kaizen_index, monkeypatch):
+    import health_watch
+    from unittest.mock import AsyncMock
+    row = _evidence_row(kaizen_index, state='pending', date_occurred_on='not a date')
+    monkeypatch.setattr(health_watch, 'list_evidence_items', AsyncMock(return_value=[row]))
+    assert await health_watch.find_stuck_signoffs('42', today=date(2026, 10, 20)) == []

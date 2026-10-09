@@ -250,7 +250,7 @@ async def test_run_health_analysis_uses_indexed_source_when_history_empty(
     assert "1 visible evidence item(s)" in store.user_data["last_health_report"]["views"]["scan"]
     assert "No Portfolio Guru cases filed yet" not in text
     assert "1/36 WPBAs counted in this scan" not in text
-    assert "1/36 WPBAs counted in this scan" in store.user_data["last_health_report"]["views"]["scan"]
+    assert "1/36 candidate WPBAs found in this scan" in store.user_data["last_health_report"]["views"]["scan"]
 
 
 @pytest.mark.asyncio

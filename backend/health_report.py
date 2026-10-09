@@ -61,7 +61,8 @@ def _describe(item: StuckEvidence, *, link: bool = True, separator: str = " — 
     """
     # Doctors recognise "Teaching Observation", not "TEACH_OBS".
     name = form_label(item.form_type)
-    label = f"{name}{separator}{item.event_date.strftime('%-d %b %Y')}"
+    when = item.event_date.strftime('%-d %b %Y') if item.event_date else "undated"
+    label = f"{name}{separator}{when}"
     # Naming an item from 2023 and leaving the doctor to find it is half a
     # feature. The URL is already indexed for every item.
     if link and item.url:
@@ -136,7 +137,7 @@ def action_queue_page_count(
 
 
 def _old_item_note(items: list[StuckEvidence]) -> Optional[str]:
-    if not any(item.days_waiting > REVIEW_AFTER_DAYS for item in items):
+    if not any(item.days_waiting is not None and item.days_waiting > REVIEW_AFTER_DAYS for item in items):
         return None
     return "_Some are over a year old: check they're still needed._"
 
@@ -173,9 +174,10 @@ def format_action_queue(
     subtitle = note if pages == 1 else f"{note} Page {page + 1} of {pages}."
     lines = [f"{QUEUE_EMOJI[queue]} *{heading} · {len(items)}*", subtitle, ""]
     bands = (
-        ("Over a year old", lambda item: item.days_waiting > 365),
-        ("Last 12 months", lambda item: 21 <= item.days_waiting <= 365),
-        ("Last 3 weeks", lambda item: item.days_waiting < 21),
+        ("Over a year old", lambda item: item.days_waiting is not None and item.days_waiting > 365),
+        ("Last 12 months", lambda item: item.days_waiting is not None and 21 <= item.days_waiting <= 365),
+        ("Last 3 weeks", lambda item: item.days_waiting is not None and item.days_waiting < 21),
+        ("Undated", lambda item: item.days_waiting is None),
     )
     for label, belongs in bands:
         shown = [item for item in window if belongs(item)]
@@ -284,7 +286,7 @@ def _pathway_counter(readiness: Optional[dict]) -> list[str]:
     count = readiness.get("wpba_count", 0)
     lines = [
         "*Portfolio Pathway requirement*",
-        f"{count}/{target} WPBAs counted in this scan",
+        f"{count}/{target} candidate WPBAs found in this scan",
     ]
     breakdown = readiness.get("wpba_breakdown") or {}
     if breakdown:
@@ -329,12 +331,9 @@ def _review_lines(
     if not review_date:
         return [f"No review month set — {route} to time this to your cycle."]
     when = review_date.strftime("%B %Y")
-    days = (review_date - today).days
-    if days < 0:
+    if review_date.replace(day=1) < today.replace(day=1):
         return [f"Review month {when} has passed — {route} to set the next one."]
-    weeks = days // 7
-    countdown = f"{weeks} weeks" if weeks >= 2 else f"{days} days"
-    return [f"Next review: {when} — {countdown} away."]
+    return [f"Review month: {when}. Confirm the date and evidence deadline with your programme."]
 
 
 def format_priorities(
@@ -413,14 +412,20 @@ def _chase_action(assessment: HealthAssessment) -> Optional[str]:
 def _do_next(
     pathway_actions: list[str], assessment: HealthAssessment, *, incomplete_scan: bool
 ) -> list[str]:
-    # A partial scan can't tell a missing item from an unscanned one, so it
-    # ranks nothing: the gaps above may be the scan's, not the portfolio's.
+    # A partial scan can show known drafts, but cannot rank missing evidence.
+    drafts = len(assessment.open_drafts)
+    draft_action = f"Finish and send your {drafts} open draft{'' if drafts == 1 else 's'} in Kaizen"
     if incomplete_scan:
-        return ["_Gaps above may just be unscanned. Run a full Kaizen scan before acting on them._", ""]
+        lines = []
+        if drafts:
+            lines = ["*Do next*", f"1. {draft_action}"]
+        return lines + ["_Gaps above may just be unscanned. Run a full Kaizen scan before acting on them._", ""]
     actions = list(pathway_actions)
+    if drafts:
+        actions.insert(0, draft_action)
     chase = _chase_action(assessment)
     if chase:
-        actions.insert(min(2, len(actions)), chase)
+        actions.append(chase)
     actions = actions[:DO_NEXT_LIMIT]
     if not actions:
         return []
@@ -456,8 +461,15 @@ def _landing_footer(
     )
     if notice:
         lines.extend([notice, ""])
+    source = (
+        f"{assessment.scanned_items} items in Portfolio Guru history"
+        if limited_view
+        else f"{assessment.scanned_items} Kaizen item{'' if assessment.scanned_items == 1 else 's'}"
+    )
+    if assessment.undated_items:
+        lines.append(f"_{assessment.undated_items} undated item{'' if assessment.undated_items == 1 else 's'} excluded from date windows._")
     lines.append(
-        f"_From {assessment.scanned_items} Kaizen item{'' if assessment.scanned_items == 1 else 's'}. Read-only, not an "
+        f"_From {source}. Read-only, not an "
         f"{'ARCP' if trainee else 'appraisal'} judgement._"
     )
     return lines
@@ -478,34 +490,30 @@ def format_arcp_landing(
 ) -> str:
     """Trainee landing: this year against the RCEM ARCP checklist."""
     lines = ["📊 *ARCP readiness*"]
-    deadline = checklist.evidence_deadline
-    if deadline and deadline >= today:
+    review = checklist.review_date
+    if review and review.replace(day=1) >= today.replace(day=1):
         lines.append(
-            f"{checklist.review_date.strftime('%B %Y')} panel · "
-            f"evidence due {deadline.strftime('%-d %b')} ({_weeks_until(deadline, today)})"
+            f"ARCP month: {review.strftime('%B %Y')}. "
+            "Confirm the panel date and evidence deadline with your programme."
         )
-    elif deadline:
+    elif review:
         lines.append(
-            f"Your {checklist.review_date.strftime('%B %Y')} ARCP has passed. "
+            f"ARCP month {review.strftime('%B %Y')} has passed. "
             "Set the next one with 📅 below."
         )
     else:
         lines.append("No ARCP month set, so this counts the last 12 months.")
     lines.extend(["", "*This year, signed off*"])
 
-    if checklist.msf and checklist.msf_late:
-        msf = f"⚠️ MSF done {checklist.msf_first_date.strftime('%b %Y')}, after month 6"
-    elif checklist.msf:
+    if checklist.msf:
         msf = f"✅ MSF {checklist.msf_first_date.strftime('%b %Y')}"
-    elif checklist.msf_overdue:
-        msf = "⚠️ MSF not seen, and it's due in the first 6 months"
     else:
         msf = "⬜ MSF"
     # One point per row: a doctor ticks these off one at a time (Moeed,
     # 2026-09-30).
     lines.extend([
         msf,
-        f"{_tick(checklist.supervisor_reports > 0)} Supervisor report",
+        f"Supervisor reports: {checklist.supervisor_reports} found; check there is one per placement.",
         f"{_tick(checklist.esr > 0)} ESR",
     ])
     if getattr(checklist, "accs", False):
@@ -516,15 +524,14 @@ def format_arcp_landing(
             "ℹ️ ACCS learning outcomes aren't read here. Check them in Kaizen.",
         ])
     else:
-        esle_mark = "✅" if checklist.esles >= checklist.esle_target else "⬜"
         lines.append(
-            f"{esle_mark} ESLEs {checklist.esles} of {checklist.esle_target} (one in PEM)"
+            f"ESLEs: {checklist.esles} found. Check which is in PEM yourself."
         )
         if checklist.slos_without_evidence:
             slos = ", ".join(str(s) for s in checklist.slos_without_evidence)
             lines.append(f"⬜ No assessed evidence yet: SLO {slos}")
         else:
-            lines.append("✅ Every SLO has assessed evidence")
+            lines.append("Completed tagged evidence seen for all 12 SLOs; capabilities (KCs) not assessed.")
     lines.append("")
 
     lines.extend(_do_next(
@@ -604,10 +611,9 @@ def _pathway_section(cesr) -> list[str]:
     lines = ["*Portfolio Pathway (signed off, last 6 years)*"]
     per_type = " · ".join(
         f"{label} {min(cesr.wpba_counts[code], 12)}/12"
-        + (" ✅" if cesr.wpba_counts[code] >= 12 else "")
         for code, label in (("DOPS", "DOPS"), ("MINI_CEX", "Mini-CEX"), ("CBD", "CBD"))
     )
-    lines.append(f"WPBAs {cesr.wpba_counted}/{cesr.wpba_target}: {per_type}")
+    lines.append(f"Candidate WPBAs {cesr.wpba_counted}/{cesr.wpba_target}: {per_type}")
     lines.append(
         f"ESLEs {cesr.esles_3y}/6 in 3 years · {cesr.esles_12m}/3 in last 12 months"
     )
@@ -653,8 +659,8 @@ def _about_facts(basis: str, *, limited_view: bool) -> list[str]:
             n = count.group(1) if count else None
             if "filing history only" in line:
                 facts.append(
-                    f"Read {n} items filed through Portfolio Guru only."
-                    if n else "Read items filed through Portfolio Guru only."
+                    f"From {n} items in Portfolio Guru history."
+                    if n else "From Portfolio Guru history."
                 )
             else:
                 facts.append(f"Read {n} items from your Kaizen." if n else line)
@@ -712,7 +718,8 @@ def format_about(
             "(clinical, CPD, QI, teaching, leadership, reflection). "
             f"The other {scanned_items - core_items} are counted but not categorised."
         )])
-    lines.extend(["", "• Reads Kaizen only. Never edits, sends or deletes."])
+    source = "Portfolio Guru history" if limited_view or "filing history only" in basis else "Kaizen"
+    lines.extend(["", f"• Reads {source} only. Never edits, sends or deletes."])
     if trainee:
         lines.append("• Can't see Form R or SLO 6 procedure sign-offs.")
     lines.extend([
@@ -731,6 +738,8 @@ def format_coverage(
     """What the portfolio holds — with every comparison named as a comparison."""
     reference = today or date.today()
     lines = ["📊 *Coverage*", "", "*Domains — total · last 12 months*"]
+    if assessment.undated_items:
+        lines.append(f"{assessment.undated_items} undated item{'' if assessment.undated_items == 1 else 's'} excluded from date windows.")
     for stat in sorted(assessment.domains, key=lambda s: s.count, reverse=True):
         label = DOMAIN_LABELS[stat.domain]
         if not stat.count:
@@ -813,7 +822,7 @@ def format_curriculum(assessment: HealthAssessment) -> str:
             lines.append(" · ".join(breakdown))
         lines.append("Add SLO tags in Kaizen so they count.")
     else:
-        lines.append("*Untagged:* none")
+        lines.append("No untagged items found among forms previously tagged.")
     lines.extend(["", "_Counts tags only, not whether evidence is enough._"])
     return "\n".join(lines).strip()
 

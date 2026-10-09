@@ -432,7 +432,7 @@ def cesr_expiring_count(items, today: date) -> int:
     window_start = _years_before(today, CESR_WINDOW_YEARS)
     cutoff = window_start + timedelta(days=CESR_EXPIRY_ALERT_DAYS)
     return sum(
-        1 for i in items if is_completed(i) and window_start <= i.event_date < cutoff
+        1 for i in items if is_completed(i) and i.event_date is not None and window_start <= i.event_date < cutoff
     )
 
 

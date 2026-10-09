@@ -72,8 +72,8 @@ class StuckEvidence:
     id: str
     title: str
     form_type: Optional[str]
-    event_date: date
-    days_waiting: int
+    event_date: Optional[date]
+    days_waiting: Optional[int]
     waits_on_others: bool
     url: Optional[str]
 
@@ -101,6 +101,7 @@ class HealthAssessment:
     open_drafts: list[StuckEvidence] = field(default_factory=list)
     open_awaiting: list[StuckEvidence] = field(default_factory=list)
     scanned_items: int = 0
+    undated_items: int = 0
     stuck_awaiting: list[StuckEvidence] = field(default_factory=list)
     stuck_drafts: list[StuckEvidence] = field(default_factory=list)
     domains: list[DomainStat] = field(default_factory=list)
@@ -140,7 +141,7 @@ def _open_from(item: EvidenceItem, today: date) -> Optional[StuckEvidence]:
     state = (item.workflow_state or "").strip().lower()
     if state not in BLOCKED_STATES:
         return None
-    days = (today - item.event_date).days
+    days = (today - item.event_date).days if item.event_date else None
     return StuckEvidence(
         id=item.id,
         title=item.title,
@@ -159,7 +160,7 @@ def _domain_stats(items: list[EvidenceItem], today: date) -> list[DomainStat]:
     for domain in CORE_DOMAINS:
         in_domain = [item for item in items if item.domain == domain]
         count = len(in_domain)
-        newest = max((item.event_date for item in in_domain), default=None)
+        newest = max((item.event_date for item in in_domain if item.event_date), default=None)
         thin = bool(
             comparable
             and count
@@ -168,7 +169,8 @@ def _domain_stats(items: list[EvidenceItem], today: date) -> list[DomainStat]:
         )
         stale = bool(newest and (today - newest).days > STALE_AFTER_DAYS)
         recent = sum(
-            1 for item in in_domain if (today - item.event_date).days <= RECENT_WINDOW_DAYS
+            1 for item in in_domain
+            if item.event_date and 0 <= (today - item.event_date).days <= RECENT_WINDOW_DAYS
         )
         stats.append(
             DomainStat(
@@ -202,17 +204,18 @@ def compute_health_assessment(
     # Total order, not just a sort by age: two items filed on the same day must
     # land in the same position on every render, or a doctor paging through
     # Actions sees items move between pages.
-    opened.sort(key=lambda s: (-s.days_waiting, s.form_type or "", s.id))
+    opened.sort(key=lambda s: (s.days_waiting is None, -(s.days_waiting or 0), s.form_type or "", s.id))
     open_awaiting = [s for s in opened if s.waits_on_others]
     open_drafts = [s for s in opened if not s.waits_on_others]
-    awaiting = [s for s in open_awaiting if s.days_waiting >= STUCK_AFTER_DAYS]
-    drafts = [s for s in open_drafts if s.days_waiting >= STUCK_AFTER_DAYS]
+    awaiting = [s for s in open_awaiting if s.days_waiting is not None and s.days_waiting >= STUCK_AFTER_DAYS]
+    drafts = [s for s in open_drafts if s.days_waiting is not None and s.days_waiting >= STUCK_AFTER_DAYS]
 
     core_total = sum(stat.count for stat in stats)
     recent = sum(
-        1 for item in items if (reference - item.event_date).days <= RECENT_WINDOW_DAYS
+        1 for item in items
+        if item.event_date and 0 <= (reference - item.event_date).days <= RECENT_WINDOW_DAYS
     )
-    newest = max((item.event_date for item in items), default=None)
+    newest = max((item.event_date for item in items if item.event_date), default=None)
 
     slo_counts: dict[int, int] = {}
     for item in items:
@@ -226,6 +229,7 @@ def compute_health_assessment(
         open_drafts=open_drafts,
         open_awaiting=open_awaiting,
         scanned_items=len(items),
+        undated_items=sum(1 for item in items if item.event_date is None),
         stuck_awaiting=awaiting,
         stuck_drafts=drafts,
         domains=stats,

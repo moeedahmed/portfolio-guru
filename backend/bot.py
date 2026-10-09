@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
-from telegram.error import BadRequest, NetworkError
+from telegram.error import BadRequest, Forbidden, NetworkError, TimedOut
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler, PicklePersistence,
@@ -76,7 +76,7 @@ from kaizen_index import (
     get_kaizen_sync_status,
     list_evidence_items,
 )
-from kaizen_sync import sync_kaizen_portfolio_index_for_user
+from kaizen_sync import KaizenAuthRequired, KaizenSyncDrift, sync_kaizen_portfolio_index_for_user
 from bulk_filer import bulk_file
 from conversational_router import ConversationalIntent, route_message
 from channel_actions import to_telegram_keyboard
@@ -4475,7 +4475,7 @@ def _stored_review_date(profile):
         return None
     try:
         parts = str(raw).split("-")
-        return _date(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 1)
+        return _date(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 1).replace(day=1)
     except (ValueError, IndexError):
         return None
 
@@ -10672,155 +10672,169 @@ async def _run_health_analysis(
       - send_result(text, reply_markup): render the final analysis text
       - fail_fn(text): render an error after the analysis call fails
     """
-    logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
-    _note_reminder_engagement(user_id)
-    await chat.send_action(constants.ChatAction.TYPING)
+    _remember_audit_user(context_store, user_id=user_id)
+    reason = "other"
+    try:
+        logger.info("Portfolio Guru funnel event=health_viewed user_id=%s", user_id)
+        _note_reminder_engagement(user_id)
+        await chat.send_action(constants.ChatAction.TYPING)
 
-    stored_profile = get_health_profile(user_id)
-    profile = stored_profile or _get_or_default_health_profile(user_id)
-    profile_is_default = stored_profile is None
+        stored_profile = get_health_profile(user_id)
+        profile = stored_profile or _get_or_default_health_profile(user_id)
+        profile_is_default = stored_profile is None
 
-    training_level = get_training_level(user_id)
-    if not training_level:
-        training_level = "HIGHER"
-        level_note = "\n\n_Note: No portfolio set — using HST defaults. Use /settings to update._"
-    else:
-        level_note = ""
+        training_level = get_training_level(user_id)
+        if not training_level:
+            training_level = "HIGHER"
+            level_note = "\n\n_Note: No portfolio set — using HST defaults. Use /settings to update._"
+        else:
+            level_note = ""
 
-    evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
+        evidence_items, history, evidence_source = await _resolve_health_evidence(user_id)
 
-    snapshot = compute_snapshot(profile, evidence_items)
-    limited_view = evidence_source == "case_history"
-    sync_status = await _safe_kaizen_sync_status(user_id)
+        snapshot = compute_snapshot(profile, evidence_items)
+        limited_view = evidence_source == "case_history"
+        sync_status = await _safe_kaizen_sync_status(user_id)
 
-    # Deterministic assessment first. The old path scored presence only — five
-    # of six domains holding anything earned Green — then asked an LLM for
-    # prose, which is why a portfolio with 27 unfinished items and QI at 7
-    # against 250 clinical read as "Green, missing domains: none obvious" and
-    # why _reconcile_action_severity had to exist to stop the narrative
-    # contradicting the score. The assessment answers from the evidence, and
-    # no colour is claimed on top of it.
-    from datetime import datetime as _dt_module
-    assessment = compute_health_assessment(evidence_items)
-    review_date = _stored_review_date(profile)
-    review_month_needs_setup = (
-        review_date is None
-        or review_date < _dt_module.now().date().replace(day=1)
-    )
-    scan_is_fresh = _sync_status_is_fresh(sync_status)
-    scan_is_partial = (
-        getattr(getattr(sync_status, "last_run", None), "status", None) == "partial"
-    )
-
-    # Every evidence view is rendered here, once, from one assessment. A
-    # button press then only reads what this scan already decided.
-    # The landing is the checklist this doctor is actually judged on: the
-    # RCEM ARCP year for trainees, the GMC appraisal and Portfolio Pathway
-    # minimums for everyone else. The review month doubles as the ARCP or
-    # appraisal month.
-    today = _dt_module.now().date()
-    if profile.pathway in (Pathway.cesr_portfolio, Pathway.appraisal_only):
-        priorities_text = format_portfolio_landing(
-            assessment,
-            compute_appraisal_checklist(
-                evidence_items, today=today, review_date=review_date
-            ),
-            compute_cesr_checklist(evidence_items, today=today)
-            if profile.pathway == Pathway.cesr_portfolio
-            else None,
-            today=today,
-            limited_view=limited_view,
-            partial_scan=scan_is_partial,
-            scan_is_fresh=scan_is_fresh,
+        # Deterministic assessment first. The old path scored presence only — five
+        # of six domains holding anything earned Green — then asked an LLM for
+        # prose, which is why a portfolio with 27 unfinished items and QI at 7
+        # against 250 clinical read as "Green, missing domains: none obvious" and
+        # why _reconcile_action_severity had to exist to stop the narrative
+        # contradicting the score. The assessment answers from the evidence, and
+        # no colour is claimed on top of it.
+        from datetime import datetime as _dt_module
+        assessment = compute_health_assessment(evidence_items)
+        review_date = _stored_review_date(profile)
+        # Keep the existing month control available to change a future month too.
+        review_month_needs_setup = True
+        scan_is_fresh = _sync_status_is_fresh(sync_status)
+        scan_is_partial = (
+            getattr(getattr(sync_status, "last_run", None), "status", None) == "partial"
         )
-    else:
-        priorities_text = format_arcp_landing(
-            assessment,
-            compute_arcp_checklist(
-                evidence_items,
+
+        # Every evidence view is rendered here, once, from one assessment. A
+        # button press then only reads what this scan already decided.
+        # The landing is the checklist this doctor is actually judged on: the
+        # RCEM ARCP year for trainees, the GMC appraisal and Portfolio Pathway
+        # minimums for everyone else. The review month doubles as the ARCP or
+        # appraisal month.
+        today = _dt_module.now().date()
+        if profile.pathway in (Pathway.cesr_portfolio, Pathway.appraisal_only):
+            priorities_text = format_portfolio_landing(
+                assessment,
+                compute_appraisal_checklist(
+                    evidence_items, today=today, review_date=review_date
+                ),
+                compute_cesr_checklist(evidence_items, today=today)
+                if profile.pathway == Pathway.cesr_portfolio
+                else None,
                 today=today,
-                review_date=review_date,
-                training_level=training_level,
+                limited_view=limited_view,
+                partial_scan=scan_is_partial,
+                scan_is_fresh=scan_is_fresh,
+            )
+        else:
+            priorities_text = format_arcp_landing(
+                assessment,
+                compute_arcp_checklist(
+                    evidence_items,
+                    today=today,
+                    review_date=review_date,
+                    training_level=training_level,
+                ),
+                today=today,
+                limited_view=limited_view,
+                partial_scan=scan_is_partial,
+                scan_is_fresh=scan_is_fresh,
+            )
+        if _route_needs_confirm(profile, today):
+            priorities_text = (
+                f"{priorities_text}\n\n"
+                f"{_route_hint_line(profile.pathway, _route_basis(user_id, stored_profile is not None))}"
+            )
+        await send_progress()
+        evidence_basis = _format_health_evidence_context(
+            source=evidence_source,
+            evidence_count=len(evidence_items),
+            history_count=len(history),
+            profile_is_default=profile_is_default,
+            sync_status=sync_status,
+            pathway=profile.pathway,
+        )
+        views = {
+            "priorities": priorities_text,
+            "actions": format_actions(assessment),
+            "about": format_about(
+                basis=evidence_basis,
+                scanned_items=assessment.scanned_items,
+                core_items=assessment.total_items,
+                trainee=profile.pathway == Pathway.training_arcp,
+                limited_view=limited_view,
+                scan_is_fresh=scan_is_fresh,
             ),
-            today=today,
-            limited_view=limited_view,
-            partial_scan=scan_is_partial,
-            scan_is_fresh=scan_is_fresh,
-        )
-    if _route_needs_confirm(profile, today):
-        priorities_text = (
-            f"{priorities_text}\n\n"
-            f"{_route_hint_line(profile.pathway, _route_basis(user_id, stored_profile is not None))}"
-        )
-    await send_progress()
-    evidence_basis = _format_health_evidence_context(
-        source=evidence_source,
-        evidence_count=len(evidence_items),
-        history_count=len(history),
-        profile_is_default=profile_is_default,
-        sync_status=sync_status,
-        pathway=profile.pathway,
-    )
-    views = {
-        "priorities": priorities_text,
-        "actions": format_actions(assessment),
-        "about": format_about(
-            basis=evidence_basis,
-            scanned_items=assessment.scanned_items,
-            core_items=assessment.total_items,
-            trainee=profile.pathway == Pathway.training_arcp,
-            limited_view=limited_view,
-            scan_is_fresh=scan_is_fresh,
-        ),
-        "coverage": format_coverage(assessment),
-        "curriculum": format_curriculum(assessment),
-        "scan": format_scan_info(
-            assessment,
-            basis=evidence_basis,
-            review_date=review_date,
-            limited_view=limited_view,
-            pathway_readiness=snapshot.pathway_readiness,
-        ),
-    }
-    action_pages = [
-        format_actions(assessment, page=page)
-        for page in range(actions_page_count(assessment))
-    ]
-    action_queue_pages = {
-        queue: [
-            format_action_queue(assessment, queue, page=page)
-            for page in range(action_queue_page_count(assessment, queue))
+            "coverage": format_coverage(assessment),
+            "curriculum": format_curriculum(assessment),
+            "scan": format_scan_info(
+                assessment,
+                basis=evidence_basis,
+                review_date=review_date,
+                limited_view=limited_view,
+                pathway_readiness=snapshot.pathway_readiness,
+            ),
+        }
+        action_pages = [
+            format_actions(assessment, page=page)
+            for page in range(actions_page_count(assessment))
         ]
-        for queue in ("draft", "awaiting")
-    }
-    action_queue_totals = {
-        "draft": len(assessment.open_drafts),
-        "awaiting": len(assessment.open_awaiting),
-    }
-    # Curriculum SLOs matter for training and Portfolio Pathway evidence, not
-    # for an appraisal-only doctor.
-    slo_map = profile.pathway != Pathway.appraisal_only
-    if context_store is not None:
-        _store_health_report_context(
-            context_store,
-            views=views,
-            action_pages=action_pages,
-            action_queue_pages=action_queue_pages,
-            action_queue_totals=action_queue_totals,
-            needs_review_month=review_month_needs_setup,
-            slo_map=slo_map,
-            month_label_trainee=profile.pathway == Pathway.training_arcp,
+        action_queue_pages = {
+            queue: [
+                format_action_queue(assessment, queue, page=page)
+                for page in range(action_queue_page_count(assessment, queue))
+            ]
+            for queue in ("draft", "awaiting")
+        }
+        action_queue_totals = {
+            "draft": len(assessment.open_drafts),
+            "awaiting": len(assessment.open_awaiting),
+        }
+        # Curriculum SLOs matter for training and Portfolio Pathway evidence, not
+        # for an appraisal-only doctor.
+        slo_map = profile.pathway != Pathway.appraisal_only
+        if context_store is not None:
+            _store_health_report_context(
+                context_store,
+                views=views,
+                action_pages=action_pages,
+                action_queue_pages=action_queue_pages,
+                action_queue_totals=action_queue_totals,
+                needs_review_month=review_month_needs_setup,
+                slo_map=slo_map,
+                month_label_trainee=profile.pathway == Pathway.training_arcp,
+            )
+        await send_result(
+            priorities_text,
+            _health_view_keyboard(
+                "priorities",
+                queue_totals=action_queue_totals,
+                needs_review_month=review_month_needs_setup,
+                slo_map=slo_map,
+                month_label_trainee=profile.pathway == Pathway.training_arcp,
+            ),
         )
-    await send_result(
-        priorities_text,
-        _health_view_keyboard(
-            "priorities",
-            queue_totals=action_queue_totals,
-            needs_review_month=review_month_needs_setup,
-            slo_map=slo_map,
-            month_label_trainee=profile.pathway == Pathway.training_arcp,
-        ),
-    )
+        reason = "ok"
+    except (TimeoutError, TimedOut):
+        reason = "timeout"
+        raise
+    except (KaizenAuthRequired, Forbidden):
+        reason = "auth"
+        raise
+    except KaizenSyncDrift:
+        reason = "drift"
+        raise
+    finally:
+        event = "health_report_delivered" if reason == "ok" else "health_report_failed"
+        _track_funnel_event(context_store, event, update_last=False, reason=reason)
 
 
 # An interactive Kaizen scan runs inside the doctor's per-user update lock, so
@@ -10910,18 +10924,35 @@ async def _run_health_with_optional_kaizen_sync(
     the existing limited-view behaviour inside ``_run_health_analysis`` rather
     than pretending a full Kaizen scan ran.
     """
-    if await _health_needs_kaizen_refresh(user_id):
-        await show_scanning()
-        result = await _run_interactive_kaizen_scan(user_id, show_progress=show_scanning)
+    _remember_audit_user(context_store, user_id=user_id)
+    scan_reason = "other"
+    try:
+        if await _health_needs_kaizen_refresh(user_id):
+            await show_scanning()
+            result = await _run_interactive_kaizen_scan(user_id, show_progress=show_scanning)
 
-        sync_run_status = getattr(result, "status", "failed")
-        if sync_run_status not in {"ok", "partial"}:
-            status = await _safe_kaizen_sync_status(user_id)
-            await show_recovery(
-                _format_refresh_portfolio_result(result, status),
-                _health_sync_recovery_keyboard(sync_run_status),
-            )
-            return
+            sync_run_status = getattr(result, "status", "failed")
+            if sync_run_status not in {"ok", "partial"}:
+                scan_reason = {"auth_required": "auth", "timed_out": "timeout", "drift": "drift"}.get(sync_run_status, "other")
+                status = await _safe_kaizen_sync_status(user_id)
+                await show_recovery(
+                    _format_refresh_portfolio_result(result, status),
+                    _health_sync_recovery_keyboard(sync_run_status),
+                )
+                return
+        scan_reason = None
+    except (TimeoutError, TimedOut):
+        scan_reason = "timeout"
+        raise
+    except (KaizenAuthRequired, Forbidden):
+        scan_reason = "auth"
+        raise
+    except KaizenSyncDrift:
+        scan_reason = "drift"
+        raise
+    finally:
+        if scan_reason is not None:
+            _track_funnel_event(context_store, "health_report_failed", update_last=False, reason=scan_reason)
 
     await _run_health_analysis(
         user_id=user_id,

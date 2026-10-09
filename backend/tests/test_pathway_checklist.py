@@ -61,10 +61,10 @@ def _many(form_type, count, *, days_ago=30, **kw):
 # ── ARCP ────────────────────────────────────────────────────────────────────
 
 
-def test_arcp_deadline_is_two_weeks_before_the_panel():
+def test_arcp_month_does_not_invent_a_panel_or_deadline():
     check = compute_arcp_checklist([], today=TODAY, review_date=date(2027, 5, 1))
-    assert check.evidence_deadline == date(2027, 4, 17)
-    assert check.cycle_end == date(2027, 5, 1)
+    assert check.evidence_deadline is None
+    assert check.cycle_end == date(2027, 5, 31)
 
 
 def test_arcp_counts_only_signed_off_evidence_in_the_cycle():
@@ -76,7 +76,7 @@ def test_arcp_counts_only_signed_off_evidence_in_the_cycle():
     ]
     check = compute_arcp_checklist(items, today=TODAY)
     assert check.esles == 1
-    assert check.actions[0] == "Book 2 more ESLEs, one in PEM"
+    assert check.actions[0] == "2 more ESLEs needed (arranged with your assessors in Kaizen)"
 
 
 def test_reflections_do_not_evidence_an_slo():
@@ -103,7 +103,7 @@ def test_intermediate_keeps_three_esles_with_pem_and_every_slo():
     check = compute_arcp_checklist([], today=TODAY, training_level="INTERMEDIATE")
     assert not check.accs and check.esle_target == 3
     assert check.slos_without_evidence == tuple(range(1, 13))
-    assert "Book 3 more ESLEs, one in PEM" in check.actions
+    assert "3 more ESLEs needed (arranged with your assessors in Kaizen)" in check.actions
 
 
 def test_accs_landing_counts_esles_without_a_target_and_points_to_kaizen_los():
@@ -118,11 +118,11 @@ def test_accs_landing_counts_esles_without_a_target_and_points_to_kaizen_los():
     assert "of 3" not in text and "PEM" not in text and "SLO" not in text
 
 
-def test_msf_after_month_six_is_flagged():
+def test_review_month_does_not_establish_a_training_start_for_msf():
     review = date(2027, 5, 1)
     late = _item("MSF", on=date(2027, 1, 10))
     check = compute_arcp_checklist([late], today=TODAY, review_date=review)
-    assert check.msf == 1 and check.msf_late
+    assert check.msf == 1 and not check.msf_late
 
     early = _item("MSF", on=date(2026, 7, 1))
     assert not compute_arcp_checklist([early], today=TODAY, review_date=review).msf_late
@@ -143,8 +143,8 @@ def test_arcp_landing_is_phone_sized_and_leaves_scan_limits_to_about():
         compute_arcp_checklist(items, today=TODAY, review_date=date(2027, 5, 1)),
         today=TODAY,
     )
-    assert "May 2027 panel · evidence due 17 Apr" in text
-    assert "ESLEs 2 of 3" in text and "PEM" in text
+    assert "ARCP month: May 2027. Confirm the panel date and evidence deadline with your programme." in text
+    assert "ESLEs: 2 found. Check which is in PEM yourself." in text
     assert "Form R" not in text
     assert text.count("\n") <= 22
     do_next = text.split("*Do next*")[1]
@@ -249,8 +249,8 @@ def test_portfolio_landing_shows_appraisal_then_pathway():
         today=TODAY,
     )
     assert text.index("Before your appraisal") < text.index("*Portfolio Pathway (")
-    assert "WPBAs 17/36" in text
-    assert "CBD 12/12 ✅" in text
+    assert "Candidate WPBAs 17/36" in text
+    assert "CBD 12/12" in text and "CBD 12/12 ✅" not in text
     assert "Patient feedback" in text
     assert "Add 12 Mini-CEX, 7 DOPS" in text
     assert "⬜ Paediatric cases 0/20 (linked to SLO 5)" in text
@@ -283,14 +283,70 @@ def test_landing_counts_all_open_items_and_all_scanned_categories():
     assessment = replace(compute_health_assessment(items, today=TODAY), scanned_items=507, total_items=460)
     check = compute_arcp_checklist(items, today=TODAY, review_date=date(2027, 5, 1))
     text = format_arcp_landing(assessment, check, today=TODAY)
-    assert 'May 2027 panel · evidence due 17 Apr (28 weeks)' in text
+    assert 'ARCP month: May 2027.' in text and 'weeks)' not in text
     assert '*This year, signed off*' in text
-    assert '⬜ MSF\n⬜ Supervisor report\n⬜ ESR' in text
-    assert 'ESLEs 1 of 3 (one in PEM)' in text
+    assert '⬜ MSF\nSupervisor reports: 0 found; check there is one per placement.\n⬜ ESR' in text
+    assert 'ESLEs: 1 found. Check which is in PEM yourself.' in text
     assert '*Still open in Kaizen*\n📝 9 to finish and send (drafts)\n⏳ 2 sent, waiting on an assessor' in text
-    assert 'Ask your assessor about your Teaching Observation from Aug 2023' in text
+    assert '1. Finish and send your 9 open drafts in Kaizen' in text
     assert 'Form R' not in text and 'Chase' not in text
     assert '_From 507 Kaizen items. Read-only, not an ARCP judgement._' in text
     assert 'Clinical narrative' not in text
     portfolio = format_portfolio_landing(assessment, compute_appraisal_checklist(items, today=TODAY), None, today=TODAY)
     assert 'From 507 Kaizen items. Read-only, not an appraisal judgement.' in portfolio
+
+
+def test_new_portfolio_rolling_window_does_not_make_msf_overdue():
+    check = compute_arcp_checklist([], today=TODAY)
+    assert (check.cycle_end - check.cycle_start).days == 365
+    assert not check.msf_overdue and not check.msf_late
+    text = format_arcp_landing(compute_health_assessment([], today=TODAY), check, today=TODAY)
+    assert 'No ARCP month set, so this counts the last 12 months.' in text
+    assert 'first 6 months' not in text and 'overdue' not in text
+
+
+def test_month_only_arcp_is_not_passed_until_month_ends():
+    for today in (date(2026, 10, 20), date(2026, 11, 20), date(2026, 11, 30)):
+        check = compute_arcp_checklist([], today=today, review_date=date(2026, 11, 1))
+        text = format_arcp_landing(compute_health_assessment([], today=today), check, today=today)
+        assert 'ARCP month: November 2026.' in text
+        assert 'has passed' not in text and 'weeks' not in text
+    today = date(2026, 12, 1)
+    check = compute_arcp_checklist([], today=today, review_date=date(2026, 11, 1))
+    text = format_arcp_landing(compute_health_assessment([], today=today), check, today=today)
+    assert 'ARCP month November 2026 has passed' in text
+
+
+def test_completed_tags_are_not_a_capability_or_pem_assessment():
+    items = _many('ESLE', 3, slos=tuple(range(1, 13))) + [_item('STR')]
+    text = format_arcp_landing(
+        compute_health_assessment(items, today=TODAY),
+        compute_arcp_checklist(items, today=TODAY), today=TODAY,
+    )
+    assert 'ESLEs: 3 found. Check which is in PEM yourself.' in text
+    assert '✅ ESLE' not in text and '(one in PEM)' not in text
+    assert 'Completed tagged evidence seen for all 12 SLOs; capabilities (KCs) not assessed.' in text
+    assert 'Supervisor reports: 1 found; check there is one per placement.' in text
+
+
+def test_near_review_missing_reports_precede_routine_actions_and_chase():
+    items = [_item('CBD', state='draft'), _item('CBD', state='pending')]
+    text = format_arcp_landing(
+        compute_health_assessment(items, today=TODAY),
+        compute_arcp_checklist(items, today=TODAY, review_date=date(2026, 11, 1)), today=TODAY,
+    )
+    actions = text.split('*Do next*')[1].split('*Still open')[0]
+    assert actions.index('Finish and send') < actions.index('MSF') < actions.index('ESR')
+    assert 'Ask your assessor' not in actions and 'ESLE' not in actions
+
+
+
+def test_partial_scan_still_puts_known_open_drafts_first():
+    items = [_item('CBD', state='draft')]
+    text = format_arcp_landing(
+        compute_health_assessment(items, today=TODAY),
+        compute_arcp_checklist(items, today=TODAY), today=TODAY, partial_scan=True,
+    )
+    assert '1. Finish and send your 1 open draft in Kaizen' in text
+    assert 'Gaps above may just be unscanned' in text
+    assert 'more ESLEs needed' not in text

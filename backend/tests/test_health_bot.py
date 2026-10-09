@@ -7,6 +7,7 @@ from telegram.error import BadRequest
 from telegram.ext import ConversationHandler
 
 from health_models import HealthDomain, HealthProfile, HealthScore, HealthSnapshot, Pathway
+from kaizen_sync import KaizenAuthRequired, KaizenSyncDrift
 from tests.bot_simulator import BotSimulator
 
 
@@ -1398,7 +1399,7 @@ async def test_arcp_and_cesr_pathway_outputs_diverge_in_lead_framing(monkeypatch
     assert "*Portfolio Pathway requirement*" not in cesr_text
     assert "WPBAs counted in this scan" not in cesr_text
     assert "*Portfolio Pathway requirement*" in cesr_views["scan"]
-    assert "WPBAs counted in this scan" in cesr_views["scan"]
+    assert "candidate WPBAs found in this scan" in cesr_views["scan"]
     assert "6-year evidence window" in cesr_views["scan"]
     # CESR must NOT carry ARCP-deadline framing
     assert "ARCP risk" not in cesr_text
@@ -1413,7 +1414,7 @@ async def test_cesr_message_contains_long_term_and_domain_balance(monkeypatch):
     assert "WPBAs counted in this scan" not in cesr_text
     # Legacy Scan info retains the counter and long-term expectations without
     # putting system analysis in the everyday journey.
-    assert "WPBAs counted in this scan" in cesr_views["scan"]
+    assert "candidate WPBAs found in this scan" in cesr_views["scan"]
     assert "consultant report" in cesr_views["scan"].lower()
     assert "multi-year" in cesr_views["scan"]
     assert "6-year evidence window" in cesr_views["scan"]
@@ -2272,3 +2273,84 @@ def test_route_before_kaizen_connect_follows_the_portfolio_profile(
     assert bot._route_basis(4242, stored=False) == basis
     assert bot._route_basis(4242, stored=True) == "guessed from Kaizen"
     assert "guessed from Kaizen" not in bot._route_hint_line(pathway, basis)
+
+
+@pytest.mark.asyncio
+async def test_future_arcp_month_keeps_existing_change_control(monkeypatch):
+    import bot
+    profile = _profile(99999999, Pathway.training_arcp)
+    profile.pathway_config['review_date'] = '2099-04-01'
+    monkeypatch.setattr(bot, 'get_health_profile', lambda _uid: profile)
+    monkeypatch.setattr(bot, 'get_training_level', lambda _uid: 'HIGHER')
+    monkeypatch.setattr(bot, '_resolve_health_evidence', AsyncMock(return_value=([], [], 'case_history')))
+    monkeypatch.setattr(bot, '_safe_kaizen_sync_status', AsyncMock(return_value=None))
+    sent = AsyncMock()
+    store = SimpleNamespace(user_data={})
+    await bot._run_health_analysis(
+        user_id=99999999, chat=SimpleNamespace(send_action=AsyncMock()),
+        send_progress=AsyncMock(), send_result=sent, fail_fn=AsyncMock(), context_store=store,
+    )
+    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(_keyboard_rows(sent.await_args.args[1]), [])
+    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(_keyboard_rows(bot._health_view_payload(store, 'priorities')[1]), [])
+    assert 'From 0 items in Portfolio Guru history' in sent.await_args.args[0]
+    assert 'Reads Kaizen only' not in store.user_data['last_health_report']['views']['about']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error,reason', [
+    (None, 'ok'), (TimeoutError('private details'), 'timeout'),
+    (RuntimeError('private details'), 'other'),
+    (KaizenAuthRequired('private details'), 'auth'),
+    (KaizenSyncDrift('private details'), 'drift'),
+])
+async def test_health_outcome_event_records_delivery_result_once(monkeypatch, tmp_path, error, reason):
+    import bot
+    from funnel_metrics import iter_records
+    monkeypatch.setenv('PORTFOLIO_GURU_FUNNEL_LOG_PATH', str(tmp_path / 'funnel.ndjson'))
+    monkeypatch.setattr(bot, 'get_health_profile', lambda _uid: _profile(99999999, Pathway.training_arcp))
+    monkeypatch.setattr(bot, 'get_training_level', lambda _uid: 'HIGHER')
+    monkeypatch.setattr(bot, '_resolve_health_evidence', AsyncMock(return_value=([], [], 'case_history')))
+    monkeypatch.setattr(bot, '_safe_kaizen_sync_status', AsyncMock(return_value=None))
+    store = SimpleNamespace(user_data={})
+    sent = AsyncMock(side_effect=error)
+    async def deliver(*args):
+        # No success event may be written before Telegram accepts the report.
+        assert not [r for r in iter_records() if r['event'].startswith('health_report_')]
+        await sent(*args)
+    kwargs = dict(user_id=99999999, chat=SimpleNamespace(send_action=AsyncMock()),
+                  send_progress=AsyncMock(), send_result=deliver, fail_fn=AsyncMock(), context_store=store)
+    if error:
+        with pytest.raises(type(error)):
+            await bot._run_health_analysis(**kwargs)
+    else:
+        await bot._run_health_analysis(**kwargs)
+    outcomes = [r for r in iter_records() if r['event'].startswith('health_report_')]
+    assert len(outcomes) == 1
+    assert outcomes[0]['event'] == ('health_report_failed' if error else 'health_report_delivered')
+    assert outcomes[0]['metadata'] == {'reason': reason}
+    assert outcomes[0]['username'] is None
+    assert 'private details' not in str(outcomes[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,reason', [('auth_required', 'auth'), ('timed_out', 'timeout'), ('drift', 'drift'), ('failed', 'other')])
+async def test_health_scan_failure_logs_only_reason_class(monkeypatch, status, reason, tmp_path):
+    import bot
+    from funnel_metrics import iter_records
+    monkeypatch.setenv('PORTFOLIO_GURU_FUNNEL_LOG_PATH', str(tmp_path / 'funnel.ndjson'))
+    monkeypatch.setattr(bot, '_health_needs_kaizen_refresh', AsyncMock(return_value=True))
+    monkeypatch.setattr(bot, '_run_interactive_kaizen_scan', AsyncMock(return_value=SimpleNamespace(status=status)))
+    monkeypatch.setattr(bot, '_safe_kaizen_sync_status', AsyncMock(return_value=None))
+    monkeypatch.setattr(bot, '_format_refresh_portfolio_result', lambda *args: 'Recovery')
+    analysis = AsyncMock()
+    monkeypatch.setattr(bot, '_run_health_analysis', analysis)
+    await bot._run_health_with_optional_kaizen_sync(
+        user_id=99999999, chat=SimpleNamespace(send_action=AsyncMock()),
+        show_scanning=AsyncMock(), send_progress=AsyncMock(), send_result=AsyncMock(),
+        fail_fn=AsyncMock(), show_recovery=AsyncMock(), context_store=SimpleNamespace(user_data={}),
+    )
+    records = list(iter_records())
+    assert len(records) == 1
+    assert records[0]['event'] == 'health_report_failed'
+    assert records[0]['metadata'] == {'reason': reason}
+    analysis.assert_not_awaited()

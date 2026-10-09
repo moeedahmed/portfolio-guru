@@ -797,12 +797,12 @@ def _kaizen_source_for_surface(surface: str) -> str:
 _SEPT_PATTERN = re.compile(r"\bSept\b", re.IGNORECASE)
 
 
-def _parse_kaizen_date(value: Optional[str]) -> date:
+def _parse_kaizen_date(value: Optional[str]) -> Optional[date]:
     if not value:
-        return date.today()
+        return None
     raw = value.strip()
     if not raw:
-        return date.today()
+        return None
     # Kaizen writes both "8 Sep, 2026" and "4 Sept, 2026". "Sept" matches no
     # strptime directive, so it used to fall through to date.today() — silently
     # ageing an old item into a brand new one, which is the one direction a
@@ -823,7 +823,7 @@ def _parse_kaizen_date(value: Optional[str]) -> date:
             return datetime.strptime(snippet, fmt).date()
         except ValueError:
             continue
-    return date.today()
+    return None
 
 
 def evidence_row_to_health_item(row: EvidenceItemRow) -> EvidenceItem:
