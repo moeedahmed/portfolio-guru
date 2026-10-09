@@ -397,9 +397,10 @@ def _sentences(text: str) -> tuple[str, ...]:
     # before a direct question ("I taught handover, why is my account blocked?").
     return tuple(part.strip() for part in re.split(
         r"[?!.;]|\b(?:and|but)\s+(?=(?:how|why|what|when|where|can|could)\b)"
-        # A comma or colon is narrative punctuation unless a question with an
-        # auxiliary and the doctor or their account follows ("..., what was
-        # difficult was IV access" stays one clause).
+        # A comma or colon is narrative punctuation unless a question follows:
+        # one ending in "?", or one about the doctor or their account
+        # ("..., what was difficult was IV access" stays one clause).
+        r"|[,:]\s+(?=(?:how|why|what|when|where|which|who|is|are|do|does|did|can|could|would|should|will|has|have)\b[^,:.;!?]*\?)"
         r"|[,:]\s+(?=(?:(?:how|why|what|when|where)\s+)?"
         r"(?:do|does|did|can|could|would|should|will|is|are|was|were|has|have)(?:n?['’]t)?\s+"
         r"(?:i|you|my|we|our)\b)", text,
