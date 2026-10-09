@@ -332,14 +332,31 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
                 # page-level navigation instead; every hop still goes through this handler.
                 headers = {k: v for k, v in headers.items() if k.lower() not in {"location", "content-length", "content-type"}}
                 headers["Content-Type"] = "text/html; charset=utf-8"
-                body = f"<script>location.replace({json.dumps(location)})</script>".encode()
+                pause = "await window.waitForFakeSaveRedirect();" if parsed.path.startswith("/save/") and getattr(fake, "save_redirect_release", None) else ""
+                body = f"<script>(async () => {{{pause}location.replace({json.dumps(location)})}})()</script>".encode()
                 status = 200
             await request_route.fulfill(status=status, headers=headers, body=body)
+
+        # A fulfilled redirect is a JavaScript hop, not the HTTP navigation
+        # Playwright normally waits for in click(). Pacing sleeps are removed
+        # above, so wait for the actual saved-document page before the filer
+        # reads page.url or begins post-save QA.
+        real_click = Locator.click
+        async def settled_submit(self, **kwargs):
+            action = await self.evaluate("el => el.form && el.type === 'submit' ? (el.getAttribute('formaction') || el.form.getAttribute('action')) : null")
+            result = await real_click(self, **kwargs)
+            if action and action.startswith("/save/"):
+                await self.page.wait_for_url("**/events/fillin/**", wait_until="load")
+            return result
+        monkeypatch.setattr(Locator, "click", settled_submit)
 
         real_new_page = Browser.new_page
         async def routed_page(self, **kwargs):
             kwargs["service_workers"] = "block"
             page = await real_new_page(self, **kwargs)
+            async def wait_for_fake_redirect(_source):
+                await fake.save_redirect_release.wait()
+            await page.expose_binding("waitForFakeSaveRedirect", wait_for_fake_redirect)
             await page.context.route("**/*", route)
             await page.context.route_web_socket("**/*", lambda ws: ws.close())
             return page
@@ -368,6 +385,30 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
         assert fake.submit_clicks == 0, "Draft filing must never send to an assessor"
         assert fake.forbidden_clicks == [], "Draft filing must never submit, sign or delete"
         assert not blocked, f"Unexpected non-fake browser traffic: {blocked}"
+
+
+async def test_serious_incident_save_waits_for_deferred_redirect_before_readback(fake_browser, monkeypatch):
+    """Hold the JS redirect until the save waiter starts; never rely on pacing."""
+    fake, _ = fake_browser
+    fake.save_redirect_release = asyncio.Event()
+    real_wait = Page.wait_for_url
+    async def release_redirect_when_waited(self, url, **kwargs):
+        if url == "**/events/fillin/**":
+            fake.save_redirect_release.set()
+        return await real_wait(self, url, **kwargs)
+    monkeypatch.setattr(Page, "wait_for_url", release_redirect_when_waited)
+    real_verify = filer._verify_entry_saved
+    async def verify_only_saved_page(page, form_type, fields=None):
+        assert fake.save_redirect_release.is_set(), "Post-save verification raced the redirect"
+        assert filer._saved_draft_url(page.url), "Read-back started on the transient redirect page"
+        return await real_verify(page, form_type, fields)
+    monkeypatch.setattr(filer, "_verify_entry_saved", verify_only_saved_page)
+    form_type = "SERIOUS_INC_2021"
+    fields = synthetic_fields(form_type)
+    result = await filer.file_to_kaizen(form_type, fields, USERNAME, PASSWORD, telegram_user_id=99999999)
+    assert result["status"] == "success", result
+    assert result["saved_url"] == result["draft_url"] == fake.drafts[0]["url"]
+    assert fake.drafts[0]["values"] == expected_values(form_type, fields)
 
 
 @pytest.mark.parametrize("form_type", sorted(filer.FORM_FIELD_MAP))

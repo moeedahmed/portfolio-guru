@@ -196,14 +196,19 @@ Only set `TELEGRAM_LIVE_APPROVED` after an already-approved task/card covers thi
 `TELEGRAM_BOT_USERNAME=portfolio_guru_test_bot` and the singleton
 `TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_test_bot`, with the existing approved
 Telethon environment, or use `stage.sh smoke --sha <40hex> --wider`.
-It selects the focused text CBD plus synthetic handwritten-style photo, voice
-and PDF ready-draft-to-Cancel journeys and `/settings` read-only navigation
-(Portfolio defaults, Reminders, Writing style, then Back). Media may use only
-Read text/Use as case and CBD form choice; a missing supervision detail has one
-bounded reply. Ready means the harness classifies a gap-free draft and observes
+It selects dedicated synthetic text CBD, handwritten-style photo, voice and
+PDF journeys: capture → Choose form → CBD choice → preview → change only the
+encounter date using the bot's reply-to-edit route → verify the refreshed date.
+Gathering mode must already be on: a missing Choose form is incomplete proof.
+`/settings` visits Portfolio defaults and its Portfolio, Pathway and Curriculum
+pickers, Reminders, Writing style sources and Manual examples, pressing Back
+from each without choosing values. Kaizen entries sampling is observed but
+never pressed: it automatically builds and activates the writing profile.
+A missing supervision detail has one bounded reply. Ready means the harness classifies a gap-free draft and observes
 exactly the Save to Kaizen boundary payload and safe Cancel control. Save is
 never pressed. Each new journey writes a separate transcript, including failure
-and `/cancel` cleanup. Voice uses local `say` + `ffmpeg`/libopus; unavailable
+and exactly one `/cancel` in `finally`, without a leading reset or Cancel
+button click. Voice uses local `say` + `ffmpeg`/libopus; unavailable
 tools skip with a reason, and skipped/missing journeys fail wider completeness.
 This does not change `--focused-release` or default staging smoke, satisfy the
 whole-bot aggregate, or establish live proof until explicitly run.

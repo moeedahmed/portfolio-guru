@@ -65,9 +65,9 @@ def _run_wider_qa(harness, *, extra=None, flags=("--wider-journeys",)):
 def test_wider_mode_selects_exact_five_journeys(wider_qa_harness):
     result = _run_wider_qa(wider_qa_harness)
     assert result.returncode == 0, result.stdout + result.stderr
-    live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_cbd' in line)
+    live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_text' in line)
     assert live.count('tests/test_e2e.py::') == 5
-    for kind in ('cbd', 'photo', 'voice', 'document'):
+    for kind in ('text', 'photo', 'voice', 'document'):
         assert f'test_e2e_{kind}_ready_draft_to_cancel_journey' in live
     assert 'test_e2e_settings_read_only_journey' in live
     assert 'test_e2e_live.py' not in live

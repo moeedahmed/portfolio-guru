@@ -37,7 +37,7 @@ BOT_USERNAME = telethon_env()["bot_username"]
 # Invented case only. All modalities contain the same complete CBD evidence;
 # the caption contains no case detail, so it cannot mask a failed media read.
 SYNTHETIC_CASE = (
-    "Synthetic training case. Please file a case-based discussion. "
+    "Synthetic training case. "
     "On 17 March 2026 in ED resus I reviewed a 68-year-old adult with chest pain. "
     "I took a focused history and examination, arranged ECG and serial troponins, "
     "and discussed diagnostic uncertainty with my senior registrar. "
@@ -141,6 +141,8 @@ async def _wider_click(client, transcript, message, payload, **expect):
         "DOCUSE|info", "GATHER|done", "FORM|CBD", "FORM|CBD_2021", "FORM|best",
         "ACTION|cancel", "CANCEL|draft", "ACTION|portfolio_defaults",
         "REMIND|menu", "ACTION|voice", "ACTION|settings", "VOICE|back_to_settings",
+        "ACTION|change_level", "ACTION|change_pathway", "ACTION|change_curriculum",
+        "VOICE|path_manual", "VOICE|back_to_choice",
     }, "Protected or unreviewed control"
     button = next((b for row in (message.buttons or []) for b in row if _payload(b) == payload), None)
     assert button is not None, f"Expected safe control {payload} in {button_texts(message)!r}"
@@ -149,6 +151,13 @@ async def _wider_click(client, transcript, message, payload, **expect):
     fingerprint = message_fingerprint(message)
     await button.click()
     return await _wider_wait(client, transcript, f"after:{payload}", before=fingerprint, **expect)
+
+
+async def _wider_before_send(client):
+    # Observe the current bubble without changing bot state. Its fingerprint
+    # also permits a response that edits that same bubble in place.
+    messages = await client.get_messages(BOT_USERNAME, limit=1)
+    return message_fingerprint(messages[0]) if messages else None
 
 
 async def _wider_cleanup(client, transcript, name):
@@ -167,32 +176,46 @@ async def _wider_cleanup(client, transcript, name):
         write_transcript_artifact(transcript, filename=f"portfolio-guru-{name}-transcript.json")
 
 
+def _assert_ready_review(reply):
+    assert classify_post_click_draft_state(reply) == "ready", "Expected ready draft review"
+    buttons = [b for row in (reply.buttons or []) for b in row]
+    assert len(buttons) == 2 and any(_payload(b) == "APPROVE|draft" for b in buttons), "Save boundary not observed"
+    cancel = next((b for b in buttons if _payload(b) in {"ACTION|cancel", "CANCEL|draft"}), None)
+    assert cancel and "cancel" in cancel.text.lower(), "Safe Cancel control missing"
+
+
+def _preview_date(reply):
+    match = re.search(r"^.*?Date:\s*([^\n]+)", (reply.raw_text or "").replace("*", ""), re.M)
+    assert match, "Encounter date missing from preview"
+    return match.group(1).strip()
+
+
 async def _media_ready_draft_to_cancel(client, path, kind):
     assert_live_telegram_guardrails(BOT_USERNAME)
     transcript = []
     try:
-        sent = await client.send_message(BOT_USERNAME, "/cancel")
-        reset = await _wider_wait(client, transcript, "reset:/cancel", min_id=sent.id, expect_text_any=("cancelled",))
-        transcript.append(TelegramExchange(step="upload", action=f"send:{kind}:{path.name}", received="Upload attempted"))
-        sent = await client.send_file(
-            BOT_USERNAME, str(path), voice_note=kind == "voice", force_document=kind == "document",
-            caption=None if kind == "voice" else "Synthetic training note only.",
-        )
-        next_controls = dict(expect_buttons=True, expect_button_any=(
-            "Read text", "Use as case", "Choose form", "CBD", "Case-based discussion",
-            "Best fit", "Save to Kaizen", "Save draft to Kaizen",
-        ))
-        # The bot can edit an earlier progress bubble, or send a fresh one.
-        # Use the last observed fingerprint as the CBD journey does, rather
-        # than requiring every response to have an id newer than the upload.
-        reply = await _wider_wait(client, transcript, f"after:{kind}",
-                                  before=message_fingerprint(reset), **next_controls)
-        # Read-only capture -> default gathering -> CBD choice -> review.
-        # Gathering-off users skip Choose form. No other branch is clicked.
-        for allowed in ({"DOCUSE|info"}, {"GATHER|done"}, {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}):
-            payload = next((_payload(b) for row in (reply.buttons or []) for b in row if _payload(b) in allowed), None)
-            if payload:
-                reply = await _wider_click(client, transcript, reply, payload, **next_controls)
+        before = await _wider_before_send(client)
+        transcript.append(TelegramExchange(step="capture", action=f"send:{kind}", received="Capture attempted"))
+        if kind == "text":
+            sent = await client.send_message(BOT_USERNAME, SYNTHETIC_CASE)
+        else:
+            sent = await client.send_file(
+                BOT_USERNAME, str(path), voice_note=kind == "voice", force_document=kind == "document",
+                caption=None if kind == "voice" else "Synthetic training note only.",
+            )
+        capture_controls = dict(expect_buttons=True, expect_button_any=("Read text", "Use as case", "Choose form", "CBD", "Case-based discussion"))
+        reply = await _wider_wait(client, transcript, f"after:{kind}", before=before, min_id=sent.id, **capture_controls)
+        if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
+            reply = await _wider_click(client, transcript, reply, "DOCUSE|info", **capture_controls)
+        # Choose form must be observed. Gathering-off or a direct-form shortcut
+        # is incomplete proof, rather than a silently shortened journey.
+        reply = await _wider_click(client, transcript, reply, "GATHER|done",
+                                   expect_buttons=True, expect_button_any=("CBD", "Case-based discussion", "Best fit"))
+        form = next((_payload(b) for row in (reply.buttons or []) for b in row
+                     if _payload(b) in {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}), None)
+        assert form, "CBD choice missing"
+        reply = await _wider_click(client, transcript, reply, form,
+                                   expect_buttons=True, expect_button_any=("Save to Kaizen", "Save draft to Kaizen"))
         if classify_post_click_draft_state(reply) == "draft_with_gaps":
             assert re.search(r"still needed:\s*level of supervision\.\s*reply", reply.raw_text or "", re.I), "Unreviewed draft gap"
             detail = "Level of supervision: indirect. I discussed the case with my senior registrar."
@@ -200,12 +223,22 @@ async def _media_ready_draft_to_cancel(client, path, kind):
             await client.send_message(BOT_USERNAME, detail)
             reply = await _wider_wait(client, transcript, f"send:{detail}", before=fingerprint,
                                       expect_buttons=True, expect_button_any=("Save to Kaizen",))
-        assert classify_post_click_draft_state(reply) == "ready", "Expected ready draft review"
-        buttons = [b for row in (reply.buttons or []) for b in row]
-        assert len(buttons) == 2 and any(_payload(b) == "APPROVE|draft" for b in buttons), "Save boundary not observed"
-        cancel = next((b for b in buttons if _payload(b) in {"ACTION|cancel", "CANCEL|draft"}), None)
-        assert cancel and "cancel" in cancel.text.lower(), "Safe Cancel control missing"
-        await _wider_click(client, transcript, reply, _payload(cancel), expect_text_any=("cancelled",))
+        _assert_ready_review(reply)
+        original_date = _preview_date(reply)
+        assert original_date != "18 Mar 2026", "Edit must change the encounter date"
+        # Current bot has no Edit button: its own review hint directs the
+        # doctor to reply with a correction, handled by handle_edit_value.
+        assert "reply" in (reply.raw_text or "").lower(), "Bot's reply-to-edit control missing"
+        correction = "Change only the encounter date to 18 March 2026. Keep all other fields unchanged."
+        sent = await client.send_message(BOT_USERNAME, correction, reply_to=reply.id)
+        refreshed = await _wider_wait(client, transcript, f"edit:{correction}", before=message_fingerprint(reply),
+                                      expect_buttons=True, expect_button_any=("Save to Kaizen",))
+        _assert_ready_review(refreshed)
+        assert _preview_date(refreshed) == "18 Mar 2026", "Encounter date change missing from refreshed preview"
+        if kind == "text":
+            selections = parse_visible_kc_selections(refreshed.raw_text or "")
+            assert len(selections) == len(set(selections)) == 3, "Expected three distinct visible KCs"
+        # Stop at the refreshed preview. No Save or additional Cancel click.
     finally:
         await _wider_cleanup(client, transcript, kind)
 
@@ -230,22 +263,43 @@ async def test_e2e_settings_read_only_journey(telethon_client):
     assert_live_telegram_guardrails(BOT_USERNAME)
     transcript = []
     try:
-        sent = await telethon_client.send_message(BOT_USERNAME, "/cancel")
-        await _wider_wait(telethon_client, transcript, "reset:/cancel", min_id=sent.id, expect_text_any=("cancelled",))
         sent = await telethon_client.send_message(BOT_USERNAME, "/settings")
         settings = await _wider_wait(telethon_client, transcript, "send:/settings", min_id=sent.id,
                                      expect_text_any=("Settings",), expect_buttons=True)
-        for payload, title, back in (
-            ("ACTION|portfolio_defaults", "Portfolio defaults", "ACTION|settings"),
-            ("REMIND|menu", "Reminders", "ACTION|settings"),
-            ("ACTION|voice", "Writing style", "VOICE|back_to_settings"),
+        defaults = await _wider_click(telethon_client, transcript, settings, "ACTION|portfolio_defaults",
+                                       expect_text_any=("Portfolio defaults",), expect_button_any=("Back",))
+        for payload, title in (
+            ("ACTION|change_level", "portfolio"),
+            ("ACTION|change_pathway", "pathway"),
+            ("ACTION|change_curriculum", "curriculum"),
         ):
-            view = await _wider_click(telethon_client, transcript, settings, payload,
-                                      expect_text_any=(title,), expect_buttons=True, expect_button_any=("Back",))
-            assert title.lower() in view.raw_text.lower()
-            settings = await _wider_click(telethon_client, transcript, view, back,
-                                          expect_text_any=("Settings",), expect_buttons=True)
-            assert "settings" in settings.raw_text.lower()
+            picker = await _wider_click(telethon_client, transcript, defaults, payload,
+                                       expect_text_any=(title,), expect_button_any=("Back",))
+            assert title in picker.raw_text.lower()
+            defaults = await _wider_click(telethon_client, transcript, picker, "ACTION|portfolio_defaults",
+                                         expect_text_any=("Portfolio defaults",), expect_button_any=("Back",))
+        settings = await _wider_click(telethon_client, transcript, defaults, "ACTION|settings",
+                                     expect_text_any=("Settings",), expect_buttons=True)
+        reminders = await _wider_click(telethon_client, transcript, settings, "REMIND|menu",
+                                      expect_text_any=("Reminders",), expect_button_any=("Back",))
+        settings = await _wider_click(telethon_client, transcript, reminders, "ACTION|settings",
+                                     expect_text_any=("Settings",), expect_buttons=True)
+        sources = await _wider_click(telethon_client, transcript, settings, "ACTION|voice",
+                                    expect_text_any=("Writing style",), expect_button_any=("Back",))
+        # Manual examples is an empty input view. Kaizen entries is NOT merely
+        # a view: it reads entries and builds/activates a profile on success.
+        # Observe that source, but never click it in a read-only journey.
+        assert {"VOICE|path_manual", "VOICE|path_kaizen"} <= {
+            _payload(b) for row in (sources.buttons or []) for b in row
+        }, "Writing style sources missing"
+        manual = await _wider_click(telethon_client, transcript, sources, "VOICE|path_manual",
+                                   expect_text_any=("Add examples manually",), expect_button_any=("Back",))
+        sources = await _wider_click(telethon_client, transcript, manual, "VOICE|back_to_choice",
+                                    expect_text_any=("Writing style",), expect_button_any=("Back",))
+        settings = await _wider_click(telethon_client, transcript, sources, "VOICE|back_to_settings",
+                                     expect_text_any=("Settings",), expect_buttons=True)
+        assert "settings" in settings.raw_text.lower()
+
     finally:
         await _wider_cleanup(telethon_client, transcript, "settings")
 
@@ -276,6 +330,15 @@ async def test_e2e_start_shows_welcome(telethon_client):
         reply = await conv.get_response()
 
     assert "Portfolio Guru" in reply.raw_text
+
+
+@pytest.mark.asyncio
+async def test_e2e_text_ready_draft_to_cancel_journey(telethon_client):
+    """Capture -> Choose form -> CBD -> review -> reply-to-edit -> review.
+
+    Stop before Save and issue exactly one cleanup /cancel, including failures.
+    """
+    await _media_ready_draft_to_cancel(telethon_client, None, "text")
 
 
 @pytest.mark.asyncio

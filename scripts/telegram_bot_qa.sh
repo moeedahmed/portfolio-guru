@@ -269,7 +269,7 @@ elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
   if [[ "$WIDER_JOURNEYS" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-wider "$PY" -m pytest \
-      tests/test_e2e.py::test_e2e_cbd_ready_draft_to_cancel_journey \
+      tests/test_e2e.py::test_e2e_text_ready_draft_to_cancel_journey \
       tests/test_e2e.py::test_e2e_photo_ready_draft_to_cancel_journey \
       tests/test_e2e.py::test_e2e_voice_ready_draft_to_cancel_journey \
       tests/test_e2e.py::test_e2e_document_ready_draft_to_cancel_journey \
@@ -282,7 +282,7 @@ import sys
 import xml.etree.ElementTree as ET
 cases = ET.parse(sys.argv[1]).findall(".//testcase")
 expected = {
-    "test_e2e_cbd_ready_draft_to_cancel_journey",
+    "test_e2e_text_ready_draft_to_cancel_journey",
     "test_e2e_photo_ready_draft_to_cancel_journey",
     "test_e2e_voice_ready_draft_to_cancel_journey",
     "test_e2e_document_ready_draft_to_cancel_journey",

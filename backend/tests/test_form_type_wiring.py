@@ -670,13 +670,12 @@ _LAT_ED_SHIFT_CASE = (
 )
 
 
-def test_lat_normalise_drops_clinical_setting_without_populating_trainee_post():
-    """clinical_setting must be silently dropped for LAT, not moved to trainee_post.
-
-    Kaizen's trainee_post field expects grade + hospital (e.g. 'ST5 Higher EM, City ED'),
-    not a clinical-setting dropdown value like 'Emergency Department'.
-    """
-    from kaizen_form_filer import normalise_fields_for_deterministic_filing
+@pytest.mark.parametrize("form_type", ["LAT", "LAT_2021"])
+def test_lat_normalise_preserves_unmapped_clinical_setting_without_populating_trainee_post(form_type):
+    """Keep supplied evidence as a reported gap, never as the current post."""
+    from kaizen_form_filer import (
+        FORM_FIELD_MAP, normalise_fields_for_deterministic_filing, unfiled_schema_fields,
+    )
 
     fields_in = {
         "clinical_setting": "Emergency Department",
@@ -684,9 +683,11 @@ def test_lat_normalise_drops_clinical_setting_without_populating_trainee_post():
         "clinical_reasoning": "I allocated roles and escalated bed-state risk to site team.",
         "reflection": "I would close the loop earlier with the nursing coordinator.",
     }
-    result = normalise_fields_for_deterministic_filing("LAT", fields_in)
+    result = normalise_fields_for_deterministic_filing(form_type, fields_in)
 
-    assert "clinical_setting" not in result
+    assert result["clinical_setting"] == fields_in["clinical_setting"]
+    assert "clinical_setting" in unfiled_schema_fields(form_type, result, FORM_FIELD_MAP[form_type])
+    assert fields_in["clinical_setting"] == "Emergency Department"
     assert "trainee_post" not in result
     assert result["leadership_context"] == fields_in["leadership_context"]
     assert "Reflection:" in result["clinical_reasoning"]

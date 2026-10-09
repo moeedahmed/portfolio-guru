@@ -21,7 +21,8 @@ def wider_journey_harness(monkeypatch):
     from tests import test_e2e as journeys
 
     replies, clicks, artifacts = deque(), [], {}
-    client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=1)),
+    client = SimpleNamespace(get_messages=AsyncMock(return_value=[]),
+                             send_message=AsyncMock(return_value=SimpleNamespace(id=1)),
                              send_file=AsyncMock(return_value=SimpleNamespace(id=2)))
 
     def message(text, *controls):
@@ -46,29 +47,42 @@ def wider_journey_harness(monkeypatch):
     return journeys, client, replies, clicks, artifacts, message
 
 
+KC_PREVIEW = "\n• SLO3 — Resuscitation\n  ↳ KC3: assessment\n  ↳ KC5: leadership\n• SLO7 — Complex situations\n  ↳ KC1: communication"
+
+
+def _ready_text(date='17 Mar 2026'):
+    return f'Here is your draft.\n📅 Date: {date}\nReply to change any field.' + KC_PREVIEW
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind,route', [('photo', 'read-form'), ('voice', 'form-gap'), ('document', 'ready')])
-async def test_wider_media_stops_at_ready_draft_and_cancels(wider_journey_harness, tmp_path, kind, route):
+@pytest.mark.parametrize('kind', ['text', 'photo', 'voice', 'document'])
+@pytest.mark.parametrize('gap', [False, True])
+async def test_wider_clinical_edits_a_field_before_cleanup(wider_journey_harness, tmp_path, kind, gap):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
-    replies.append(message('Cancelled'))
-    if route == 'read-form':
+    if kind in {'photo', 'document'}:
         replies.append(message('Read this note?', ('Read text', 'DOCUSE|info')))
-    if route != 'ready':
-        replies.append(message('Forms that fit', ('CBD', 'FORM|CBD')))
-    if route == 'form-gap':
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('Forms that fit', ('CBD', 'FORM|CBD'))])
+    if gap:
         replies.append(message('Draft. Still needed: Level of supervision. Reply with this detail.',
                                ('Save draft to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')))
-    replies.extend([message('Ready draft', ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')),
-                    message('Cancelled after review'), message('Cancelled cleanup')])
+    replies.extend([message(_ready_text(), ('Save to Kaizen', 'APPROVE|draft|abc123'), ('Cancel', 'CANCEL|draft|abc123')),
+                    message(_ready_text('18 Mar 2026'), ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')),
+                    message('Cancelled cleanup')])
     await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
-    assert clicks[-1] == 'ACTION|cancel'
-    assert not any(value.startswith('APPROVE|') for value in clicks)
-    assert client.send_message.call_args_list[-1].args[1] == '/cancel'
-    upload = client.send_file.call_args
-    assert upload.kwargs['voice_note'] == (kind == 'voice')
-    assert upload.kwargs['force_document'] == (kind == 'document')
+    assert clicks == (['DOCUSE|info'] if kind in {'photo', 'document'} else []) + ['GATHER|done', 'FORM|CBD']
+    sends = [call.args[1] for call in client.send_message.call_args_list]
+    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
+    assert sum(value.startswith('Change only the encounter date') for value in sends) == 1
+    assert any(value.startswith('Level of supervision: indirect') for value in sends) == gap
+    if kind == 'text':
+        assert sends[0] == journeys.SYNTHETIC_CASE
+        client.send_file.assert_not_awaited()
+    else:
+        assert client.send_file.call_args.kwargs['voice_note'] == (kind == 'voice')
+        assert client.send_file.call_args.kwargs['force_document'] == (kind == 'document')
     transcript = artifacts[f'portfolio-guru-{kind}-transcript.json']
-    assert any(exchange.received == 'Ready draft' for exchange in transcript)
+    assert any(exchange.action.startswith('edit:') and '18 Mar 2026' in exchange.received for exchange in transcript)
     assert transcript[-1].received == 'Cancelled cleanup'
     assert not replies
 
@@ -125,16 +139,23 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
                       ('🩺 Case-based discussion', 'FORM|CBD_2021'),
                       ('📋 Forms', 'FORM|show_all'), ('❌ Cancel', 'ACTION|cancel'), id=form_id)
     histories.append([choice, progress])
-    review = observed('🩺 Here is your Case-Based Discussion draft:',
+    review = observed(_ready_text(),
                       ('💾 Save to Kaizen', 'APPROVE|draft'), ('❌ Cancel', 'ACTION|cancel'),
                       id=form_id if edit_in_place else form_id + 1)
-    histories.extend([[review, choice], [observed('↩️ Cancelled.', id=30)],
-                      [observed('↩️ Cancelled. Cleanup.', id=40)]])
+    if gathering:
+        refreshed = observed(_ready_text('18 Mar 2026'), ('💾 Save to Kaizen', 'APPROVE|draft'),
+                             ('❌ Cancel', 'ACTION|cancel'), id=review.id if edit_in_place else review.id + 1)
+        histories.extend([[review, choice], [refreshed, review]])
+    histories.append([observed('↩️ Cancelled. Cleanup.', id=40)])
     client.get_messages = AsyncMock(side_effect=histories)
     monkeypatch.setattr(journeys, 'wait_for_matching_message', harness.wait_for_matching_message)
-    await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
+    if gathering:
+        await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
+    else:
+        with pytest.raises(AssertionError, match='GATHER'):
+            await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
     assert clicks == ((['DOCUSE|info'] if kind != 'voice' else [])
-                      + (['GATHER|done'] if gathering else []) + ['FORM|CBD_2021', 'ACTION|cancel'])
+                      + (['GATHER|done', 'FORM|CBD_2021'] if gathering else []))
     assert client.get_messages.call_count == len(histories)
     assert artifacts[f'portfolio-guru-{kind}-transcript.json'][-1].received.endswith('Cleanup.')
 
@@ -151,12 +172,14 @@ async def test_wider_media_failure_retains_transcript_and_cleans_up(wider_journe
     if bad_reply == 'unknown-gap':
         text = 'Still needed: Patient presentation. Reply with this detail.'
         controls[0] = ('Save draft to Kaizen', 'APPROVE|draft')
-    replies.extend([message('Cancelled'), TimeoutError() if bad_reply == 'timeout' else message(text, *controls),
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('Choose CBD', ('CBD', 'FORM|CBD')),
+                    TimeoutError() if bad_reply == 'timeout' else message(text, *controls),
                     message('Cancelled cleanup')])
     with pytest.raises((AssertionError, TimeoutError)):
         await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', 'photo')
-    assert not clicks
-    assert client.send_message.call_args_list[-1].args[1] == '/cancel'
+    assert clicks == ['GATHER|done', 'FORM|CBD']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel']
     assert artifacts['portfolio-guru-photo-transcript.json'][-1].received == 'Cancelled cleanup'
 
 
@@ -167,16 +190,40 @@ async def test_wider_settings_traverses_views_and_back_only(wider_journey_harnes
         return message('Settings', ('Portfolio defaults', 'ACTION|portfolio_defaults'),
                        ('Reminders', 'REMIND|menu'), ('Writing style', 'ACTION|voice'),
                        ('Reset data', 'ACTION|delete'), ('Connect Kaizen', 'ACTION|setup'))
-    replies.extend([message('Cancelled'), settings()])
-    for title, back in [('Portfolio defaults', 'ACTION|settings'), ('Reminders', 'ACTION|settings'),
-                        ('Writing style setup', 'VOICE|back_to_settings')]:
-        replies.extend([message(title, ('Back', back)), settings()])
-    replies.append(message('Cancelled cleanup'))
+    def defaults():
+        return message('Portfolio defaults', ('Portfolio', 'ACTION|change_level'),
+                       ('Pathway', 'ACTION|change_pathway'), ('Curriculum', 'ACTION|change_curriculum'),
+                       ('Back', 'ACTION|settings'))
+    def sources():
+        return message('Writing style setup', ('Manual examples', 'VOICE|path_manual'),
+                       ('Kaizen entries', 'VOICE|path_kaizen'), ('Remove profile', 'VOICE|remove'),
+                       ('Back', 'VOICE|back_to_settings'))
+    replies.extend([settings(), defaults()])
+    for title, option in [('Portfolio', 'SETLEVEL|HIGHER'), ('Pathway', 'PATHWAY_SETTINGS|training'),
+                          ('Curriculum', 'SET_CURRICULUM|2021')]:
+        replies.extend([message(title, ('Change value', option), ('Back', 'ACTION|portfolio_defaults')), defaults()])
+    replies.extend([settings(), message('Reminders', ('On/Off', 'REMIND|toggle'), ('Back', 'ACTION|settings')),
+                    settings(), sources(), message('Add examples manually', ('Back', 'VOICE|back_to_choice')),
+                    sources(), settings(), message('Cancelled cleanup')])
     await journeys.test_e2e_settings_read_only_journey(client)
-    assert clicks == ['ACTION|portfolio_defaults', 'ACTION|settings', 'REMIND|menu', 'ACTION|settings',
-                      'ACTION|voice', 'VOICE|back_to_settings']
+    assert clicks == ['ACTION|portfolio_defaults', 'ACTION|change_level', 'ACTION|portfolio_defaults',
+                      'ACTION|change_pathway', 'ACTION|portfolio_defaults', 'ACTION|change_curriculum',
+                      'ACTION|portfolio_defaults', 'ACTION|settings', 'REMIND|menu', 'ACTION|settings',
+                      'ACTION|voice', 'VOICE|path_manual', 'VOICE|back_to_choice', 'VOICE|back_to_settings']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/settings', '/cancel']
     assert artifacts['portfolio-guru-settings-transcript.json'][-1].received == 'Cancelled cleanup'
     assert not replies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('payload', ['APPROVE|draft', 'ACTION|setup', 'ACTION|delete', 'REMIND|toggle',
+                                     'SETLEVEL|HIGHER', 'PATHWAY_SETTINGS|training', 'SET_CURRICULUM|2021',
+                                     'VOICE|path_kaizen', 'VOICE|remove'])
+async def test_wider_navigation_refuses_value_changes_even_with_safe_label(wider_journey_harness, payload):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    with pytest.raises(AssertionError, match='Protected or unreviewed'):
+        await journeys._wider_click(client, [], message('Settings', ('Back', payload)), payload)
+    assert not clicks
 
 
 def test_wider_synthetic_media_are_deterministic_and_pdf_text_is_readable(tmp_path):
@@ -816,6 +863,51 @@ def test_draft_first_gap_preview_is_a_bounded_live_state():
 def test_gap_preview_classifier_rejects_incomplete_or_conflicting_controls(text, buttons):
     with pytest.raises(AssertionError):
         harness.classify_post_click_draft_state(_FakeMessage(text, buttons))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['text', 'photo', 'voice', 'document'])
+@pytest.mark.parametrize('refreshed', ['unchanged', 'wrong-date', 'missing-controls', 'timeout'])
+async def test_clinical_edit_must_land_in_refreshed_preview(wider_journey_harness, tmp_path, kind, refreshed):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    controls = (('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'CANCEL|draft'))
+    bad = TimeoutError() if refreshed == 'timeout' else message(
+        _ready_text('17 Mar 2026' if refreshed == 'unchanged' else '19 Mar 2026'),
+        *(controls if refreshed != 'missing-controls' else (('Retry', 'ACTION|retry'),)))
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('CBD', ('CBD', 'FORM|CBD')), message(_ready_text(), *controls),
+                    bad, message('Cancelled cleanup')])
+    with pytest.raises((AssertionError, TimeoutError)):
+        await journeys._media_ready_draft_to_cancel(client, tmp_path / 'media', kind)
+    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 1
+    assert clicks == ['GATHER|done', 'FORM|CBD']
+    assert artifacts[f'portfolio-guru-{kind}-transcript.json'][-1].received == 'Cancelled cleanup'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cleanup_failure', [None, 'send', 'wait'])
+async def test_focused_journey_keeps_original_failure_and_cleanup_transcript(wider_journey_harness, cleanup_failure):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('CBD', ('CBD', 'FORM|CBD')), message('Unexpected state', ('Retry', 'ACTION|retry'))])
+    if cleanup_failure == 'send':
+        async def send(target, text, **kwargs):
+            if text == '/cancel':
+                raise TimeoutError('cleanup send failed')
+            from types import SimpleNamespace
+            return SimpleNamespace(id=1)
+        client.send_message.side_effect = send
+    else:
+        replies.append(TimeoutError('cleanup response timed out') if cleanup_failure == 'wait' else message('Cancelled'))
+    with pytest.raises(AssertionError, match='unexpected post-click state') as failure:
+        await journeys.test_e2e_text_ready_draft_to_cancel_journey(client)
+    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 1
+    transcript = artifacts['portfolio-guru-text-transcript.json']
+    if cleanup_failure:
+        assert 'unconfirmed' in transcript[-1].received.lower()
+        assert any('Cleanup unconfirmed' in note for note in failure.value.__notes__)
+    else:
+        assert transcript[-1].received == 'Cancelled'
 
 
 @pytest.mark.asyncio

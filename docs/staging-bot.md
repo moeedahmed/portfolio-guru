@@ -71,8 +71,12 @@ a redacted transcript under staging's `.artifacts/telegram-bot-qa/`.
 This sends test-bot messages when explicitly run; it is never routine CI.
 
 Opt in to broader proof with `scripts/stage.sh smoke --sha <full-40-hex-sha> --wider`.
-This runs the focused CBD plus synthetic photo, OGG/Opus voice and PDF cases to
-ready draft review, then Cancel, and read-only Settings views with Back.
+This runs synthetic text CBD, photo, OGG/Opus voice and PDF cases through
+capture → Choose form → form choice → preview → one encounter-date correction
+via the bot's reply-to-edit route → refreshed preview, then one `/cancel` in
+`finally`. Gathering mode must already be on; a missing Choose form fails proof.
+Settings opens each safe view and picker, then Back. Kaizen writing-style
+sampling is excluded because it automatically builds and activates a profile.
 It never presses Save/Approve/Submit, changes settings or links Kaizen. The
 same test-bot-only target guard and runtime/receipt checks apply. Default smoke
 is unchanged. Voice requires local macOS `say` (Samantha) and `ffmpeg`/libopus;
