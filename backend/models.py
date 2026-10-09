@@ -1,8 +1,28 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+from curriculum import validate_curriculum
 from typing import Optional, List, Literal
 
 
-class CBDData(BaseModel):
+class CurriculumDraft(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def validate_draft_curriculum(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = validate_curriculum(data)
+        if isinstance(data.get("fields"), dict):
+            data["fields"] = validate_curriculum(data["fields"])
+            # Possible KCs are draft metadata, never filing fields.
+            data["fields"].pop("possible_key_capability", None)
+        return data
+
+    def model_copy(self, *, update=None, deep=False):
+        # Pydantic's default copy trusts updates, bypassing model validators.
+        copied = super().model_copy(update=update, deep=deep)
+        return type(self).model_validate(copied.model_dump())
+
+
+class CBDData(CurriculumDraft):
     form_type: Literal["CBD"] = "CBD"
     date_of_encounter: str = ""              # YYYY-MM-DD
     patient_age: Optional[str] = None        # e.g. "45-year-old"
@@ -19,7 +39,7 @@ class CBDData(BaseModel):
     possible_key_capability: Optional[dict] = None  # preview only until the doctor taps Add
 
 
-class FormDraft(BaseModel):
+class FormDraft(CurriculumDraft):
     """Generic draft — holds any form's extracted field values as a flat dict."""
     form_type: str
     fields: dict        # key → extracted value, keyed by schema field key

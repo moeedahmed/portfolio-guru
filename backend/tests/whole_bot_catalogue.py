@@ -65,7 +65,11 @@ def producer_digest():
 # preservation through field edits and active/pending re-analysis. Add remains
 # the sole selection action;
 # existing keyboards, callback payloads and approval ownership are unchanged.
-PRODUCER_DIGEST = '91c7f6b1fd68694bbf43bf21c6eb1bab44e826ffc9f44c2357ec38e72d40f3fb'
+# 9 Oct 2026: reviewed catalogue validation at draft reconstruction and preview;
+# invalid KCs are removed before filing. No keyboard or callback payload changes.
+# 9 Oct 2026: reviewed account/billing topic routing; connection failures retain
+# the existing Connect Kaizen/Settings actions; pricing appears only for billing.
+PRODUCER_DIGEST = 'ac1feea0ee2e29a3f700678c1a6f9f2236b0dab3ec8049953b732ac86f534f23'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|add_possible_kc|*

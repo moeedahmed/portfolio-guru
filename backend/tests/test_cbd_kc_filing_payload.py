@@ -14,11 +14,9 @@ import bot
 from models import CBDData
 from tests.bot_simulator import BotSimulator
 
-KCS = [
-    "SLO3 KC3: Higher SLO3 KC3 (2025 Update)",
-    "SLO3 KC5: Higher SLO3 KC5 (2025 Update)",
-    "SLO7 KC1: Higher SLO7 KC1 (2025 Update)",
-]
+from curriculum import KC_FULL_TEXT
+
+KCS = [KC_FULL_TEXT[code] for code in ("SLO3 KC3", "SLO3 KC5", "SLO7 KC1")]
 
 
 def _cbd_draft() -> CBDData:

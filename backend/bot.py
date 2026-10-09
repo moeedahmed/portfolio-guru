@@ -3,6 +3,7 @@ Portfolio Guru Telegram Bot — v2
 Multimodal input (text/voice/image) with approval flow before filing.
 """
 import asyncio
+from curriculum import validate_curriculum
 import logging
 import os
 import kaizen_offline
@@ -1957,7 +1958,7 @@ def _deserialise_draft(raw):
     if not raw:
         return None
     if isinstance(raw, (CBDData, FormDraft)):
-        return raw
+        return type(raw).model_validate(raw.model_dump())
     t = raw.get("_type")
     if t == "CBD":
         d = {k: v for k, v in raw.items() if k != "_type"}
@@ -6505,6 +6506,7 @@ def _format_draft_preview(
     name_check_degraded: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
+    draft = type(draft).model_validate(draft.model_dump())
     preview_draft = _with_rcem_ai_declaration(draft) if include_safety_layer else draft
     preview = (
         _format_generic_draft(preview_draft)
@@ -7484,6 +7486,7 @@ def _cbd_filing_fields(draft: CBDData) -> dict:
     draft showing SLO3 KC3, SLO3 KC5 and SLO7 KC1 was filed with only two
     boxes ticked, and post-filing QA had no KC list to catch the gap.
     """
+    draft = CBDData.model_validate(draft.model_dump())
     return {
         "date_of_encounter": draft.date_of_encounter,
         "end_date": draft.date_of_encounter,
@@ -7501,6 +7504,10 @@ def _format_curriculum_hierarchy(curriculum_links, key_capabilities) -> str:
     import re as _re
     if not curriculum_links:
         return "  • None"
+
+    checked = validate_curriculum({"curriculum_links": curriculum_links, "key_capabilities": key_capabilities})
+    curriculum_links = checked["curriculum_links"]
+    key_capabilities = checked["key_capabilities"]
 
     # Build a safe display label for each SLO (no underscores that break Markdown).
     # Numbers follow the Kaizen 2025 checkbox scheme used throughout extraction

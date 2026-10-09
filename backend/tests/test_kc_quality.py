@@ -337,18 +337,17 @@ def test_preview_deduplicates_repeated_kc_entries():
     assert out.count("↳ KC1:") == 1
 
 
-def test_preview_fallback_truncation_is_clean_for_unknown_kc():
+def test_preview_drops_unknown_kc():
     from bot import _format_curriculum_hierarchy
 
     out = _format_curriculum_hierarchy(
         ["SLO1"],
         ["SLO1 KC9: be expert in some newly added capability that the curated map does not yet know about and keeps going (2025 Update)"],
     )
-    # Unknown code falls back to a cleaned truncation: no "(2025 Update)" noise,
-    # no trailing conjunction, leading filler stripped.
+    # An unknown catalogue identity is never presented as a curriculum link.
     assert "(2025 Update)" not in out
     assert "be expert in" not in out
-    assert "↳ KC9:" in out
+    assert "KC9" not in out
 
 
 # --- Post-save confirmation: never leak raw internal KC/tag labels ---
@@ -921,7 +920,8 @@ async def test_possible_generic_kc_cannot_be_silently_promoted_by_existing_bread
                "possible_key_capability": {**_possible_kc(), "capability": "SLO1 KC1"}}
     with patch("extractor._generate", AsyncMock(return_value=json.dumps(payload))):
         draft = await extract_form_data(POSSIBLE_CASE, "TEACH")
-    assert draft.fields["key_capabilities"] == ["SLO4 KC1"]
+    from curriculum import KC_FULL_TEXT
+    assert draft.fields["key_capabilities"] == [KC_FULL_TEXT["SLO4 KC1"]]
     assert draft.possible_key_capability["capability"].startswith("SLO1 KC1:")
 
 
@@ -1156,3 +1156,120 @@ def test_unconfirmed_possible_kc_survives_cleared_generic_selection(selection):
     updated = preserve_unconfirmed_possible_kc(previous, previous.model_copy(update={'fields': {'key_capabilities': selection}}))
     assert updated.fields['key_capabilities'] == []
     assert updated.possible_key_capability == offered
+
+
+# 2026-10-09: every draft boundary rejects invented catalogue identities.
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS', 'REFLECT_LOG', 'QIAT', 'MINI_CEX'])
+@pytest.mark.asyncio
+async def test_unknown_curriculum_never_reaches_extracted_draft_or_preview(form_type, caplog):
+    from extractor import extract_form_data, KC_FULL_TEXT
+    from bot import _format_draft_preview
+
+    payload = {
+        'key_capabilities': ['SLO99 KC99: invented curriculum', 'SLO1 KC99: invented leaf', 'SLO7 KC1'],
+        'curriculum_links': ['SLO99', 'SLO1', 'SLO7'],
+        'possible_key_capability': {'capability': 'SLO99 KC99: invented curriculum', 'evidence': 'Synthetic evidence'},
+    }
+    with patch('extractor._generate', new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data('Synthetic evidence only.', form_type)
+    fields = draft.fields if hasattr(draft, 'fields') else draft.model_dump()
+    assert KC_FULL_TEXT['SLO7 KC1'] in fields['key_capabilities']
+    assert all(kc in KC_FULL_TEXT.values() for kc in fields['key_capabilities'])
+    assert set(fields['curriculum_links']) == {kc.split()[0] for kc in fields['key_capabilities']}
+    assert 'SLO1' not in fields['curriculum_links']
+    assert draft.possible_key_capability is None
+    assert 'SLO99' not in _format_draft_preview(draft)
+    assert 'invented' not in caplog.text
+    assert 'Dropped invalid curriculum capabilities: count=' in caplog.text
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+def test_curriculum_reconstruction_and_edit_boundaries(form_type):
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _format_draft_preview
+    bad = {'key_capabilities': ['SLO99 KC99: invented curriculum'], 'curriculum_links': ['SLO99']}
+    data = dict(bad, possible_key_capability={'capability': 'SLO99 KC99'})
+    raw = dict(data, _type='CBD') if form_type == 'CBD' else dict(_type='FORM', form_type=form_type, fields=bad, possible_key_capability=data['possible_key_capability'])
+    draft = _deserialise_draft(raw)
+    edited = draft.model_copy(update=data if form_type == 'CBD' else dict(fields=bad, possible_key_capability=data['possible_key_capability']))
+    fields = edited.fields if isinstance(edited, FormDraft) else edited.model_dump()
+    assert fields['key_capabilities'] == []
+    assert fields['curriculum_links'] == []
+    assert edited.possible_key_capability is None
+    # Mutable legacy drafts must also be safe at the preview boundary.
+    if isinstance(edited, CBDData):
+        edited.key_capabilities.append('SLO99 KC99: invented curriculum')
+        edited.curriculum_links.append('SLO99')
+    else:
+        edited.fields.update(bad)
+    assert 'SLO99' not in _format_draft_preview(edited)
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_filing_boundary_drops_unknown_kcs_and_possible_metadata(form_type):
+    from filer_router import route_filing
+    fields = {'key_capabilities': ['SLO99 KC99: invented curriculum'], 'curriculum_links': ['SLO99'],
+              'possible_key_capability': {'capability': 'SLO7 KC1'}}
+    filed = AsyncMock(return_value={'status': 'failed'})
+    with patch('filer_router._route_filing_unbounded', new=filed), patch('filer_router.kaizen_offline.enabled', return_value=False):
+        await route_filing('kaizen', form_type, fields, {}, curriculum_links=['SLO99'])
+    assert filed.await_args.kwargs['fields']['key_capabilities'] == []
+    assert filed.await_args.kwargs['curriculum_links'] == []
+    assert 'possible_key_capability' not in filed.await_args.kwargs['fields']
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+def test_valid_legacy_slo_only_drafts_survive_copy_restore_and_preview(form_type):
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _serialise_draft, _format_draft_preview
+    fields = {'curriculum_links': ['SLO7', 'SLO99']}
+    draft = CBDData(**fields) if form_type == 'CBD' else FormDraft(form_type=form_type, fields=fields)
+    copied = draft.model_copy()
+    restored = _deserialise_draft(_serialise_draft(copied))
+    result = restored.model_dump() if form_type == 'CBD' else restored.fields
+    assert result['curriculum_links'] == ['SLO7']
+    assert 'SLO7' in _format_draft_preview(restored)
+    assert 'SLO99' not in _format_draft_preview(restored)
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_filing_keeps_valid_selection_while_dropping_invented_kc(form_type):
+    from curriculum import KC_FULL_TEXT
+    from filer_router import route_filing
+    fields = {'key_capabilities': ['SLO7 KC1: wrong wording', 'SLO99 KC99: invented'],
+              'curriculum_links': ['SLO99']}
+    filed = AsyncMock(return_value={'status': 'failed'})
+    with patch('filer_router._route_filing_unbounded', new=filed), patch('filer_router.kaizen_offline.enabled', return_value=False):
+        await route_filing('kaizen', form_type, fields, {}, curriculum_links=['SLO99'])
+    assert filed.await_args.kwargs['fields']['key_capabilities'] == [KC_FULL_TEXT['SLO7 KC1']]
+    assert filed.await_args.kwargs['curriculum_links'] == ['SLO7']
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_unknown_leaf_does_not_leave_a_broad_parent_link(form_type):
+    from extractor import extract_form_data
+    payload = {'key_capabilities': ['SLO1 KC99: invented curriculum'], 'curriculum_links': ['SLO1']}
+    with patch('extractor._generate', new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data('Synthetic evidence only.', form_type)
+    fields = draft.fields if hasattr(draft, 'fields') else draft.model_dump()
+    assert fields['key_capabilities'] == []
+    assert fields['curriculum_links'] == []
+
+
+@pytest.mark.asyncio
+async def test_review_prompt_revalidates_curriculum_fields():
+    from extractor import review_draft
+    generate = AsyncMock(return_value='{}')
+    with patch('extractor._generate', generate):
+        await review_draft('TEACH', {
+            'key_capabilities': ['SLO99 KC99: invented curriculum', 'SLO7 KC1'],
+            'curriculum_links': ['SLO99'],
+            'possible_key_capability': {'capability': 'SLO99 KC99'},
+        }, 'Synthetic evidence only.')
+    prompt = generate.await_args.args[0]
+    assert 'SLO99' not in prompt
+    assert 'invented curriculum' not in prompt
+    assert 'SLO7 KC1' in prompt

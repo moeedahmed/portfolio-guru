@@ -59,11 +59,11 @@ def test_edit_request_extracts_edit_action_and_target_draft():
     }
 
 
-def test_setup_or_credentials_routes_separately_from_billing():
+def test_reconnecting_an_existing_account_routes_to_account_help():
     result = route_message("I need to reconnect my Kaizen login credentials")
 
-    assert result.intent == ConversationalIntent.SETUP_OR_CREDENTIALS
-    assert result.signals == {"action": "setup_credentials"}
+    assert result.intent == ConversationalIntent.ACCOUNT_OR_BILLING
+    assert result.signals == {"action": "setup_credentials", "topic": "account"}
 
 
 @pytest.mark.parametrize("text", [
@@ -171,13 +171,13 @@ def test_result_rejects_invalid_confidence():
         RouterResult(intent=ConversationalIntent.UNKNOWN, confidence=1.2)
 
 
-def test_product_problem_question_after_reflection_word_routes_to_setup():
-    assert route_message("I had a problem saving my reflection. How do I reconnect my account?").intent == ConversationalIntent.SETUP_OR_CREDENTIALS
+def test_product_problem_question_after_reflection_word_routes_to_account():
+    assert route_message("I had a problem saving my reflection. How do I reconnect my account?").intent == ConversationalIntent.ACCOUNT_OR_BILLING
 
 
 @pytest.mark.parametrize(("message", "expected_intent"), [
     ("I had a problem saving my reflection. Why is my account blocked?", ConversationalIntent.ACCOUNT_OR_BILLING),
-    ("I had a problem saving my reflection. How do I reconnect my account?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("I had a problem saving my reflection. How do I reconnect my account?", ConversationalIntent.ACCOUNT_OR_BILLING),
     ("I taught handover communication. Can you help with a reflection on our plan?", ConversationalIntent.NEW_CASE),
     ("File this 45F sepsis case as a CBD in Kaizen. I reviewed the management plan.", ConversationalIntent.FILE_TO_KAIZEN),
     ("I taught handover communication; login access delayed the session", ConversationalIntent.NEW_CASE),
@@ -185,15 +185,16 @@ def test_product_problem_question_after_reflection_word_routes_to_setup():
     ("I taught handover communication. How does this bot work?", ConversationalIntent.HELP_OR_CAPABILITY),
     ("I taught handover communication; why is my account blocked", ConversationalIntent.ACCOUNT_OR_BILLING),
     ("I taught handover communication. Is my login encrypted?", ConversationalIntent.SETUP_OR_CREDENTIALS),
-    ("I taught handover communication; my account is blocked", ConversationalIntent.NEW_CASE),
+    # A direct own-account complaint wins even without a question mark.
+    ("I taught handover communication; my account is blocked", ConversationalIntent.ACCOUNT_OR_BILLING),
     ("I taught handover communication. Can you help with a reflection about the login delay?", ConversationalIntent.NEW_CASE),
     ("I taught handover communication. How do I save my draft in Kaizen?", ConversationalIntent.HELP_OR_CAPABILITY),
     ("I taught how to reconnect an account during handover", ConversationalIntent.NEW_CASE),
     ("I taught why login access was delayed during handover", ConversationalIntent.NEW_CASE),
     ("I taught which account to use during handover", ConversationalIntent.NEW_CASE),
-    ("I taught handover and how do I reconnect my account?", ConversationalIntent.SETUP_OR_CREDENTIALS),
-    ("Can you help reconnect my account to save this reflection?", ConversationalIntent.SETUP_OR_CREDENTIALS),
-    ("I taught handover. Can you help reconnect my account to save my reflection?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("I taught handover and how do I reconnect my account?", ConversationalIntent.ACCOUNT_OR_BILLING),
+    ("Can you help reconnect my account to save this reflection?", ConversationalIntent.ACCOUNT_OR_BILLING),
+    ("I taught handover. Can you help reconnect my account to save my reflection?", ConversationalIntent.ACCOUNT_OR_BILLING),
 ])
 def test_question_subject_and_activity_keep_product_help_separate_from_cases(message, expected_intent):
     assert route_message(message).intent == expected_intent
@@ -201,6 +202,7 @@ def test_question_subject_and_activity_keep_product_help_separate_from_cases(mes
 
 @pytest.mark.parametrize("message", [
     "What is our management plan?", "Can you help with a reflection on our plan?", "plan",
+    "Can you change the plan?", "Can you change our plan?", "What is the escalation plan?",
 ])
 def test_bare_plan_does_not_route_to_billing(message):
     assert route_message(message).intent != ConversationalIntent.ACCOUNT_OR_BILLING
@@ -253,3 +255,93 @@ async def test_case_form_choice_renders_valid_model_codes_with_fixed_copy(questi
     generate.assert_awaited_once()
     assert 'Case-Based Discussion: clinical reasoning and management' in answer
     assert 'Direct Observation of Procedural Skills: an observed procedure' in answer
+
+
+# The ordering is the contract: filing, direct product help, then narrated evidence.
+ROUTING_PRECEDENCE_CASES = [
+    ("Could you save this draft?", "filing"),
+    ("File this 45F sepsis case as a CBD in Kaizen. I reviewed the management plan.", "filing"),
+    ("File this 45F sepsis case as a CBD in Kaizen. I reviewed the escalation card.", "filing"),
+    ("Save to Kaizen", "filing"),
+    ("Please save this reflection about account access", "filing"),
+    ("Log this reflection: I taught handover communication", "filing"),
+    ("Can you file this as a DOPS?", "filing"),
+    ("I taught handover. Please save this draft.", "filing"),
+    ("I had a problem saving my reflection. Why has my account been blocked?", "account"),
+    ("I had a problem saving my reflection. Why is my account blocked?", "account"),
+    ("I had a problem saving my reflection. How do I reconnect my account?", "account"),
+    ("I can't log in", "account"),
+    ("I cannot access my account", "account"),
+    ("My account is blocked", "account"),
+    ("Saving my reflection keeps failing", "account"),
+    ("I had a problem saving my reflection", "account"),
+    ("I taught handover. My account is blocked", "account"),
+    ("I taught handover; why has my account been blocked", "account"),
+    ("I taught handover. How do I reconnect my account?", "account"),
+    ("I taught handover. Why can't I log in?", "account"),
+    ("Can you help reconnect my account to save this reflection?", "account"),
+    ("I taught handover communication. Can you help with a short reflection about account access?", "case"),
+    ("I taught handover communication. Can you help with a reflection on our plan?", "case"),
+    ("I taught handover communication; login access delayed the session", "case"),
+    ("Synthetic training evidence only. On 17 March 2026. I reflected on a simulated ED handover where task ownership was unclear. I clarified roles with the team and repeated the plan. Reflection: closed-loop communication reduced confusion; I will confirm ownership at future handovers.", "case"),
+    ("I reviewed the management plan for a patient with sepsis", "case"),
+    ("I reviewed the escalation plan for a patient in ED", "case"),
+    ("I taught handover and repeated our plan", "case"),
+    ("I taught handover and repeated the plan", "case"),
+    ("I reviewed the escalation card with the patient", "case"),
+    ("I taught handover. Can you draft a brief reflection on login access?", "case"),
+    ("I taught handover. Can you help me write a short reflection about billing?", "case"),
+    ("I reflected on a handover where my account was blocked", "case"),
+    ("I taught how to reconnect an account during handover", "case"),
+    ("I taught why login access was delayed during handover", "case"),
+    ("I taught handover. Can you help me reflect on the account access delay?", "case"),
+    ("I taught handover. Could you help me draft an educational activity about billing?", "case"),
+    ("I had a problem saving ultrasound images during the procedure", "case"),
+    ("What plan am I on?", "billing"),
+    ("How do I change my plan?", "billing"),
+    ("How much does it cost?", "billing"),
+    ("Change my plan", "billing"),
+    ("Upgrade my plan", "billing"),
+    ("Cancel my plan", "billing"),
+    ("What is the plan price?", "billing"),
+    ("What does the paid plan include?", "billing"),
+    ("What does the free plan include?", "billing"),
+    ("I taught handover. What plan am I on?", "billing"),
+    ("I taught handover. Why did my subscription renew?", "billing"),
+    ("I taught handover. My payment failed", "billing"),
+    ("Can I change my payment card?", "billing"),
+    ("How do I save my draft in Kaizen?", "help"),
+    ("I taught handover. How does this bot work?", "help"),
+]
+
+
+@pytest.mark.parametrize(("message", "expected"), ROUTING_PRECEDENCE_CASES)
+def test_sentence_routing_precedence_table(message, expected):
+    intents = {
+        "filing": ConversationalIntent.FILE_TO_KAIZEN,
+        "account": ConversationalIntent.ACCOUNT_OR_BILLING,
+        "setup": ConversationalIntent.SETUP_OR_CREDENTIALS,
+        "billing": ConversationalIntent.ACCOUNT_OR_BILLING,
+        "case": ConversationalIntent.NEW_CASE,
+        "help": ConversationalIntent.HELP_OR_CAPABILITY,
+    }
+    result = route_message(message)
+    assert result.intent is intents[expected]
+    if expected in {"account", "billing"}:
+        assert result.signals["topic"] == expected
+
+
+@pytest.mark.parametrize(("message", "expected"), [
+    row for row in ROUTING_PRECEDENCE_CASES if row[1] in {"account", "setup", "billing"}
+])
+@pytest.mark.parametrize("draft_has_gaps", [False, True])
+def test_product_help_with_open_draft_never_enriches(message, expected, draft_has_gaps):
+    from workflow_turn_policy import WorkflowPhase, WorkflowTurnKind, decide_workflow_turn
+
+    decision = decide_workflow_turn(
+        message, phase=WorkflowPhase.DRAFT_OPEN,
+        legacy_intent="edit_detail", draft_has_gaps=draft_has_gaps,
+    )
+    assert decision.kind is WorkflowTurnKind.SIDE_QUESTION
+    assert decision.state_action is None
+    assert decision.case_detail is None

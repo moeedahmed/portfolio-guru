@@ -94,3 +94,33 @@ def test_high_risk_intents_use_static_copy(intent):
 )
 def test_low_risk_guidance_intents_allow_controlled_flexible_copy(intent):
     assert copy_mode_for_intent(intent) == "controlled-flexible"
+
+
+@pytest.mark.parametrize("text", [
+    "I can't log in",
+    "I had a problem saving my reflection. How do I reconnect my account?",
+])
+def test_existing_account_connection_help_keeps_setup_actions_without_pricing(text):
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    assert reply.body == render_message("kaizen_setup_guide")
+    assert [action.action_id for action in reply.actions] == ["ACTION|setup", "ACTION|settings"]
+    assert "free and unlimited" not in reply.full_text()
+
+
+@pytest.mark.parametrize("text", [
+    "Why has my account been blocked?",
+    "I had a problem saving my reflection. Why is my account blocked?",
+    "Saving my reflection keeps failing",
+])
+def test_account_help_never_answers_with_plan_or_price(text):
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    assert "account" in reply.full_text().lower()
+    assert "free and unlimited" not in reply.full_text()
+    assert "£" not in reply.full_text()
+
+
+@pytest.mark.parametrize("text", ["What plan am I on?", "How do I change my plan?", "How much does it cost?"])
+def test_billing_help_retains_plan_summary(text, monkeypatch):
+    monkeypatch.setattr("channel_reply_policy.payments_enabled", lambda: False)
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    assert "free and unlimited" in reply.full_text()
