@@ -592,7 +592,6 @@ async def test_login_journey_start_share_login_to_best_fit(login_journey):
     await connected_case(j)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="First case before linking is discarded; setup ends at welcome rather than resuming Best fit")
 async def test_login_journey_first_case_continues_after_linking(login_journey):
     j = login_journey
     await password_choice(j, first_case=True)
@@ -651,9 +650,7 @@ async def test_login_journey_email_first_message_connects(login_journey):
 
 @pytest.mark.parametrize("landing", [
     "https://auth.kaizenep.com/verification",
-    pytest.param("https://kaizenep.com/welcome", marks=pytest.mark.xfail(
-        strict=True, raises=AssertionError,
-        reason="_login accepts any kaizenep.com path; /welcome is falsely declared connected (portfolio unknown)")),
+    "https://kaizenep.com/welcome",
 ])
 async def test_login_journey_unexpected_sign_in_page_refuses_success(login_journey, landing):
     j = login_journey

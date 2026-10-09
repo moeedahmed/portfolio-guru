@@ -9,11 +9,12 @@ many taps, and the bot confirms the connection by itself.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from telegram import Message
+from telegram import Chat, Message
 from telegram.ext import CallbackContext
 
 import bot
@@ -61,9 +62,13 @@ def harness(monkeypatch):
 
     async def send_message(_self, chat_id=None, text="", **kwargs):
         outbox.append(("send", text, kwargs.get("reply_markup")))
-        message = MagicMock(spec=Message)
-        message.message_id = 5000 + len(outbox)
-        message.chat_id = chat_id
+        chat = Chat(chat_id, "private")
+        chat.set_bot(_self)
+        message = Message(
+            5000 + len(outbox), datetime.now(timezone.utc), chat,
+            from_user=BOT_USER, text=text,
+        )
+        message.set_bot(_self)
         return message
 
     async def edit_message_text(_self, text="", **kwargs):
@@ -361,3 +366,78 @@ async def test_a_rejected_login_without_the_password_free_option_offers_cancel_o
     _, text, markup = harness.outbox[-1]
     assert "didn't accept that email and password" in text
     assert _buttons(markup) == [("❌ Cancel", "ACTION|cancel")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["hst", "unknown"])
+@pytest.mark.parametrize("source", ["case", "setup"])
+async def test_pending_case_after_passwordless_watch_has_working_best_fit(harness, monkeypatch, role, source):
+    import mobile_kaizen_handoff
+    from models import FormTypeRecommendation
+
+    case = "Synthetic scenario: I assessed a fictional adult with chest pain and discussed the ECG and escalation with my supervisor."
+    monkeypatch.setattr(mobile_kaizen_handoff, "connect_link_status", lambda _: "complete")
+    monkeypatch.setattr(bot, "_probe_kept_kaizen_session", AsyncMock(return_value=role))
+    monkeypatch.setattr(bot.kaizen_connection, "mark_passwordless", lambda _: harness.connection.update(state="passwordless"))
+    monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=[
+        FormTypeRecommendation(form_type="CBD", rationale="Synthetic discussion", uuid=bot.FORM_UUIDS["CBD"]),
+    ]))
+    # Stop at the existing missing-detail boundary after the form is chosen.
+    gate = AsyncMock(return_value=bot.AWAIT_CASE_INPUT)
+    monkeypatch.setattr(bot, "_essentials_gate_before_draft", gate)
+    await harness.app.initialize()
+    try:
+        await harness.feed(make_text_update(case))
+        if source == "setup":
+            await harness.feed(make_command_update("setup"))
+        await harness.feed(make_callback_update("ACTION|connect_passwordless"))
+        job = harness.app.job_queue.get_jobs_by_name(f"pwl-watch-{TEST_USER.id}")[0]
+        await bot._passwordless_watch_job(CallbackContext.from_job(job, harness.app))
+        if role == "unknown":
+            await harness.feed(make_callback_update("SETLEVEL|HIGHER"))
+        assert "Best fit:" in harness.outbox[-1][1]
+        data = harness.app.user_data[TEST_USER.id]
+        assert data["case_text"] == case
+        choice = make_callback_update("FORM|best")
+        choice.callback_query.message._unfreeze()
+        choice.callback_query.message.message_id = data["last_bot_msg_id"]
+        await harness.feed(choice)
+        assert data["chosen_form"] == "CBD"
+        gate.assert_awaited_once()
+        case_conv = next(h for h in harness.app.handlers[0] if getattr(h, "name", None) == "case_conv")
+        assert case_conv._conversations[(TEST_USER.id, TEST_USER.id)] == bot.AWAIT_CASE_INPUT
+    finally:
+        await harness.app.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked", ["not_connected", "no_consent", "pending_setup", "old_message", "no_resume", "reset"])
+async def test_setup_form_reentry_refuses_unready_or_old_buttons(harness, monkeypatch, blocked):
+    monkeypatch.setattr(bot.consent, "has_current_consent", AsyncMock(return_value=blocked != "no_consent"))
+    harness.connection["state"] = None if blocked == "not_connected" else "passwordless"
+    extraction = AsyncMock(side_effect=AssertionError("Extraction must not run"))
+    monkeypatch.setattr(bot, "_analyse_selected_form", extraction)
+    monkeypatch.setattr(bot, "_essentials_gate_before_draft", AsyncMock(return_value=None))
+    update = make_callback_update("FORM|CBD")
+    message_id = update.callback_query.message.message_id
+    data = harness.app.user_data[TEST_USER.id]
+    data.update({
+        "case_text": "Synthetic fictional chest pain case, discussed with my supervisor.",
+        "_setup_pending_case": blocked == "pending_setup",
+        "_setup_form_reentry": (TEST_USER.id, message_id + (blocked == "old_message")),
+        "last_bot_msg_id": message_id,
+        "last_bot_chat_id": TEST_USER.id,
+    })
+    if blocked == "no_resume":
+        data.pop("_setup_form_reentry")
+    if blocked == "reset":
+        data.clear()
+    await harness.app.initialize()
+    try:
+        await harness.feed(update)
+        extraction.assert_not_awaited()
+        assert "chosen_form" not in data
+        case_conv = next(h for h in harness.app.handlers[0] if getattr(h, "name", None) == "case_conv")
+        assert (TEST_USER.id, TEST_USER.id) not in case_conv._conversations
+    finally:
+        await harness.app.shutdown()

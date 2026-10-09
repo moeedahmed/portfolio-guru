@@ -3193,6 +3193,12 @@ async def _send_start_setup_messages(update: Update, context: ContextTypes.DEFAU
 
 async def _prompt_implicit_kaizen_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+    # Keep the first text case unprocessed until connection and consent finish.
+    case_text = (getattr(update.message, "text", None) or "").strip()
+    if case_text:
+        context.user_data["case_text"] = case_text
+        context.user_data["_setup_pending_case"] = True
+    context.user_data["_setup_state_hint"] = "username"
     # No Cancel button here: this prompt fires when a disconnected user sends a
     # case/message (e.g. after /reset), so entering a Kaizen username/email is
     # the only usable next step. A Cancel would just loop back to the same
@@ -5134,6 +5140,7 @@ _FUNNEL_METADATA_KEYS = frozenset({
     "has_missing",
     "tier",
     "reason",
+    "method",
     # Health interaction telemetry is structural only. Values at each call
     # site are bounded pane/queue names or page indexes. The chosen review
     # month is deliberately not retained in analytics.
@@ -7725,6 +7732,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # === SETUP FLOW ===
 
+async def _answer_connect_query(query, *args, **kwargs) -> None:
+    """An expired callback acknowledgement must not abort connecting Kaizen."""
+    try:
+        await query.answer(*args, **kwargs)
+    except BadRequest as exc:
+        error = str(exc).lower()
+        if "query is too old" not in error and "query id is invalid" not in error:
+            raise
+
+
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Redirect to DM if in a group chat
     chat = update.effective_chat
@@ -7736,7 +7753,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             parse_mode="Markdown"
         )
         if update.callback_query:
-            await update.callback_query.answer()
+            await _answer_connect_query(update.callback_query)
         return ConversationHandler.END
 
     query = update.callback_query
@@ -7744,13 +7761,15 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         active_anchor = context.user_data.get("_flow_anchor_setup")
         setup_state = context.user_data.get("_setup_state_hint")
         if active_anchor and setup_state == "username":
-            await query.answer("I'm already waiting for your Kaizen email.")
+            await _answer_connect_query(query, "I'm already waiting for your Kaizen email.")
             await _retire_clicked_keyboard(query)
             return AWAIT_USERNAME
         if active_anchor and setup_state == "password" and context.user_data.get("setup_username"):
-            await query.answer("I'm already waiting for your Kaizen password.")
+            await _answer_connect_query(query, "I'm already waiting for your Kaizen password.")
             await _retire_clicked_keyboard(query)
             return AWAIT_PASSWORD
+
+    context.user_data.pop("_connect_method", None)
 
     # /setup command guard: connected users get settings; explicit button
     # clicks (Kaizen login / Connect Kaizen) always start setup.
@@ -7763,7 +7782,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     _flow_done(context, "setup")  # fresh start — drop any stale anchor
     in_place = False
     if query:
-        await query.answer()
+        await _answer_connect_query(query)
         # Settings turns into the connect step in place, so the sign-in is one
         # message from the tap to connected. Buttons on other messages (a
         # draft's Reconnect, say) keep that message and start a new one below.
@@ -7828,7 +7847,7 @@ async def setup_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if _looks_like_case_not_credential(text, min_words=8, min_chars=60):
         return await _leave_setup_for_case(update, context)
     deleted = await _delete_typed_setup_reply(update)
-    if "@" not in text or "." not in text:
+    if not _valid_setup_email(text):
         send = _flow_edit if deleted else _flow_msg
         await send(update, context, "⚠️ That doesn't look like an email. What's your Kaizen username?", flow_key="setup")
         return AWAIT_USERNAME
@@ -7839,6 +7858,10 @@ async def _prompt_kaizen_password(
     update: Update, context: ContextTypes.DEFAULT_TYPE, username: str, *, in_place: bool = False
 ) -> int:
     _clear_setup_retry_credentials(context)
+    if context.user_data.get("_connect_method") != "password":
+        _remember_audit_user(context, update)
+        _track_funnel_event(context, "connect_method_chosen", method="password")
+    context.user_data["_connect_method"] = "password"
     context.user_data["setup_username"] = username
     context.user_data["_setup_state_hint"] = "password"
     send = _flow_edit if in_place else _flow_msg
@@ -7853,7 +7876,23 @@ async def _prompt_kaizen_password(
     return AWAIT_PASSWORD
 
 
-_EMAIL_PATTERN = re.compile(r"(?<![A-Z0-9._%+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![A-Z0-9._%+-])", re.IGNORECASE)
+_EMAIL_PATTERN = re.compile(r"(?<![A-Z0-9._%+@-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![A-Z0-9._%+@-])", re.IGNORECASE)
+
+
+def _valid_setup_email(text: str) -> bool:
+    if len(text) > 254 or not _EMAIL_PATTERN.fullmatch(text):
+        return False
+    local, domain = text.rsplit("@", 1)
+    return (
+        len(local) <= 64
+        and not local.startswith(".")
+        and not local.endswith(".")
+        and ".." not in local
+        and all(
+            label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-")
+            for label in domain.split(".")
+        )
+    )
 
 
 def _extract_setup_email_candidate(text: str) -> str | None:
@@ -7870,6 +7909,8 @@ def _extract_setup_email_candidate(text: str) -> str | None:
     if len(matches) != 1:
         return None
     email = matches[0]
+    if not _valid_setup_email(email):
+        return None
     lowered = stripped.lower()
     credential_words = {"kaizen", "login", "username", "email", "connect", "reconnect"}
     if stripped == email or any(word in lowered for word in credential_words):
@@ -8088,6 +8129,46 @@ async def _complete_setup_login(
     return await _finish_setup_after_connect(update, context, login_ok)
 
 
+async def _resume_setup_case(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not context.user_data.get("_setup_pending_case"):
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+    if not _kaizen_connected(user_id) or not await consent.has_current_consent(user_id):
+        return ConversationHandler.END
+    context.user_data.pop("_setup_pending_case", None)
+    case_text = context.user_data.get("case_text", "")
+    if not case_text:
+        return ConversationHandler.END
+    # A passwordless watch has no incoming Message; use a fresh chat message.
+    message = update.effective_message
+    if message is None:
+        message = await update.effective_chat.send_message(CAPTURED_ACK, parse_mode="Markdown")
+    state = await _process_case_text(message, context, user_id, case_text, "text")
+    if state == AWAIT_FORM_CHOICE:
+        context.user_data["_setup_form_reentry"] = (
+            context.user_data.get("last_bot_chat_id"), context.user_data.get("last_bot_msg_id"),
+        )
+    return state
+
+
+async def _resume_setup_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
+    """Re-enter only from the retained case's current, consented recommendation."""
+    query = update.callback_query
+    message = query.message
+    anchor = context.user_data.get("_setup_form_reentry")
+    current = (context.user_data.get("last_bot_chat_id"), context.user_data.get("last_bot_msg_id"))
+    if (
+        not anchor or not all(anchor) or anchor != current
+        or message is None or (message.chat_id, message.message_id) != anchor
+        or context.user_data.get("_setup_pending_case")
+        or not context.user_data.get("case_text")
+        or not _kaizen_connected(update.effective_user.id)
+        or not await consent.has_current_consent(update.effective_user.id)
+    ):
+        return await _answer_unhandled_button(update, context)
+    return await handle_form_choice(update, context)
+
+
 async def _finish_setup_after_connect(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -8095,7 +8176,9 @@ async def _finish_setup_after_connect(
 ) -> int:
     """Everything after Kaizen is connected, for either connection method."""
     user_id = update.effective_user.id
+    _remember_audit_user(context, update, user_id)
     _track_funnel_event(context, "credentials_connected")
+    context.user_data.pop("_connect_method", None)
     _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     context.user_data.pop("_setup_state_hint", None)
@@ -8186,7 +8269,7 @@ async def _finish_setup_after_connect(
         return AWAIT_TRAINING_LEVEL
 
     _flow_done(context, "setup")
-    return ConversationHandler.END
+    return await _resume_setup_case(update, context)
 
 
 _KAIZEN_PASSWORD_ROUTE_PROMPT = (
@@ -8380,6 +8463,9 @@ async def _passwordless_watch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         job.schedule_removal()
         return
     if status in {"failed", "expired"}:
+        if status == "expired":
+            _remember_audit_user(context, user_id=watch["user_id"])
+            _track_funnel_event(context, "connect_link_expired")
         job.schedule_removal()
         context.user_data.pop(_PWL_WATCH_KEY, None)
         await _edit_watched_message(
@@ -8453,12 +8539,15 @@ async def passwordless_setup_start(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     user_id = update.effective_user.id
     if query:
-        await query.answer()
+        await _answer_connect_query(query)
     if not kaizen_connection.passwordless_offered_to(user_id):
         if query:
             await _retire_clicked_keyboard(query)
         await _flow_msg(update, context, _KAIZEN_USERNAME_PROMPT, parse_mode="Markdown", flow_key="setup")
         return AWAIT_USERNAME
+    _remember_audit_user(context, update, user_id)
+    _track_funnel_event(context, "connect_method_chosen", method="passwordless")
+    context.user_data["_connect_method"] = "passwordless"
     _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
     if query and query.message is not None:
@@ -8502,7 +8591,10 @@ async def passwordless_setup_new_link(update: Update, context: ContextTypes.DEFA
 async def setup_password_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Setup: the doctor chose to connect with their password."""
     query = update.callback_query
-    await query.answer()
+    await _answer_connect_query(query)
+    _remember_audit_user(context, update)
+    _track_funnel_event(context, "connect_method_chosen", method="password")
+    context.user_data["_connect_method"] = "password"
     _stop_passwordless_watch(context, update.effective_user.id)
     _clear_setup_retry_credentials(context)
     context.user_data.pop("setup_username", None)
@@ -8517,7 +8609,7 @@ async def passwordless_setup_done(update: Update, context: ContextTypes.DEFAULT_
     """Setup: the doctor says they signed in. Prove it before connecting."""
     query = update.callback_query
     user_id = update.effective_user.id
-    await query.answer("Checking Kaizen…")
+    await _answer_connect_query(query, "Checking Kaizen…")
     probe = await _probe_kept_kaizen_session(user_id)
     if not probe:
         text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
@@ -8557,6 +8649,9 @@ async def passwordless_reconnect(update: Update, context: ContextTypes.DEFAULT_T
     """
     query = update.callback_query
     user_id = update.effective_user.id
+    await _answer_connect_query(query)
+    _remember_audit_user(context, update, user_id)
+    _track_funnel_event(context, "connect_method_chosen", method="passwordless")
     link = await _passwordless_link_for(context, user_id, "reconnect")
     if link is None:
         await query.message.reply_text(_PASSWORDLESS_UNAVAILABLE_TEXT)
@@ -8577,7 +8672,7 @@ async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT
     """After signing in again: check it worked, then finish the waiting save."""
     query = update.callback_query
     user_id = update.effective_user.id
-    await query.answer("Checking Kaizen…")
+    await _answer_connect_query(query, "Checking Kaizen…")
     probe = await _probe_kept_kaizen_session(user_id)
     if not probe:
         text = _PASSWORDLESS_CHECK_FAILED_TEXT if probe is None else _PASSWORDLESS_NOT_SIGNED_IN_TEXT
@@ -8598,6 +8693,8 @@ async def passwordless_reconnected(update: Update, context: ContextTypes.DEFAULT
 
 async def _show_login_rejected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Kaizen rejected the login: back to the email step on the same message."""
+    _remember_audit_user(context, update)
+    _track_funnel_event(context, "connect_login_rejected")
     text, markup = _login_rejected_prompt(update.effective_user.id)
     await _flow_edit(
         update, context, text, reply_markup=markup, parse_mode="Markdown", flow_key="setup",
@@ -8610,7 +8707,7 @@ async def _show_login_rejected(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def setup_retry_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    await _answer_connect_query(query)
 
     pending = _load_setup_retry_credentials(context)
     if pending is None:
@@ -8671,7 +8768,7 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
     settings-handler "Back to settings" copy —
     this is mid-setup, not a /settings round-trip."""
     query = update.callback_query
-    await query.answer()
+    await _answer_connect_query(query)
     level = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_training_level(user_id, level)
@@ -8695,13 +8792,13 @@ async def setup_training_level(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode="Markdown",
     )
     _flow_done(context, "setup")
-    return ConversationHandler.END
+    return await _resume_setup_case(update, context)
 
 
 async def setup_curriculum(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle curriculum selection during setup."""
     query = update.callback_query
-    await query.answer()
+    await _answer_connect_query(query)
     curriculum = query.data.split("|")[1]
     user_id = update.effective_user.id
     store_curriculum(user_id, curriculum)
@@ -8728,7 +8825,7 @@ async def _setup_wrong_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
-        await update.callback_query.answer()
+        await _answer_connect_query(update.callback_query)
     text = _cancelled_next_step_text(update.effective_user.id, "Setup cancelled")
     keyboard = _build_next_step_keyboard(update.effective_user.id)
     await _flow_edit(update, context, text, reply_markup=keyboard, flow_key="setup")
@@ -9394,7 +9491,10 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "pwl_reconnected":
         return await passwordless_reconnected(update, context)
 
-    await query.answer()
+    if action in {"setup", "pwl_reconnect"}:
+        await _answer_connect_query(query)
+    else:
+        await query.answer()
 
     if action == "pwl_reconnect":
         await passwordless_reconnect(update, context)
@@ -15259,6 +15359,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle form type selection."""
     query = update.callback_query
     await query.answer()
+    context.user_data.pop("_setup_form_reentry", None)
 
     data = query.data
     _remember_audit_user(context, update)
@@ -18029,6 +18130,8 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         if source != "setup" and pending_input:
             return await _resume_pending_consent_input(query, context, tapper_id, pending_input)
         if source == "setup":
+            if context.user_data.get("_setup_pending_case"):
+                return await _resume_setup_case(update, context)
             await query.edit_message_text(
                 "✅ Consent recorded.\n\n"
                 f"{WELCOME_MSG_CONNECTED}\n\n"
@@ -18042,6 +18145,8 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
             )
     else:
         await query.answer()
+        if context.user_data.pop("_setup_pending_case", False):
+            context.user_data.pop("case_text", None)
         if source == "setup":
             await query.edit_message_text(
                 "That's fine. Kaizen is connected, and I won't draft from cases "
@@ -18260,6 +18365,9 @@ def build_application() -> Application:
             MessageHandler(filters.PHOTO, handle_case_input),
             MessageHandler(filters.VIDEO, handle_case_input),
             MessageHandler(filters.Document.ALL, handle_case_input),
+            # Background setup has ended its conversation before it resumes
+            # the retained case. Its Best fit buttons start the case flow here.
+            CallbackQueryHandler(_resume_setup_form_choice, pattern=r"^FORM\|"),
         ],
         states={
             AWAIT_CASE_INPUT: [

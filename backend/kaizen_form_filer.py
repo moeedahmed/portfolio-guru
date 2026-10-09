@@ -2176,6 +2176,17 @@ async def _has_credential_rejection(page: Page) -> bool:
     return False
 
 
+def _is_kaizen_portfolio_landing(url: str) -> bool:
+    """Recognised portfolio entry routes; auth/verification pages aren't proof."""
+    if not _is_kaizen_app_url(url):
+        return False
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    route = parsed.path.rstrip("/").lower()
+    return route in {"/activities", "/dashboard", "/events/list"}
+
+
 async def _login(page: Page, username: str, password: str) -> bool:
     """Log in to Kaizen via RCEM portal (two-step: username → password).
 
@@ -2219,7 +2230,7 @@ async def _login(page: Page, username: str, password: str) -> bool:
         ) from e
 
     try:
-        await page.wait_for_url("**/kaizenep.com/**", timeout=30000)
+        await page.wait_for_url(_is_kaizen_portfolio_landing, timeout=30000)
     except Exception as e:
         if login_submitted and await _has_credential_rejection(page):
             logger.info("Kaizen rejected the supplied credentials")
@@ -2233,7 +2244,11 @@ async def _login(page: Page, username: str, password: str) -> bool:
         ) from e
 
     await asyncio.sleep(3)
-    logger.info(f"Login success: {page.url}")
+    if not _is_kaizen_portfolio_landing(page.url):
+        if login_submitted and await _has_credential_rejection(page):
+            return False
+        raise _kaizen_infrastructure_error("Kaizen login did not land on a portfolio page")
+    logger.info("Kaizen login reached the portfolio")
     return True
 
 
