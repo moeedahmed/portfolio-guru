@@ -2073,6 +2073,7 @@ def _clear_case_review_state(context, keep_case: bool = True) -> None:
     for key in (
         "awaiting_detail",
         "awaiting_detail_at",
+        "awaiting_reflection_detail",
         "attachment_upload_confirmed",
         "case_input_source",
         "case_has_user_context",
@@ -6462,6 +6463,8 @@ def _set_reflection_detail_gate(context, draft) -> bool:
         context.user_data["needs_reflection_detail"] = True
     else:
         context.user_data.pop("needs_reflection_detail", None)
+    if _draft_reflection_text(draft).strip():
+        context.user_data.pop("awaiting_reflection_detail", None)
     return needs_reflection_detail
 
 
@@ -6559,6 +6562,31 @@ def _draft_gaps(context) -> list[dict]:
     gaps = _pre_draft_completeness_gaps(context, draft, form_type)
     gaps.sort(key=lambda gap: gap["key"] == "reflection")
     return gaps
+
+
+def _reflection_reply_requested(context) -> bool:
+    """The explicit prompt and the preview's reflection gaps ask for authored words."""
+    draft = _load_draft(context)
+    if draft is None or not context.user_data.get("case_text"):
+        return False
+    reflection_keys = _find_reflection_keys(_draft_fields_for_review(draft), _draft_form_type(draft))
+    return bool(context.user_data.get("awaiting_reflection_detail")) or any(
+        gap["key"] in reflection_keys for gap in _draft_gaps(context)
+    )
+
+
+def _is_reflection_reply(context, text, turn) -> bool:
+    """Only enrichment replies, never edit/control messages, supply a reflection."""
+    return (
+        _reflection_reply_requested(context)
+        and not context.user_data.get("amend_mode")
+        and turn.kind is WorkflowTurnKind.ENRICH
+        and not _is_recent_filing_status_question(text)
+        and not is_reuse_request(text)
+        and not (extract_explicit_form_type(text, require_intent=False)
+                 and not has_personal_reflective_input(text))
+        and text.lower().rstrip(".!?") != "cancel"
+    )
 
 # Visual divider separating portfolio content from bot guidance/rationale in
 # draft previews (after draft body). Post-filing confirmations should stay
@@ -10185,6 +10213,7 @@ async def reset_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     Asks first, exactly like Settings > Reset data: the wipe itself runs only
     from the Delete button (handle_reset_confirm). Keep changes nothing.
     """
+    context.user_data.pop("awaiting_reflection_detail", None)
     await update.message.reply_text(
         _RESET_CONFIRM_TEXT,
         reply_markup=_build_reset_confirm_keyboard(),
@@ -12489,6 +12518,7 @@ async def _handle_reuse_request(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, case_text: str, input_source: str) -> int:
     """Store case text, suggest form types, or move directly to the chosen template review."""
+    context.user_data.pop("awaiting_reflection_detail", None)
     photo_removed_labels: list[str] = []
     if str(input_source or "").strip().lower() in {"photo", "image"}:
         case_text, photo_removed_labels = _deidentify_photo_case_text(case_text)
@@ -13928,12 +13958,27 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
 
     _remember_case_context_source(context, input_source,
                                   user_text=extracted_text if voice_media else caption)
+    reflection_reply = False
+    if voice_media and _reflection_reply_requested(context):
+        try:
+            intent = await classify_intent(extracted_text, case_context=context.user_data.get("case_text", ""))
+        except Exception:
+            intent = None
+        turn = decide_workflow_turn(
+            extracted_text or "", phase=WorkflowPhase.DRAFT_OPEN,
+            legacy_intent=intent, classifier_failed=intent is None,
+            draft_has_gaps=bool(_draft_gaps(context)),
+        )
+        reflection_reply = _is_reflection_reply(context, extracted_text or "", turn)
+        if reflection_reply:
+            context.user_data.pop("awaiting_reflection_detail", None)
     return await _regenerate_active_draft_with_feedback(
         update,
         context,
         extracted_text or "",
         append_to_case=True,
         input_source=input_source,
+        reflection_reply=reflection_reply,
     )
 
 
@@ -17569,7 +17614,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         draft_has_gaps=has_draft and bool(_draft_gaps(context)),
     )
 
-    if context.user_data.get("awaiting_reflection_detail") and has_draft and case_text:
+    if _reflection_reply_requested(context):
         # Control messages keep their normal ownership; waiting for a
         # reflection does not make an edit, status question or form request
         # the doctor's learning. Side messages leave the prompt waiting.
@@ -17583,7 +17628,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
         if raw_text.lower().rstrip(".!?") == "cancel":
             return await cancel_command(update, context)
-        if turn.kind is WorkflowTurnKind.ENRICH:
+        if _is_reflection_reply(context, raw_text, turn):
             context.user_data.pop("awaiting_reflection_detail", None)
             return await _regenerate_active_draft_with_feedback(
                 update, context, raw_text,

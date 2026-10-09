@@ -158,8 +158,34 @@ def test_new_case_clears_prior_reflection_confirmation():
 
     context = _context("Prior reflective case.")
     context.user_data["rcem_personal_reflection_confirmed"] = True
+    context.user_data["awaiting_reflection_detail"] = True
     _clear_case_review_state(context, keep_case=False)
     assert "rcem_personal_reflection_confirmed" not in context.user_data
+    assert "awaiting_reflection_detail" not in context.user_data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["new_case", "cancel", "reset"])
+async def test_case_lifecycle_clears_pending_reflection(action):
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text="Synthetic old case", awaiting_reflection_detail=True)
+    bot._store_draft(context, CBDData(reflection=""))
+    update = sim._make_text_update(f"/{action}")
+    with patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
+        if action == "new_case":
+            bot._clear_case_review_state(context, keep_case=False)
+            # Also guard direct captures that do not use the review-state helper.
+            context.user_data["awaiting_reflection_detail"] = True
+            await bot._process_case_text(update.message, context, sim.user_id, "Synthetic new case", "text")
+        elif action == "cancel":
+            await bot.cancel_command(update, context)
+        else:
+            before_draft = context.user_data["draft_data"]
+            await bot.reset_data(update, context)
+            assert context.user_data["draft_data"] == before_draft
+            assert "Reset Portfolio Guru?" in sim.get_last_text()
+    assert not context.user_data.get("awaiting_reflection_detail")
 
 
 def test_ai_declaration_is_visible_and_accountability_is_explicit():
@@ -731,15 +757,20 @@ async def test_reflection_fields_are_grounded_individually_in_doctor_words():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("explicit_prompt", [False, True])
-@pytest.mark.parametrize("reflection,generated", [
+@pytest.mark.parametrize("input_source", ["text", "voice", "audio"])
+@pytest.mark.parametrize("reflection,generated,expected", [
     ("I learned to check understanding before ending a referral.",
+     "I learned to check understanding before ending a referral.",
      "I learned to check understanding before ending a referral."),
-    ("Escalate earlier.", "Escalate earlier."),
-    ("Escalate earlier.", "I will escalate earlier."),
+    ("Escalate earlier.", "Escalate earlier.", "Escalate earlier."),
+    ("Escalate earlier.", "I will escalate earlier.", "Escalate earlier."),
     ("I learned:\nEscalate earlier.\nCheck drug allergies.",
-     "I learned to escalate earlier and check drug allergies."),
+     "I learned to escalate earlier and check drug allergies.",
+     "I learned:\nEscalate earlier.\nCheck drug allergies."),
+    ("I learned to escalate earlier next time.", "I learned to escalate earlier.",
+     "I learned to escalate earlier."),
 ])
-async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(reflection, generated, explicit_prompt):
+async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(reflection, generated, expected, explicit_prompt, input_source):
     sim = BotSimulator()
     context = sim._make_context()
     source = "Synthetic ED chest pain assessed with senior review."
@@ -753,30 +784,35 @@ async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(ref
     assert [gap["key"] for gap in bot._draft_gaps(context)] == ["reflection"]
     if explicit_prompt:
         context.user_data["awaiting_reflection_detail"] = True
+    update = sim._make_text_update(reflection)
+    if input_source != "text":
+        update.message.text = None
+        setattr(update.message, input_source, SimpleNamespace(
+            get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=AsyncMock())),
+            mime_type="audio/ogg", file_name="reflection.ogg",
+        ))
     with patch("bot.extract_cbd_data", new=AsyncMock(return_value=draft.model_copy(update={"reflection": generated}))), \
          patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value=reflection)), \
          patch("bot.get_voice_profile", return_value=""), \
          patch("bot.assess_form_essentials", new=AsyncMock(return_value={
              item["key"]: bot.ESSENTIAL_PRESENT for item in bot._form_essential_requirements("CBD")
          })):
-        assert await bot.handle_mid_conversation_text(sim._make_text_update(reflection), context) == bot.AWAIT_APPROVAL
+        handler = bot.handle_mid_conversation_text if input_source == "text" else bot.handle_approval_media_feedback
+        assert await handler(update, context) == bot.AWAIT_APPROVAL
     assert reflection in "\n".join(context.user_data["case_user_text"])
     assert source not in "\n".join(context.user_data["case_user_text"])
-    # An unprompted short instruction is not a verbatim reflection fallback.
-    expected = "" if not explicit_prompt and reflection == "Escalate earlier." and generated != reflection else reflection
     assert bot._load_draft(context).reflection == expected
-    if expected:
-        assert "your reflection" not in sim.get_last_text()
+    assert "your reflection" not in sim.get_last_text()
+    assert not context.user_data.get("awaiting_reflection_detail")
     fields = await _capture_approved_fields(sim, context)
-    if expected:
-        assert fields["reflection"].startswith(expected)
-    else:
-        assert fields["reflection"] == ""
+    assert fields["reflection"].startswith(expected)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("awaiting_reflection", [False, True])
-async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(awaiting_reflection):
+@pytest.mark.parametrize("route", ["gap", "awaiting", "edit", "amend"])
+@pytest.mark.parametrize("input_source", ["text", "voice", "audio"])
+async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(route, input_source):
     sim = BotSimulator()
     context = sim._make_context()
     source = "Synthetic ED chest pain assessed with senior review."
@@ -787,24 +823,37 @@ async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(await
                     clinical_setting="Emergency Department", level_of_supervision="Direct", reflection="")
     await bot._show_draft_review(sim._make_text_update(source).message, context, draft, "CBD", edit=False)
     assert [gap["key"] for gap in bot._draft_gaps(context)] == ["reflection"]
+    awaiting_reflection = route in {"awaiting", "amend"}
     if awaiting_reflection:
         await bot.handle_callback(sim._make_callback_update("ACTION|add_reflection_detail"), context)
-    else:
+    if route == "amend":
+        context.user_data["amend_mode"] = True
+    elif route == "edit":
         # Exercise the doctor's Edit button and its actual text handler.
         assert await bot.handle_approval_edit(sim._make_callback_update("EDIT|draft"), context) == bot.AWAIT_EDIT_VALUE
     feedback = "change the date to 3 Oct"
     regenerated = draft.model_copy(update={
         "date_of_encounter": "2026-10-03", "reflection": "I learned to escalate earlier.",
     })
+    update = sim._make_text_update(feedback)
+    if input_source != "text":
+        update.message.text = None
+        setattr(update.message, input_source, SimpleNamespace(
+            get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=AsyncMock())),
+            mime_type="audio/ogg", file_name="amendment.ogg",
+        ))
     with patch("bot.extract_cbd_data", new=AsyncMock(return_value=regenerated)), \
+         patch("bot.transcribe_voice", new=AsyncMock(return_value=feedback)), \
          patch("bot.extract_field_updates", new=AsyncMock(return_value={})), \
          patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
          patch("bot.get_voice_profile", return_value=""), \
          patch("bot.assess_form_essentials", new=AsyncMock(return_value={
              item["key"]: bot.ESSENTIAL_PRESENT for item in bot._form_essential_requirements("CBD")
          })):
-        handler = bot.handle_mid_conversation_text if awaiting_reflection else bot.handle_edit_value_with_intent
-        assert await handler(sim._make_text_update(feedback), context) == bot.AWAIT_APPROVAL
+        handler = bot.handle_edit_value_with_intent if route == "edit" else bot.handle_mid_conversation_text
+        if input_source != "text":
+            handler = bot.handle_approval_media_feedback
+        assert await handler(update, context) == bot.AWAIT_APPROVAL
     assert bot._load_draft(context).date_of_encounter == "2026-10-03"
     assert bot._load_draft(context).reflection == ""
     assert "I learned to escalate earlier." not in sim.get_last_text()

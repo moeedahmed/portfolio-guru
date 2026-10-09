@@ -89,7 +89,9 @@ def producer_digest():
 # Existing controls, callback payloads and approval ownership are unchanged.
 # 10 Oct 2026: reflection fallback requires a prompted reply; status, reuse,
 # form, cancel and edit controls retain their handlers and pending reflection.
-PRODUCER_DIGEST = 'd13b2d30446da5f4c536ab7bf67db515b5b1336b3b07a79da6d6a34bcba17e3c'
+# 10 Oct 2026: standard reflection gaps and voice/audio replies retain authored
+# wording; edit/control exclusions and case-lifecycle cleanup are unchanged in scope.
+PRODUCER_DIGEST = '7bb75d0c8241e3502ef20b8e1ee9b7ef5806b3eb170bbef71ef2e7e3ff7ea4a9'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
