@@ -3150,9 +3150,9 @@ _POSSIBLE_KC_INSTRUCTION = """
 If fewer than 3 distinct KCs are genuinely supported, you may return ONE separate
 top-level "possible_key_capability": {"capability": "<exact KC from the curriculum>",
 "evidence": "<exact quote from the doctor's case or feedback>"}.
-This is a POSSIBLE extra for the doctor to confirm, NOT a supported link: never
-put it in key_capabilities or curriculum_links. It must be a distinct, plausible
-link grounded in something actually described, requiring the doctor's judgement,
+This extra will be selected by default and the doctor can remove it: return it
+separately, not in key_capabilities or curriculum_links. It must be a distinct,
+plausible link grounded in something actually described,
 not invented activity or a generic filler to reach three. Never suggest a KC
 the doctor has explicitly excluded. Return null if there is no such candidate,
 or if 3 KCs are already supported. Do not return a list of possible KCs.
@@ -3160,11 +3160,11 @@ or if 3 KCs are already supported. Do not return a list of possible KCs.
 
 
 def _validated_possible_key_capability(candidate, selected, source_text=None, *, excluded=()):
-    """Canonical curriculum identity and source anchor; never supplement selection.
+    """Canonical curriculum identity and source anchor for the default extra.
 
     Extraction requires an exact source quote. Store only curriculum identity;
     model reasons and source quotes never reach preview or persistence.
-    Subsequent preview/tap validation reads this validated draft metadata.
+    Draft construction selects this validated metadata; Remove retains its identity.
     """
     if not isinstance(candidate, dict):
         return None
@@ -3183,12 +3183,8 @@ def _validated_possible_key_capability(candidate, selected, source_text=None, *,
     return {"capability": canonical}
 
 
-def preserve_unconfirmed_possible_kc(previous, regenerated):
-    """Regeneration cannot perform the doctor's Add action.
-
-    Keep the pending candidate on the draft even while three other KCs hide
-    the offer. This preserves its identity for later edits; only Add consumes it.
-    """
+def preserve_possible_kc_selection(previous, regenerated):
+    """Retain the extra's identity and the doctor's removal across regeneration."""
     candidate = getattr(previous, "possible_key_capability", None)
     if not isinstance(candidate, dict):
         return regenerated
@@ -3197,8 +3193,10 @@ def preserve_unconfirmed_possible_kc(previous, regenerated):
         return regenerated
     fields = dict(regenerated.fields) if isinstance(regenerated, FormDraft) else None
     selected = (fields.get("key_capabilities") or []) if fields is not None else regenerated.key_capabilities
-    selected = [kc for kc in selected if _kc_identity(kc) != _kc_identity(capability)]
     possible = {"capability": capability}
+    if candidate.get("removed") is True:
+        possible["removed"] = True
+        selected = [kc for kc in selected if _kc_identity(kc) != _kc_identity(capability)]
     links = _derive_curriculum_links_from_kcs(selected)
     if fields is not None:
         fields.update(key_capabilities=selected, curriculum_links=links)
@@ -3879,8 +3877,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         has_kc_tick=has_kc_tick,
     )
     if possible:
-        # Existing breadth heuristics must not silently promote something the
-        # model explicitly left for the doctor's confirmation.
+        # Keep the extra separate until the draft validator selects it, so
+        # existing breadth heuristics cannot duplicate its curriculum identity.
         proposed_id = _kc_identity(possible["capability"])
         normalised["key_capabilities"] = [kc for kc in normalised.get("key_capabilities", [])
                                           if _kc_identity(kc) != proposed_id]

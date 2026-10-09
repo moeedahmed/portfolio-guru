@@ -134,13 +134,14 @@ def canonical_kcs(capabilities, *, strict=False):
     return result
 
 
-def validate_curriculum(fields):
+def validate_curriculum(fields, *, select_possible=False):
     """One catalogue choke point; never trust model labels or orphan SLOs.
 
     Accept legacy SLO-only selections when no KCs were supplied (including
     Pydantic default empty lists). For nonempty KC input, derive SLOs solely
     from the validated selection, even if every supplied KC is rejected.
-    Possible metadata remains separate and can never become a selected link.
+    Drafts select a validated extra by default, unless the doctor removed it.
+    Filing validates the selected list only. Every selection is capped at three.
     No source text or rejected values are logged.
     """
     out = dict(fields)
@@ -148,7 +149,7 @@ def validate_curriculum(fields):
     if not isinstance(values, list):
         values = [] if values is None else [values]
     if values:
-        out['key_capabilities'] = canonical_kcs(values)
+        out['key_capabilities'] = canonical_kcs(values)[:3]
         out['curriculum_links'] = list(dict.fromkeys(kc.split()[0] for kc in out['key_capabilities']))
     else:
         if 'key_capabilities' in out:
@@ -165,4 +166,14 @@ def validate_curriculum(fields):
         if candidate is not None and canonical is None:
             logger.warning('Dropped invalid curriculum capabilities: count=1')
         out['possible_key_capability'] = {'capability': canonical} if canonical else None
+        if canonical and candidate.get('removed') is True:
+            out['possible_key_capability']['removed'] = True
+        if canonical and select_possible:
+            selected = out.get('key_capabilities', [])
+            if candidate.get('removed') is True:
+                selected = [kc for kc in selected if kc != canonical]
+            elif canonical not in selected and len(selected) < 3:
+                selected = [*selected, canonical]
+            out['key_capabilities'] = selected
+            out['curriculum_links'] = list(dict.fromkeys(kc.split()[0] for kc in selected))
     return out

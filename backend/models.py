@@ -9,11 +9,16 @@ class CurriculumDraft(BaseModel):
     def validate_draft_curriculum(cls, data):
         if not isinstance(data, dict):
             return data
-        data = validate_curriculum(data)
         if isinstance(data.get("fields"), dict):
-            data["fields"] = validate_curriculum(data["fields"])
-            # Possible KCs are draft metadata, never filing fields.
+            data = validate_curriculum(data)
+            data["fields"] = validate_curriculum(
+                {**data["fields"], "possible_key_capability": data.get("possible_key_capability")},
+                select_possible=True,
+            )
+            # Removal identity stays in draft metadata, never filing fields.
             data["fields"].pop("possible_key_capability", None)
+        else:
+            data = validate_curriculum(data, select_possible=True)
         return data
 
     def model_copy(self, *, update=None, deep=False):
@@ -36,7 +41,7 @@ class CBDData(CurriculumDraft):
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
     key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
-    possible_key_capability: Optional[dict] = None  # preview only until the doctor taps Add
+    possible_key_capability: Optional[dict] = None  # auto-selected KC identity and optional removed flag
 
 
 class FormDraft(CurriculumDraft):

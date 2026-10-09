@@ -29,7 +29,7 @@ def payload_branch(payload):
     if family == "ACTION" and len(parts) > 2:
         if parts[1] == "health_queue":
             return "|".join(parts[:3]) + "|*"
-        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more", "add_possible_kc"}:
+        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more", "remove_possible_kc"}:
             return "|".join(parts[:2]) + "|*"
     return payload
 
@@ -69,10 +69,11 @@ def producer_digest():
 # invalid KCs are removed before filing. No keyboard or callback payload changes.
 # 9 Oct 2026: reviewed account/billing topic routing; connection failures retain
 # the existing Connect Kaizen/Settings actions; pricing appears only for billing.
-PRODUCER_DIGEST = 'ac1feea0ee2e29a3f700678c1a6f9f2236b0dab3ec8049953b732ac86f534f23'
+# 9 Oct 2026: third KC selected by default with Remove instead of Add.
+PRODUCER_DIGEST = '45e2e92d39a87dd71e1bf617d503d7a3c657d3c998af81654b9aa3cf8a6948d3'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
-ACTION|add_possible_kc|*
+ACTION|remove_possible_kc|*
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
@@ -215,8 +216,8 @@ def reviewed_units(slots):
 
 
 # Registration candidate paths shift when consent moves into case_conv.
-# 9 Oct 2026: reviewed ACTION|add_possible_kc|* and its approval-state owner.
-CATALOGUE_DIGEST = '933692d10a3f94aba96b3b951e22bd87222bf906f8e51dd235bc31168d271e4d'
+# 9 Oct 2026: reviewed ACTION|remove_possible_kc|* and its approval-state owner.
+CATALOGUE_DIGEST = '36804a8a2e30f07f4188ba569d7c18e42748dd7bb3b3570a58306cac786c88b0'
 
 
 def requirements_digest(units):

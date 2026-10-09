@@ -245,6 +245,6 @@ async def test_edit_invalidates_pending_save_continuations(callback):
     assert not context.user_data.get("attachment_upload_confirmed")
 
 
-def test_possible_kc_button_routes_in_approval_state(app):
-    assert _route(app, make_callback_update("ACTION|add_possible_kc|abcdef"), case_state=bot.AWAIT_APPROVAL) == (
+def test_remove_kc_button_routes_in_approval_state(app):
+    assert _route(app, make_callback_update("ACTION|remove_possible_kc|abcdef"), case_state=bot.AWAIT_APPROVAL) == (
         "case_conv", "handle_callback")

@@ -5570,7 +5570,7 @@ def _is_stale_case_button(context, data: str | None) -> bool:
 
 
 def _draft_possible_kc(draft):
-    from extractor import _validated_possible_key_capability
+    from curriculum import validate_curriculum
     if isinstance(draft, CBDData):
         selected = draft.key_capabilities
     elif isinstance(draft, FormDraft):
@@ -5580,7 +5580,10 @@ def _draft_possible_kc(draft):
         selected = draft.fields.get("key_capabilities") or []
     else:
         return None
-    return _validated_possible_key_capability(draft.possible_key_capability, selected)
+    possible = validate_curriculum({"possible_key_capability": draft.possible_key_capability})["possible_key_capability"]
+    if possible and not possible.get("removed") and possible["capability"] in selected:
+        return possible
+    return None
 
 
 def _possible_kc_button_row(context):
@@ -5590,28 +5593,28 @@ def _possible_kc_button_row(context):
     if not possible:
         return []
     code = possible["capability"].split(":", 1)[0]
-    return [InlineKeyboardButton(f"➕ Add {code}", callback_data=_case_button("ACTION|add_possible_kc", context))]
+    return [InlineKeyboardButton(f"➖ Remove {code}", callback_data=_case_button("ACTION|remove_possible_kc", context))]
 
 
-async def _add_possible_key_capability(query, context):
+async def _remove_possible_key_capability(query, context):
     """Claim and update the current draft before awaiting, so repeated taps lose."""
     draft = _load_draft(context)
     possible = _draft_possible_kc(draft)
     if (not possible or context.user_data.get("filing_in_progress") or
-            query.data != f"ACTION|add_possible_kc|{context.user_data.get('case_token')}"):
+            query.data != f"ACTION|remove_possible_kc|{context.user_data.get('case_token')}"):
         await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
         return None
     from extractor import _derive_curriculum_links_from_kcs
     if isinstance(draft, CBDData):
-        kcs = [*draft.key_capabilities, possible["capability"]]
+        kcs = [kc for kc in draft.key_capabilities if kc != possible["capability"]]
         updated = draft.model_copy(update={"key_capabilities": kcs,
-            "curriculum_links": _derive_curriculum_links_from_kcs(kcs), "possible_key_capability": None})
+            "curriculum_links": _derive_curriculum_links_from_kcs(kcs), "possible_key_capability": {**possible, "removed": True}})
     else:
         fields = dict(draft.fields)
-        kcs = [*(fields.get("key_capabilities") or []), possible["capability"]]
+        kcs = [kc for kc in (fields.get("key_capabilities") or []) if kc != possible["capability"]]
         fields["key_capabilities"] = kcs
         fields["curriculum_links"] = _derive_curriculum_links_from_kcs(kcs)
-        updated = draft.model_copy(update={"fields": fields, "possible_key_capability": None})
+        updated = draft.model_copy(update={"fields": fields, "possible_key_capability": {**possible, "removed": True}})
     _store_draft(context, updated)
     await query.answer()
     await _safe_edit_text(query.message, _format_draft_preview_for_context(updated, context) + _draft_reply_hint(context),
@@ -6535,13 +6538,7 @@ def _format_draft_preview(
     # The declaration is already inside preview_draft's reflection field via
     # _with_rcem_ai_declaration, exactly as it will be saved. Appending a
     # separate note here as well showed the doctor the same sentence twice.
-    possible = _draft_possible_kc(draft)
-    extra = ""
-    if possible:
-        code = possible["capability"].split(":", 1)[0]
-        title = _kc_preview_summary(possible["capability"])
-        extra = f"\n\nPossible extra: {code}: {title}"
-    return preview + extra + layer + coach + degraded
+    return preview + layer + coach + degraded
 
 
 def _draft_coach_note_suffix(draft) -> str:
@@ -12386,8 +12383,8 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
             ),
             timeout=45,
         )
-    from extractor import preserve_unconfirmed_possible_kc
-    draft = preserve_unconfirmed_possible_kc(previous, draft)
+    from extractor import preserve_possible_kc_selection
+    draft = preserve_possible_kc_selection(previous, draft)
     # Carry the sidecar's availability out of the extractor so the preview can
     # say the draft was checked with weaker cover. A silent downgrade would let
     # the doctor believe they had protection they did not have on this draft.
@@ -12682,8 +12679,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _case_review_state_snapshot(context),
     )
 
-    if data.startswith("ACTION|add_possible_kc|"):
-        return await _add_possible_key_capability(query, context)
+    if data.startswith("ACTION|remove_possible_kc|"):
+        return await _remove_possible_key_capability(query, context)
 
     if data.startswith("INFO|privacy_"):
         await query.answer()
@@ -13607,8 +13604,8 @@ async def _regenerate_active_draft_with_feedback(
                 ),
                 timeout=45,
         )
-        from extractor import preserve_unconfirmed_possible_kc
-        updated = preserve_unconfirmed_possible_kc(draft, updated)
+        from extractor import preserve_possible_kc_selection
+        updated = preserve_possible_kc_selection(draft, updated)
         updated = _blank_judged_missing_essentials(context, updated, case_text, form_type)
         # A regenerated draft must keep the same profile defaults as the first
         # draft, or a doctor who supplies one missing detail is asked for a
@@ -17678,8 +17675,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                             reply_markup=_active_draft_keyboard(context),
                         )
                         return AWAIT_APPROVAL
-                from extractor import preserve_unconfirmed_possible_kc
-                draft = preserve_unconfirmed_possible_kc(previous, draft)
+                from extractor import preserve_possible_kc_selection
+                draft = preserve_possible_kc_selection(previous, draft)
                 draft = _blank_judged_missing_essentials(context, draft, case_text, chosen_form or "CBD")
                 _store_draft(context, draft)
                 _set_reflection_detail_gate(context, draft)
@@ -18440,7 +18437,7 @@ def build_application() -> Application:
                     handle_callback,
                     pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
                 ),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:(?:add_reflection_detail|retry_filing|back_to_missing)$|add_possible_kc\|[0-9a-f]+$)"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:(?:add_reflection_detail|retry_filing|back_to_missing)$|remove_possible_kc\|[0-9a-f]+$)"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -18578,7 +18575,7 @@ def build_application() -> Application:
             handle_action_button,
             # Buttons that move the case conversation must reach case_conv, or
             # the state they return is thrown away (Retry left the case stuck).
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$|add_possible_kc\|).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$|remove_possible_kc\|).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

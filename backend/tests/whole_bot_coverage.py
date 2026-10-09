@@ -63,7 +63,8 @@ def registration_digest(slots):
 # Consent now enters/falls back through case_conv; dispatch tests prove state retention.
 # 9 Oct 2026: possible-KC Add reaches the existing approval callback slot;
 # the global ACTION handler excludes it. Offline routing tests prove ownership.
-REGISTRATION_DIGEST = 'a3088dc52a663a8f53fa12d10562ceeb66cfb07aee098a05c25dbf74ae160580'
+# 9 Oct 2026: Remove replaces Add in the same approval callback slot; routing tests prove ownership.
+REGISTRATION_DIGEST = '0bb488491177e933eb27aa50ea07e530d4a8e2164e91c554b46884d0ea3dda64'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
