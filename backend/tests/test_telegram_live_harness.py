@@ -41,6 +41,8 @@ def wider_journey_harness(monkeypatch):
         return reply
 
     monkeypatch.setattr(journeys, 'assert_live_telegram_guardrails', lambda target: None)
+    monkeypatch.setattr(journeys, 'BOT_USERNAME', 'portfolio_guru_test_bot')
+    monkeypatch.setattr(journeys, 'allowed_bot_usernames', lambda: {'portfolio_guru_test_bot'})
     monkeypatch.setattr(journeys, 'wait_for_matching_message', wait)
     monkeypatch.setattr(journeys, 'write_transcript_artifact',
                         lambda transcript, *, filename: artifacts.update({filename: list(transcript)}))
@@ -52,6 +54,129 @@ KC_PREVIEW = "\n• SLO3 — Resuscitation\n  ↳ KC3: assessment\n  ↳ KC5: le
 
 def _ready_text(date='17 Mar 2026'):
     return f'Here is your draft.\n📅 Date: {date}\nReply to change any field.' + KC_PREVIEW
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('recommendation', ['target', 'best', 'wrong-best', 'list'])
+@pytest.mark.parametrize('variant', ['', '_2021'])
+async def test_form_variety_selects_target_and_cancels(wider_journey_harness, recommendation, variant):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    target = 'FORM|TEACH' + variant
+    offered = ('Teaching Session', target) if recommendation == 'target' else (
+        '👨‍🏫 Teaching Session' if recommendation == 'best' else 'CBD', 'FORM|best')
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('Forms that fit', offered, ('Forms', 'FORM|show_all'))])
+    use_list = recommendation in {'wrong-best', 'list'}
+    if use_list:
+        replies.extend([message('Categories', ('Learning', 'FORM|cat_TEACHING')),
+                        message('Learning forms', ('Teaching Session', target))])
+    replies.extend([message(_ready_text(), ('Save to Kaizen', 'APPROVE|draft|abc123'),
+                            ('Cancel', 'CANCEL|draft|abc123')), message('Cancelled cleanup')])
+    await journeys._form_variety_ready_draft_to_cancel(
+        client, 'TEACH', 'Synthetic teaching session.', prefer_recommendation=recommendation != 'list')
+    assert clicks == ['GATHER|done'] + (
+        ['FORM|show_all', 'FORM|cat_TEACHING', target] if use_list else
+        [target if recommendation == 'target' else 'FORM|best'])
+    assert [call.args[1] for call in client.send_message.call_args_list] == [
+        'Synthetic teaching session.', '/cancel']
+    assert artifacts['portfolio-guru-form-variety-TEACH-transcript.json'][-1].received == 'Cancelled cleanup'
+    assert not replies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('gap', ['Level of supervision',
+                                'your reflection (what you learned or would do differently)',
+                                'Level of supervision and patient identifier', None])
+async def test_form_variety_gap_allowlist_and_failure_cleanup(wider_journey_harness, gap):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('Teaching', ('Teaching Session', 'FORM|TEACH')),
+                    TimeoutError('draft timeout') if gap is None else
+                    message(f'Draft. Still needed: {gap}. Reply with this detail.',
+                            ('Save draft to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel'))])
+    known = gap in {'Level of supervision', 'your reflection (what you learned or would do differently)'}
+    if known:
+        replies.append(message(_ready_text(), ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')))
+    replies.append(message('Cancelled cleanup'))
+    if known:
+        await journeys._form_variety_ready_draft_to_cancel(client, 'TEACH', 'Synthetic teaching.', prefer_recommendation=True)
+    else:
+        with pytest.raises((AssertionError, TimeoutError)):
+            await journeys._form_variety_ready_draft_to_cancel(client, 'TEACH', 'Synthetic teaching.', prefer_recommendation=True)
+    sends = [call.args[1] for call in client.send_message.call_args_list]
+    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
+    assert len(sends) == (3 if known else 2)
+    assert clicks == ['GATHER|done', 'FORM|TEACH']
+    assert artifacts['portfolio-guru-form-variety-TEACH-transcript.json'][-1].received == 'Cancelled cleanup'
+    assert not replies
+
+
+@pytest.mark.asyncio
+async def test_form_variety_pdf_uses_document_intent_and_non_cbd_form(wider_journey_harness, tmp_path):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    text = 'Synthetic teaching: I taught a simulation session on team briefing.'
+    pdf = journeys._synthetic_pdf(tmp_path / 'teaching.pdf', text)
+    replies.extend([message('Read this document?', ('Read text', 'DOCUSE|info')),
+                    message('Case captured', ('Choose form', 'GATHER|done')),
+                    message('Forms that fit', ('Forms', 'FORM|show_all')),
+                    message('Categories', ('Learning', 'FORM|cat_TEACHING')),
+                    message('Learning forms', ('Teaching Session', 'FORM|TEACH')),
+                    message(_ready_text(), ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')),
+                    message('Cancelled cleanup')])
+    await journeys._form_variety_ready_draft_to_cancel(
+        client, 'TEACH', text, prefer_recommendation=False, document=pdf)
+    assert clicks == ['DOCUSE|info', 'GATHER|done', 'FORM|show_all', 'FORM|cat_TEACHING', 'FORM|TEACH']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel']
+    assert client.send_file.call_args.args[1] == str(pdf)
+    assert client.send_file.call_args.kwargs['force_document'] is True
+    reader = pytest.importorskip('pypdf').PdfReader(pdf)
+    assert text in reader.pages[0].extract_text()
+    assert journeys.SYNTHETIC_CASE not in reader.pages[0].extract_text()
+    assert artifacts['portfolio-guru-form-variety-TEACH-pdf-transcript.json'][-1].received == 'Cancelled cleanup'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target,allowed', [
+    ('portfolio_guru_bot', {'portfolio_guru_bot'}),
+    ('portfolio_guru_test_bot', {'portfolio_guru_test_bot', 'portfolio_guru_bot'}),
+])
+async def test_form_variety_direct_call_refuses_non_test_envelope(wider_journey_harness, monkeypatch, target, allowed):
+    journeys, client, _, clicks, _, _ = wider_journey_harness
+    monkeypatch.setattr(journeys, 'BOT_USERNAME', target)
+    monkeypatch.setattr(journeys, 'allowed_bot_usernames', lambda: allowed)
+    with pytest.raises(AssertionError, match='test-bot-only'):
+        await journeys._form_variety_ready_draft_to_cancel(client, 'TEACH', 'Synthetic teaching.', prefer_recommendation=True)
+    client.send_message.assert_not_awaited()
+    client.send_file.assert_not_awaited()
+    assert not clicks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('code', ['LAT', 'TEACH', 'QIAT', 'MGMT_ROTA', 'SERIOUS_INC',
+                                 'PROC_LOG', 'US_CASE', 'FORMAL_COURSE', 'REFLECT_LOG'])
+@pytest.mark.parametrize('curriculum', ['2025', '2021'])
+async def test_form_variety_navigates_real_bot_keyboards(wider_journey_harness, monkeypatch, code, curriculum):
+    import bot
+    journeys, client, replies, clicks, _, message = wider_journey_harness
+    actual = bot._form_type_for_curriculum(code, curriculum)
+    monkeypatch.setattr(bot, '_get_allowed_forms', lambda _: [actual])
+    monkeypatch.setattr(bot, '_effective_curriculum', lambda _: curriculum)
+    category = journeys.FORM_VARIETY_CASES[code][0]
+
+    def keyboard(text, markup):
+        return message(text, *((b.text, b.callback_data) for row in markup.inline_keyboard for b in row))
+
+    replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
+                    keyboard('Forms that fit', bot._build_form_choice_keyboard([], curriculum)),
+                    keyboard('Categories', bot._build_category_picker_keyboard(123)),
+                    keyboard('Forms', bot._build_category_forms_keyboard(123, category)),
+                    message(_ready_text(), ('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')),
+                    message('Cancelled cleanup')])
+    await journeys._form_variety_ready_draft_to_cancel(
+        client, code, journeys._form_variety_case(code), prefer_recommendation=True)
+    assert clicks == ['GATHER|done', 'FORM|show_all', f'FORM|cat_{category}', f'FORM|{actual}']
+    assert client.send_message.call_args.args[1] == '/cancel'
+    assert not replies
 
 
 @pytest.mark.asyncio

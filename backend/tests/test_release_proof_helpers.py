@@ -38,11 +38,22 @@ else:
     if report:
         suite = ET.Element('testsuite')
         selectors = [arg for arg in sys.argv if '::test_e2e_' in arg]
-        if os.environ.get('FAKE_MISSING_JOURNEY'): selectors.pop()
+        names = []
         for selector in selectors:
-            case = ET.SubElement(suite, 'testcase', name=selector.split('::')[1])
-            if os.environ.get('FAKE_VOICE_SKIP') and 'voice' in selector:
+            name = selector.split('::')[1]
+            if name == 'test_e2e_form_variety_ready_draft_to_cancel_journey':
+                names.extend(f'{name}[{code}]' for code in (
+                    'LAT', 'TEACH', 'QIAT', 'MGMT_ROTA', 'SERIOUS_INC',
+                    'PROC_LOG', 'US_CASE', 'FORMAL_COURSE', 'REFLECT_LOG'))
+            else:
+                names.append(name)
+        if os.environ.get('FAKE_MISSING_JOURNEY'): names.pop(0)
+        for name in names:
+            case = ET.SubElement(suite, 'testcase', name=name)
+            if os.environ.get('FAKE_VOICE_SKIP') and 'voice' in name:
                 ET.SubElement(case, 'skipped', message='local say/ffmpeg unavailable')
+            if os.environ.get('FAKE_FORM_SKIP') and '[LAT]' in name:
+                ET.SubElement(case, 'skipped', message='missing form variety proof')
         ET.ElementTree(suite).write(report)
 ''')
     python.chmod(0o755)
@@ -62,11 +73,13 @@ def _run_wider_qa(harness, *, extra=None, flags=("--wider-journeys",)):
                           capture_output=True, text=True, timeout=10)
 
 
-def test_wider_mode_selects_exact_five_journeys(wider_qa_harness):
+def test_wider_mode_selects_exact_fifteen_journeys(wider_qa_harness):
     result = _run_wider_qa(wider_qa_harness)
     assert result.returncode == 0, result.stdout + result.stderr
     live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_text' in line)
-    assert live.count('tests/test_e2e.py::') == 5
+    assert live.count('tests/test_e2e.py::') == 7  # nine parametrised forms + six other journeys
+    assert 'test_e2e_form_variety_ready_draft_to_cancel_journey' in live
+    assert 'test_e2e_form_variety_pdf_ready_draft_to_cancel_journey' in live
     for kind in ('text', 'photo', 'voice', 'document'):
         assert f'test_e2e_{kind}_ready_draft_to_cancel_journey' in live
     assert 'test_e2e_settings_read_only_journey' in live
@@ -74,46 +87,69 @@ def test_wider_mode_selects_exact_five_journeys(wider_qa_harness):
     assert 'wider-completeness: PASS' in result.stdout
 
 
+def test_form_variety_mode_selects_only_ten_journeys(wider_qa_harness):
+    result = _run_wider_qa(wider_qa_harness, flags=('--form-variety',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_form_variety' in line)
+    assert live.count('tests/test_e2e.py::') == 2
+    assert 'test_e2e_form_variety_ready_draft_to_cancel_journey' in live
+    assert 'test_e2e_form_variety_pdf_ready_draft_to_cancel_journey' in live
+    assert 'form-variety-completeness: PASS' in result.stdout
+
+
+@pytest.mark.parametrize('mode', ['--wider-journeys', '--form-variety'])
 @pytest.mark.parametrize('extra', [
     {'TELEGRAM_BOT_USERNAME': 'portfolio_guru_bot'},
     {'RELEASE_LIVE_TARGET': 'other_bot'},
     {'TELEGRAM_LIVE_ALLOWED_BOTS': 'portfolio_guru_test_bot,portfolio_guru_bot'},
     {'RELEASE_LIVE_ALLOWLIST': 'portfolio_guru_bot'},
 ])
-def test_wider_mode_refuses_non_test_target_before_any_step(wider_qa_harness, extra):
-    result = _run_wider_qa(wider_qa_harness, extra=extra)
+def test_wider_mode_refuses_non_test_target_before_any_step(wider_qa_harness, extra, mode):
+    result = _run_wider_qa(wider_qa_harness, extra=extra, flags=(mode,))
     assert result.returncode == 21
     assert 'Nothing was sent' in result.stderr
     assert not wider_qa_harness[1].exists()
 
 
+@pytest.mark.parametrize('mode', ['--wider-journeys', '--form-variety'])
 @pytest.mark.parametrize('line', ['TELEGRAM_BOT_USERNAME=portfolio_guru_bot',
-                                 'TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_bot', 'WIDER_JOURNEYS=0'])
-def test_wider_mode_refuses_dotenv_redirection(wider_qa_harness, line):
+                                 'TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_bot',
+                                 'WIDER_JOURNEYS=0', 'FORM_VARIETY=0'])
+def test_wider_mode_refuses_dotenv_redirection(wider_qa_harness, line, mode):
     (wider_qa_harness[0] / 'backend/.env').write_text(line + '\n')
-    result = _run_wider_qa(wider_qa_harness)
+    result = _run_wider_qa(wider_qa_harness, flags=(mode,))
     assert result.returncode == 21, result.stdout + result.stderr
     assert 'Nothing was sent' in result.stderr
     assert 'pytest' not in wider_qa_harness[1].read_text()
 
 
+@pytest.mark.parametrize('mode', ['--wider-journeys', '--form-variety'])
 @pytest.mark.parametrize('extra', [{'RUN_LIVE_TELEGRAM': '0', 'REQUIRE_TELEGRAM_LIVE': '0'},
                                  {'FAKE_HAS_TELETHON': '0'}])
-def test_wider_mode_requires_live_proof(wider_qa_harness, extra):
-    result = _run_wider_qa(wider_qa_harness, extra=extra)
+def test_wider_mode_requires_live_proof(wider_qa_harness, extra, mode):
+    result = _run_wider_qa(wider_qa_harness, extra=extra, flags=(mode,))
     assert result.returncode == 20
     assert '::test_e2e_' not in wider_qa_harness[1].read_text()
 
 
-@pytest.mark.parametrize('extra', [{'FAKE_VOICE_SKIP': '1'}, {'FAKE_MISSING_JOURNEY': '1'}])
+@pytest.mark.parametrize('extra', [{'FAKE_VOICE_SKIP': '1'}, {'FAKE_MISSING_JOURNEY': '1'}, {'FAKE_FORM_SKIP': '1'}])
 def test_wider_mode_never_passes_incomplete_proof(wider_qa_harness, extra):
     result = _run_wider_qa(wider_qa_harness, extra=extra)
     assert result.returncode == 1
     assert 'wider-completeness' in result.stdout
 
 
+@pytest.mark.parametrize('extra', [{'FAKE_MISSING_JOURNEY': '1'}, {'FAKE_FORM_SKIP': '1'}])
+def test_form_variety_mode_never_passes_incomplete_proof(wider_qa_harness, extra):
+    result = _run_wider_qa(wider_qa_harness, extra=extra, flags=('--form-variety',))
+    assert result.returncode == 1
+    assert 'form-variety-completeness' in result.stdout
+
+
 @pytest.mark.parametrize('flags', [('--wider-journeys', '--focused-release'),
-                                 ('--whole-bot', '--wider-journeys'), ('--wider',)])
+                                 ('--whole-bot', '--wider-journeys'), ('--wider',),
+                                 ('--form-variety', '--wider-journeys'),
+                                 ('--form-variety', '--focused-release'), ('--form-variety', '--whole-bot')])
 def test_wider_mode_rejects_conflicting_or_unknown_flags(wider_qa_harness, flags):
     result = _run_wider_qa(wider_qa_harness, flags=flags)
     assert result.returncode == 64

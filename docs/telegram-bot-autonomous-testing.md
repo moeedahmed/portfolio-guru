@@ -213,6 +213,19 @@ tools skip with a reason, and skipped/missing journeys fail wider completeness.
 This does not change `--focused-release` or default staging smoke, satisfy the
 whole-bot aggregate, or establish live proof until explicitly run.
 
+`--form-variety` selects ten short, sequential ready-draft journeys on the same
+allowlisted test bot: LAT (shift leadership), TEACH, QIAT, MGMT_ROTA, SERIOUS_INC,
+PROC_LOG (chest drain), US_CASE (POCUS), FORMAL_COURSE and REFLECT_LOG text cases,
+plus a tiny synthetic teaching PDF routed to TEACH. Five text cases accept a
+matching recommendation (including `FORM|best` only with the exact target label);
+the others, and any mismatched recommendation, use Forms → category → target.
+Curriculum-specific 2021 variants are accepted where registered. Known supervision
+or reflection gaps get one generic synthetic reply; any unknown gap fails.
+Each journey observes ready Save/Cancel controls, never clicks Save, and sends
+one `/cancel` in `finally`, retaining a transcript on success or failure.
+`--wider-journeys` includes all ten, so `stage.sh smoke --wider` runs fifteen
+journeys in total. Missing, skipped or failed journeys fail completeness.
+
 ## Whole-bot completion
 
 `bash scripts/telegram_bot_qa.sh --whole-bot` is the comprehensive entrypoint.

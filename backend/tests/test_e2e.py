@@ -11,6 +11,7 @@ from tests.helpers import unstamp
 
 from tests.telegram_live_harness import (
     TelegramExchange,
+    allowed_bot_usernames,
     assert_live_telegram_guardrails,
     button_texts,
     classify_post_click_draft_state,
@@ -47,6 +48,73 @@ SYNTHETIC_CASE = (
     "I will apply this approach to future cases."
 )
 
+# Categories and labels are from bot.FORM_CATEGORIES/_CAT_SLUGS and
+# FORM_BUTTON_LABELS. These invented cases contain no identifying details.
+# Five cases try a matching recommendation; four always use Forms.
+FORM_VARIETY_CASES = {
+    "LAT": ("MANAGEMENT", "LAT", True,
+            "I led an ED evening shift, allocated staff, chaired safety huddles and escalated crowding. "
+            "Leadership context: coordinating the multidisciplinary team under indirect supervision. "
+            "I prioritised resus cover to reduce delays. Reflection: early task allocation helped; I will repeat the huddles."),
+    "TEACH": ("TEACHING", "Teaching Session", False,
+              "I delivered a twenty-minute teaching session to junior doctors in ED. Title: Safe handover. "
+              "Learning outcomes: structure an SBAR handover and identify escalation triggers. "
+              "Learners practised scenarios and gave positive feedback. Reflection: rehearsal helped; I will allow more discussion time."),
+    "QIAT": ("QUALITY", "QIAT", True,
+             "In my Emergency Medicine placement I led a QI project on equipment checks. "
+             "My QI PDP goal was reliable daily checks; I attended local QI education. "
+             "I was involved in the project: baseline measurement, process mapping, PDSA and remeasurement. "
+             "Checks improved from 60 to 90 percent. Reflection: staff feedback simplified the checklist. "
+             "Next year's PDP: sustain monthly measurement and share learning."),
+    "MGMT_ROTA": ("MANAGEMENT", "Rota", False,
+                  "I coordinated an ED rota, reviewed staffing gaps with the duty consultant and arranged fair cover. "
+                  "I checked rest periods and communicated the revised schedule. "
+                  "Reflection: earlier consultation reduced last-minute changes; I will review gaps weekly."),
+    "SERIOUS_INC": ("REFLECTIVE", "Serious Incident", True,
+                    "I reflected on a simulated serious incident in ED: delayed recognition of a deteriorating adult. "
+                    "An escalation call was missed; root cause was unclear escalation ownership. "
+                    "Contributing factors were workload and an incomplete handover. "
+                    "Learning: assign escalation explicitly. Further action: practise closed-loop communication at the next simulation."),
+    "PROC_LOG": ("PROCEDURAL", "Procedural Log", False,
+                 "In ED resus I inserted a chest drain in a simulated adult with pneumothorax, under direct supervision. "
+                 "I checked consent, equipment and sterile technique, inserted the drain and confirmed its position. "
+                 "Reflective comments: preparing equipment improved flow; I will rehearse the safety checklist."),
+    "US_CASE": ("PROCEDURAL", "Ultrasound Case", True,
+                "I performed point-of-care ultrasound in an ED simulation for an adult with shock. "
+                "I obtained cardiac views under direct supervision, found a pericardial effusion and escalated to the senior clinician. "
+                "Reflection: integrating images with the examination improved decisions; I will practise subcostal views."),
+    "FORMAL_COURSE": ("TEACHING", "Formal Course", False,
+                      "I attended a simulation instructor course. Project description: designing and delivering an ED simulation. "
+                      "Resources used: the course workbook, faculty demonstrations and debrief checklist. "
+                      "Reflective notes: structured debrief improved participation. Lessons learned: use open questions; "
+                      "I will apply them in my next teaching session."),
+    "REFLECT_LOG": ("REFLECTIVE", "Reflective log", True,
+                    "I reflected on a simulated ED handover where task ownership was unclear. "
+                    "I clarified roles with the team and repeated the plan. "
+                    "Reflection: closed-loop communication reduced confusion; I will confirm ownership at future handovers."),
+}
+
+
+def _form_variety_case(form_code):
+    return "Synthetic training evidence only. On 17 March 2026. " + FORM_VARIETY_CASES[form_code][3]
+
+
+FORM_VARIETY_PDF_CASE = (
+    "Synthetic training evidence only. On 17 March 2026 I delivered ED teaching to junior doctors. "
+    "Title: Team briefing. Learning outcomes: assign clear roles and use closed-loop communication. "
+    "Learners practised a simulation and gave feedback. Reflection: practice clarified roles; "
+    "I will allow more rehearsal time."
+)
+
+# Reviewed curriculum variants present in extractor.FORM_UUIDS. MGMT_ROTA
+# has no 2021 variant; do not allow arbitrary FORM payloads or suffixes.
+FORM_VARIETY_PAYLOADS = frozenset(
+    {f"FORM|{code}" for code in FORM_VARIETY_CASES}
+    | {f"FORM|{code}_2021" for code in FORM_VARIETY_CASES if code != "MGMT_ROTA"}
+    | {f"FORM|cat_{spec[0]}" for spec in FORM_VARIETY_CASES.values()}
+    | {"FORM|show_all"}
+)
+
 
 def _synthetic_photo(path):
     from PIL import Image, ImageDraw, ImageFont
@@ -70,10 +138,10 @@ def _synthetic_photo(path):
     return path
 
 
-def _synthetic_pdf(path):
+def _synthetic_pdf(path, case_text=SYNTHETIC_CASE):
     # One deterministic text PDF, using only the standard library. Offsets in
     # the xref table are byte offsets; content is ASCII with PDF escaping.
-    lines = textwrap.wrap(SYNTHETIC_CASE, 80)
+    lines = textwrap.wrap(case_text, 80)
     content = b"BT /F1 12 Tf 50 780 Td 18 TL\n"
     for line in lines:
         escaped = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
@@ -137,7 +205,7 @@ async def _wider_wait(client, transcript, action, *, before=None, min_id=None, *
 
 async def _wider_click(client, transcript, message, payload, **expect):
     # Explicit safe navigation/read controls only. Save is observed, never clicked.
-    assert payload in {
+    assert payload in FORM_VARIETY_PAYLOADS | {
         "DOCUSE|info", "GATHER|done", "FORM|CBD", "FORM|CBD_2021", "FORM|best",
         "ACTION|cancel", "CANCEL|draft", "ACTION|portfolio_defaults",
         "REMIND|menu", "ACTION|voice", "ACTION|settings", "VOICE|back_to_settings",
@@ -190,6 +258,83 @@ def _preview_date(reply):
     return match.group(1).strip()
 
 
+async def _form_variety_ready_draft_to_cancel(client, form_code, case_text, *, prefer_recommendation, document=None):
+    assert_live_telegram_guardrails(BOT_USERNAME)
+    assert BOT_USERNAME == "portfolio_guru_test_bot" and allowed_bot_usernames() == {BOT_USERNAME}, "Form variety is test-bot-only"
+    transcript = []
+    name = f"form-variety-{form_code}" + ("-pdf" if document is not None else "")
+    try:
+        category, label, _, _ = FORM_VARIETY_CASES[form_code]
+        targets = {payload for payload in FORM_VARIETY_PAYLOADS
+                   if payload in {f"FORM|{form_code}", f"FORM|{form_code}_2021"}}
+        before = await _wider_before_send(client)
+        transcript.append(TelegramExchange(step="capture", action=f"send:{name}", received="Capture attempted"))
+        if document is None:
+            sent = await client.send_message(BOT_USERNAME, case_text)
+        else:
+            sent = await client.send_file(BOT_USERNAME, str(document), force_document=True,
+                                          caption="Synthetic training note only.")
+        reply = await _wider_wait(client, transcript, f"after:{name}", before=before, min_id=sent.id,
+                                  expect_buttons=True, expect_button_any=("Read text", "Use as case", "Choose form"))
+        if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
+            reply = await _wider_click(client, transcript, reply, "DOCUSE|info",
+                                       expect_buttons=True, expect_button_any=("Choose form",))
+        reply = await _wider_click(client, transcript, reply, "GATHER|done",
+                                   expect_buttons=True, expect_button_any=(label, "Forms"))
+        form = None
+        if prefer_recommendation:
+            for row in (reply.buttons or []):
+                for button in row:
+                    payload = _payload(button)
+                    # best does not name a form in its payload: require the
+                    # exact target label, with only its leading emoji removed.
+                    visible_label = re.sub(r"^[^\w]+", "", button.text).strip()
+                    if payload in targets or (payload == "FORM|best" and visible_label == label):
+                        form = payload
+                        break
+                if form:
+                    break
+        if form is None:
+            reply = await _wider_click(client, transcript, reply, "FORM|show_all", expect_buttons=True)
+            reply = await _wider_click(client, transcript, reply, f"FORM|cat_{category}",
+                                       expect_buttons=True, expect_button_any=(label,))
+            form = next((_payload(b) for row in (reply.buttons or []) for b in row if _payload(b) in targets), None)
+            assert form, f"Target form {form_code} missing from Forms list"
+        reply = await _wider_click(client, transcript, reply, form,
+                                   expect_buttons=True, expect_button_any=("Save to Kaizen", "Save draft to Kaizen"))
+        if classify_post_click_draft_state(reply) == "draft_with_gaps":
+            # Only the two existing gap labels are reviewed. Match the entire
+            # list, not a known prefix that could hide an unknown extra gap.
+            known = r"(?:level of supervision|your reflection \(what you learned or would do differently\))"
+            assert re.search(rf"still needed:\s*{known}(?:(?:, | and ){known})*\.\s*reply\b",
+                             reply.raw_text or "", re.I), "Unreviewed draft gap"
+            detail = ("Level of supervision: indirect. I discussed this activity with my senior. "
+                      "What I learned: clear roles helped the team; I will confirm responsibilities next time.")
+            fingerprint = message_fingerprint(reply)
+            await client.send_message(BOT_USERNAME, detail)
+            reply = await _wider_wait(client, transcript, f"send:{detail}", before=fingerprint,
+                                      expect_buttons=True, expect_button_any=("Save to Kaizen",))
+        _assert_ready_review(reply)
+        # Ready preview is the end of this journey. Save is never clicked.
+    finally:
+        await _wider_cleanup(client, transcript, name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_code", FORM_VARIETY_CASES, ids=list(FORM_VARIETY_CASES))
+async def test_e2e_form_variety_ready_draft_to_cancel_journey(telethon_client, form_code):
+    await _form_variety_ready_draft_to_cancel(
+        telethon_client, form_code, _form_variety_case(form_code),
+        prefer_recommendation=FORM_VARIETY_CASES[form_code][2])
+
+
+@pytest.mark.asyncio
+async def test_e2e_form_variety_pdf_ready_draft_to_cancel_journey(telethon_client, tmp_path):
+    document = _synthetic_pdf(tmp_path / "synthetic-teaching.pdf", FORM_VARIETY_PDF_CASE)
+    await _form_variety_ready_draft_to_cancel(
+        telethon_client, "TEACH", FORM_VARIETY_PDF_CASE, prefer_recommendation=False, document=document)
+
+
 async def _media_ready_draft_to_cancel(client, path, kind):
     assert_live_telegram_guardrails(BOT_USERNAME)
     transcript = []
@@ -240,7 +385,9 @@ async def _media_ready_draft_to_cancel(client, path, kind):
         assert _preview_date(refreshed) == "18 Mar 2026", "Encounter date change missing from refreshed preview"
         if kind == "text":
             selections = parse_visible_kc_selections(refreshed.raw_text or "")
-            assert len(selections) == len(set(selections)) == 3, "Expected three distinct visible KCs"
+            # The bot keeps fewer than three when the case supports fewer;
+            # it must never pad or invent curriculum links.
+            assert 1 <= len(selections) == len(set(selections)) <= 3, "Expected 1-3 distinct visible KCs"
         # Stop at the refreshed preview. No Save or additional Cancel click.
     finally:
         await _wider_cleanup(client, transcript, kind)
