@@ -490,8 +490,12 @@ async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, m
     assert code == 0, report
     entry = report["forms"][0]
     assert entry["draft_url"] == fake.drafts[0]["url"]
-    assert all(row["classification"] == "landed" or (row["field"].startswith("tag:") and row["classification"] == "count-only")
+    # Conditional fields outside the synthetic scenario (e.g. PROC_LOG "Other"
+    # boxes) are reported not-applicable rather than filled.
+    assert all(row["classification"] in {"landed", "not-applicable"}
+               or (row["field"].startswith("tag:") and row["classification"] == "count-only")
                for row in entry["fields"])
+    assert any(row["classification"] == "landed" for row in entry["fields"])
     assert any(row["field"] in {"kc:SLO6 KC1", "tag:SLO6 KC1"} for row in entry["fields"])
     assert requested == [check.OPERATOR_USER_ID]
     assert fake.submit_clicks == 0
