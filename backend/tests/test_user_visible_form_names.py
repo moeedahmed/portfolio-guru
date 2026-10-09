@@ -220,7 +220,7 @@ async def test_case_specific_form_question_has_hard_limits_and_plain_text(monkey
     import extractor
 
     case_context = "Adult in ED with chest pain. I assessed and managed risk."
-    generate = AsyncMock(return_value="**CBD** fits because the case centres on clinical reasoning.")
+    generate = AsyncMock(return_value='{"form_codes": ["CBD"]}')
     monkeypatch.setattr(extractor, "_generate", generate)
 
     answer = await extractor.answer_question(question, case_context=case_context)
@@ -229,11 +229,11 @@ async def test_case_specific_form_question_has_hard_limits_and_plain_text(monkey
     prompt = generate.call_args.args[0]
     assert case_context in prompt
     assert f"User question: {question}" in prompt
-    assert "suggest the 2-3 best RCEM WPBA form types for THIS specific case" in prompt
-    assert "Portfolio Guru flexible reply style:" in prompt
-    assert "- Never describe how Portfolio Guru stores, uses or protects logins or credentials, and never promise uploads, filing or saving." in prompt
+    assert "Select the 2-3 best RCEM portfolio form codes for THIS specific case" in prompt
+    assert 'Return ONLY JSON: {"form_codes": ["CBD", "DOPS"]}' in prompt
+    assert "no explanations, reasons, sentences" in prompt
     assert generate.call_args.kwargs == {"purpose": "grounded_answer"}
-    assert "Case-Based Discussion fits" in answer
+    assert "Case-Based Discussion: clinical reasoning and management" in answer
     assert "**" not in answer
 
 

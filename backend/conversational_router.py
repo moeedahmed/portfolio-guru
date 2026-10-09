@@ -156,6 +156,15 @@ FILE_TERMS = (
 
 ACCOUNT_TERMS = (
     "account",
+    "tier",
+    "limit",
+    "access",
+    "blocked",
+    "trial",
+    "usage",
+)
+
+BILLING_TERMS = (
     "billing",
     "payment",
     "pay",
@@ -164,15 +173,12 @@ ACCOUNT_TERMS = (
     "how much",
     "subscribe",
     "subscription",
-    "plan",
     "price",
     "pricing",
-    "tier",
-    "limit",
-    "access",
-    "blocked",
-    "trial",
-    "usage",
+    "card",
+    "refund",
+    "upgrade",
+    "invoice",
 )
 
 SETUP_TERMS = (
@@ -231,8 +237,12 @@ def route_message(message: str) -> RouterResult:
             signals=_compact_signals(action="medical_safety_redirect"),
         )
 
-    # Case evidence owns the turn; a handover plan or login problem within a
-    # reflection is not a request to change the doctor's bot account.
+    # Classify a product question by its own clause, so a login delay in the
+    # preceding activity does not turn an account or billing question into setup.
+    product_question = _product_question(text)
+    routing_text = product_question or text
+
+    # Case evidence owns the turn unless a question asks about the product.
     if has_case_narrative(text):
         return RouterResult(
             intent=ConversationalIntent.NEW_CASE,
@@ -240,25 +250,32 @@ def route_message(message: str) -> RouterResult:
             signals=_compact_signals(action="start_case", form_type=form_type),
         )
 
-    if _contains_any(text, SETUP_TERMS):
+    if _contains_any(routing_text, SETUP_TERMS):
         return RouterResult(
             intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
             confidence=0.88,
             signals=_compact_signals(action="setup_credentials"),
         )
 
-    if _looks_like_question(text) and _contains_any(text, SECURITY_TERMS):
+    if _looks_like_question(routing_text) and _contains_any(routing_text, SECURITY_TERMS):
         return RouterResult(
             intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
             confidence=0.86,
             signals=_compact_signals(action="security_credentials"),
         )
 
-    if _contains_any(text, ACCOUNT_TERMS):
+    if _contains_any(routing_text, BILLING_TERMS + ACCOUNT_TERMS):
         return RouterResult(
             intent=ConversationalIntent.ACCOUNT_OR_BILLING,
             confidence=0.86,
             signals=_compact_signals(action="account_or_billing"),
+        )
+
+    if product_question:
+        return RouterResult(
+            intent=ConversationalIntent.HELP_OR_CAPABILITY,
+            confidence=0.86,
+            signals=_compact_signals(action="answer_capability"),
         )
 
     if _looks_like_form_help_request(text, form_type):
@@ -397,9 +414,46 @@ def _contains_safety_medical_request(text: str) -> bool:
 
 
 def _looks_like_question(text: str) -> bool:
-    return "?" in text or bool(
-        re.match(r"^(what|which|how|why|when|where|who|can|could|do|does|is|are|will|should)\b", text)
+    return "?" in text or bool(_question_clauses(text))
+
+
+def _question_clauses(text: str) -> tuple[str, ...]:
+    """Find direct questions anywhere; 'how to' and 'why login was' narrate activity."""
+    question_start = (
+        r"^(?:(?:what|which|who)\b|"
+        r"how\s+(?:do|does|did|can|could|should|will|is|are|much|many)\b|"
+        r"(?:why|when|where)\s+(?:do|does|did|can|could|should|will|is|are|was|were)\b|"
+        r"(?:can|could|do|does|is|are|will|should)\s+"
+        r"(?:i|we|you|my|our|this|that|the|portfolio guru|kaizen)\b)"
     )
+    # A question can follow a sentence or a joined clause, while an embedded
+    # 'I taught which account to use' describes the activity's subject.
+    clauses = (clause.strip() for clause in re.split(r"[?!.;:,]|\b(?:and|but)\b", text))
+    return tuple(clause for clause in clauses if re.match(question_start, clause))
+
+
+def _product_question(text: str) -> str | None:
+    """Return the product question, excluding requests for evidence-writing help."""
+    evidence_subjects = "|".join(re.escape(subject) for subject in (
+        "case", *(alias for aliases in FORM_ALIASES.values() for alias in aliases),
+    ))
+    for question in _question_clauses(text):
+        # The requested action's object decides the subject: reconnecting an
+        # account to save a reflection asks for setup; helping with the
+        # reflection about a login delay asks for evidence-writing help.
+        if re.search(
+            r"\b(?:(?:help|support)\s+(?:me\s+)?(?:with\s+)?(?:(?:write|draft)\s+)?|"
+            r"(?:write|draft|rewrite)\s+)"
+            r"(?:(?:a|my|this|the|our|handover|clinical|teaching)\s+)*"
+            rf"(?:{evidence_subjects})\b",
+            question,
+        ):
+            continue
+        if _contains_any(question, SETUP_TERMS + ACCOUNT_TERMS + BILLING_TERMS + SECURITY_TERMS + (
+            "upload", "save", "saving", "file", "filing", "submit", "bot", "app",
+        )):
+            return question
+    return None
 
 
 def _looks_like_case_description(text: str) -> bool:
@@ -424,15 +478,7 @@ def has_case_narrative(message: str) -> bool:
     # draft rather than new evidence. Leave them to the existing filing route.
     if _contains_any(text, FILE_TERMS):
         return False
-    # A direct product-help question wins even after narrated problem wording.
-    # Match the question clause, not incidental login words in activity prose.
-    product_question = re.search(
-        r"\b(?:how\s+(?:do|can|could|should)\s+i|can\s+you|could\s+you)\b([^?!.;]*)",
-        text,
-    )
-    if product_question and _contains_any(product_question[0], SETUP_TERMS + ACCOUNT_TERMS + (
-        "upload", "save", "saving", "file", "filing", "submit", "bot", "app",
-    )):
+    if _product_question(text):
         return False
     narrated_activity = bool(re.search(
         r"\b(?:i|we)\s+(?:had|saw|assessed|managed|treated|reviewed|reflected|taught|"

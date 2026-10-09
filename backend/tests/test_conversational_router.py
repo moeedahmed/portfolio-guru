@@ -175,6 +175,47 @@ def test_product_problem_question_after_reflection_word_routes_to_setup():
     assert route_message("I had a problem saving my reflection. How do I reconnect my account?").intent == ConversationalIntent.SETUP_OR_CREDENTIALS
 
 
+@pytest.mark.parametrize(("message", "expected_intent"), [
+    ("I had a problem saving my reflection. Why is my account blocked?", ConversationalIntent.ACCOUNT_OR_BILLING),
+    ("I had a problem saving my reflection. How do I reconnect my account?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("I taught handover communication. Can you help with a reflection on our plan?", ConversationalIntent.NEW_CASE),
+    ("File this 45F sepsis case as a CBD in Kaizen. I reviewed the management plan.", ConversationalIntent.FILE_TO_KAIZEN),
+    ("I taught handover communication; login access delayed the session", ConversationalIntent.NEW_CASE),
+    ("How much does it cost?", ConversationalIntent.ACCOUNT_OR_BILLING),
+    ("I taught handover communication. How does this bot work?", ConversationalIntent.HELP_OR_CAPABILITY),
+    ("I taught handover communication; why is my account blocked", ConversationalIntent.ACCOUNT_OR_BILLING),
+    ("I taught handover communication. Is my login encrypted?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("I taught handover communication; my account is blocked", ConversationalIntent.NEW_CASE),
+    ("I taught handover communication. Can you help with a reflection about the login delay?", ConversationalIntent.NEW_CASE),
+    ("I taught handover communication. How do I save my draft in Kaizen?", ConversationalIntent.HELP_OR_CAPABILITY),
+    ("I taught how to reconnect an account during handover", ConversationalIntent.NEW_CASE),
+    ("I taught why login access was delayed during handover", ConversationalIntent.NEW_CASE),
+    ("I taught which account to use during handover", ConversationalIntent.NEW_CASE),
+    ("I taught handover and how do I reconnect my account?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("Can you help reconnect my account to save this reflection?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+    ("I taught handover. Can you help reconnect my account to save my reflection?", ConversationalIntent.SETUP_OR_CREDENTIALS),
+])
+def test_question_subject_and_activity_keep_product_help_separate_from_cases(message, expected_intent):
+    assert route_message(message).intent == expected_intent
+
+
+@pytest.mark.parametrize("message", [
+    "What is our management plan?", "Can you help with a reflection on our plan?", "plan",
+])
+def test_bare_plan_does_not_route_to_billing(message):
+    assert route_message(message).intent != ConversationalIntent.ACCOUNT_OR_BILLING
+
+
+@pytest.mark.parametrize("message", [
+    "How do I upgrade?", "Can I get a refund?", "Where is my invoice?",
+    "Can I change my payment card?", "What does the paid plan include?",
+    "What is the subscription price?", "Cancel subscription", "How do I pay?",
+    "What is the paid plan?", "Which paid plan is best?",
+])
+def test_genuine_billing_terms_route_to_billing(message):
+    assert route_message(message).intent == ConversationalIntent.ACCOUNT_OR_BILLING
+
+
 @pytest.mark.asyncio
 async def test_active_case_upload_method_question_never_uses_case_advice_model():
     from unittest.mock import AsyncMock, patch
@@ -204,11 +245,11 @@ async def test_genuine_form_question_rejects_model_product_claims(claim):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('question', ['Which form should I use?', 'Should I use CBD or DOPS?', 'What form is best for this case?'])
-async def test_case_form_choice_accepts_safe_case_grounded_model_advice(question):
+async def test_case_form_choice_renders_valid_model_codes_with_fixed_copy(question):
     from unittest.mock import AsyncMock, patch
     from extractor import answer_question
-    with patch('extractor._generate', AsyncMock(return_value='CBD fits the imaging decision; DOPS fits an observed procedure.')) as generate:
+    with patch('extractor._generate', AsyncMock(return_value='{"form_codes": ["CBD", "DOPS"]}')) as generate:
         answer = await answer_question(question, case_context='I assessed an ankle injury in ED.')
     generate.assert_awaited_once()
-    assert 'fits the imaging decision' in answer
-    assert 'fits an observed procedure' in answer
+    assert 'Case-Based Discussion: clinical reasoning and management' in answer
+    assert 'Direct Observation of Procedural Skills: an observed procedure' in answer

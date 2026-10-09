@@ -6538,7 +6538,7 @@ def _format_draft_preview(
     if possible:
         code = possible["capability"].split(":", 1)[0]
         title = _kc_preview_summary(possible["capability"])
-        extra = f"\n\nPossible extra: {code}: {title} - {_safe_markdown_text(possible['reason'])}"
+        extra = f"\n\nPossible extra: {code}: {title}"
     return preview + extra + layer + coach + degraded
 
 
@@ -12350,6 +12350,9 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
     full code must be passed into ``extract_form_data`` so the resulting draft
     carries the correct Kaizen UUID for the chosen curriculum variant.
     """
+    # The active preview owns confirmation; pending is the fallback while a
+    # template is still being built. Both belong to this same open case.
+    previous = _load_draft(context) or _load_pending_draft(context)
     vp = get_voice_profile(user_id) or ""
     name_failures_before = service_failure_count()
     base_form_type = form_type[:-5] if form_type.endswith("_2021") else form_type
@@ -12376,6 +12379,8 @@ async def _analyse_selected_form(context: ContextTypes.DEFAULT_TYPE, user_id: in
             ),
             timeout=45,
         )
+    from extractor import preserve_unconfirmed_possible_kc
+    draft = preserve_unconfirmed_possible_kc(previous, draft)
     # Carry the sidecar's availability out of the extractor so the preview can
     # say the draft was checked with weaker cover. A silent downgrade would let
     # the doctor believe they had protection they did not have on this draft.
@@ -17646,11 +17651,10 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 )
                 if gate is not None:
                     return gate
+                previous = draft
                 if isinstance(draft, FormDraft):
-                    draft = FormDraft(
-                        form_type=draft.form_type, uuid=draft.uuid,
-                        fields={**draft.fields, **updates},
-                    )
+                    # Carry preview metadata as well as the edited filing fields.
+                    draft = draft.model_copy(update={"fields": {**draft.fields, **updates}})
                 else:
                     # A model may use null to clear a field. Restore its
                     # empty default and validate before replacing the draft.
@@ -17667,6 +17671,8 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                             reply_markup=_active_draft_keyboard(context),
                         )
                         return AWAIT_APPROVAL
+                from extractor import preserve_unconfirmed_possible_kc
+                draft = preserve_unconfirmed_possible_kc(previous, draft)
                 draft = _blank_judged_missing_essentials(context, draft, case_text, chosen_form or "CBD")
                 _store_draft(context, draft)
                 _set_reflection_detail_gate(context, draft)

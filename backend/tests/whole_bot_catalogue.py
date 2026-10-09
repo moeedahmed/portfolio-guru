@@ -61,7 +61,11 @@ def producer_digest():
 # Add updates KCs only after the tap; stale/save-in-progress taps are inert.
 # 9 Oct 2026: reviewed regeneration guard retains unconfirmed possible KCs;
 # only the existing Add tap selects them. No keyboard or callback changes.
-PRODUCER_DIGEST = '930fb8b23920f561a8e53a619734fe42f4a9c14be7c8c06b0a82f4a20b7920e8'
+# 9 Oct 2026: reviewed static curriculum-only possible-KC copy and metadata
+# preservation through field edits and active/pending re-analysis. Add remains
+# the sole selection action;
+# existing keyboards, callback payloads and approval ownership are unchanged.
+PRODUCER_DIGEST = '91c7f6b1fd68694bbf43bf21c6eb1bab44e826ffc9f44c2357ec38e72d40f3fb'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|add_possible_kc|*

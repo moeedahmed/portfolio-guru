@@ -1141,8 +1141,7 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
     return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
 
 
-# These surfaces may explain form choice or case evidence, never product policy.
-# Reject the entire model answer rather than trying to remove unsafe clauses.
+# User-input routing only: product questions go to reviewed product copy.
 _CASE_PRODUCT_TOPICS = (
     r"\b(?:log[ -]?ins?|log(?:ged|ging)?\s+(?:in|into|on)|"
     r"sign[ -]?ins?|sign(?:ed|ing)?\s+(?:in|into|on)|password\w*|credential\w*|encrypt\w*|"
@@ -1151,14 +1150,30 @@ _CASE_PRODUCT_TOPICS = (
     r"support(?:s|ed)?|capabilit(?:y|ies)|application|platform|assistant|"
     r"secure|security|privacy|protect\w*|stor(?:e|es|ed|ing|age)|guarantee\w*)\b"
 )
-_CASE_ADVICE_FORBIDDEN = re.compile(
-    _CASE_PRODUCT_TOPICS + r"|\b(?:i|we|our)\b|\b(?:it|this|you)\s+(?:can|will|shall|could)\b",
-    re.IGNORECASE,
-)
-
-
-def _safe_case_advice(text):
-    return isinstance(text, str) and bool(text.strip()) and not _CASE_ADVICE_FORBIDDEN.search(text)
+# Reviewed 9 Oct 2026: descriptions identify evidence types only. The model
+# selects codes; no model sentence is used on the case-form advice surface.
+_CASE_FORM_DESCRIPTIONS = {
+    "CBD": "clinical reasoning and management",
+    "DOPS": "an observed procedure",
+    "MINI_CEX": "an observed patient assessment",
+    "ACAT": "observed care across multiple patients",
+    "LAT": "leadership during clinical work",
+    "ACAF": "critical appraisal of research evidence",
+    "STAT": "a formally assessed teaching session",
+    "MSF": "feedback from colleagues",
+    "QIAT": "quality improvement work",
+    "JCF": "a journal club discussion",
+    "TEACH": "a teaching session you delivered",
+    "PROC_LOG": "a record of a procedure",
+    "SDL": "self-directed learning",
+    "US_CASE": "reflection on an ultrasound case",
+    "ESLE": "learning from an extended supervised clinical session",
+    "COMPLAINT": "reflection on a complaint",
+    "SERIOUS_INC": "reflection on a serious incident",
+    "EDU_ACT": "an educational activity you attended",
+    "FORMAL_COURSE": "a formal course you attended",
+    "REFLECT_LOG": "reflection on your practice and learning",
+}
 
 
 def _is_case_form_choice_question(text):
@@ -1195,31 +1210,34 @@ async def answer_question(text: str, case_context: str = "", document_name: str 
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
     if case_context and _is_case_form_choice_question(text):
-        prompt = f"""You are Portfolio Guru. The user has an active clinical case and is asking what form type would be best for it.
-
+        from filer_router import PLATFORM_REGISTRY
+        supported = PLATFORM_REGISTRY.get("kaizen", {}).get("supported_forms", [])
+        available = tuple(code for code in _CASE_FORM_DESCRIPTIONS
+                          if code in supported and code in FORM_SCHEMAS)
+        prompt = f"""Select the 2-3 best RCEM portfolio form codes for THIS specific case.
 Active case:
-\"\"\"
-{case_context[:800]}
-\"\"\"
-
+<case>{case_context[:800]}</case>
 User question: {text}
-
-Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific case.
-Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
-
-Be concise. For each suggestion give the form name and a one-line reason why it fits this case.
-
-Hard limits:
-- Suggest only from the list above. Never invent a form, and never claim a form does or does not exist on Kaizen.
-- Never map anything to an SLO, key capability, or curriculum number.
-- Never state RCEM, ARCP, deanery, or Kaizen platform rules, and never predict how a panel will treat evidence.
-- Never tell the user to upload a loose file to Kaizen; this product saves drafts of the forms listed above.
-- Never describe how Portfolio Guru stores, uses or protects logins or credentials, and never promise uploads, filing or saving.
-
-{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
+Available form codes: {", ".join(available)}.
+Return ONLY JSON: {{"form_codes": ["CBD", "DOPS"]}}.
+Return codes only, no explanations, reasons, sentences, curriculum links or product claims.
+Use an empty list if none fits."""
         generated = await _generate(prompt, purpose="grounded_answer")
-        if _safe_case_advice(generated):
-            return sanitize_internal_form_codes(generated.replace("**", "").strip())
+        try:
+            data = json.loads(generated)
+        except (ValueError, TypeError):
+            data = None
+        codes = data.get("form_codes") if isinstance(data, dict) else None
+        valid = []
+        if isinstance(codes, list):
+            for code in codes:
+                if isinstance(code, str) and code in available and code not in valid:
+                    valid.append(code)
+        if valid:
+            return "🩺 Possible forms:\n" + "\n".join(
+                f"• {public_form_name(code)}: {_CASE_FORM_DESCRIPTIONS[code]}"
+                for code in valid[:3]
+            )
         reply = select_deterministic_reply(text, include_first_contact=False)
         return reply.full_text() if reply is not None else render_message("scope_redirect")
 
@@ -3253,7 +3271,6 @@ def _canonical_kcs(capabilities, *, strict=False):
 _POSSIBLE_KC_INSTRUCTION = """
 If fewer than 3 distinct KCs are genuinely supported, you may return ONE separate
 top-level "possible_key_capability": {"capability": "<exact KC from the curriculum>",
-"reason": "<one line, at most 140 characters, tied to the case>",
 "evidence": "<exact quote from the doctor's case or feedback>"}.
 This is a POSSIBLE extra for the doctor to confirm, NOT a supported link: never
 put it in key_capabilities or curriculum_links. It must be a distinct, plausible
@@ -3267,9 +3284,9 @@ or if 3 KCs are already supported. Do not return a list of possible KCs.
 def _validated_possible_key_capability(candidate, selected, source_text=None, *, excluded=()):
     """Canonical curriculum identity and source anchor; never supplement selection.
 
-    Extraction requires an exact source quote. Store only the de-identified
-    reason, not another copy of that potentially sensitive quote. Subsequent
-    preview/tap validation reads this already-validated draft metadata.
+    Extraction requires an exact source quote. Store only curriculum identity;
+    model reasons and source quotes never reach preview or persistence.
+    Subsequent preview/tap validation reads this validated draft metadata.
     """
     if not isinstance(candidate, dict):
         return None
@@ -3278,17 +3295,13 @@ def _validated_possible_key_capability(candidate, selected, source_text=None, *,
     if (not canonical or len(selected_ids) >= 3 or
             _kc_identity(canonical) in selected_ids or _kc_identity(canonical) in excluded):
         return None
-    reason = candidate.get("reason")
-    if not _safe_case_advice(reason) or len(reason.strip()) > 140 or "\n" in reason or "\r" in reason:
-        return None
     if source_text is not None:
         evidence = candidate.get("evidence")
         if not isinstance(evidence, str) or not evidence.strip():
             return None
         if " ".join(evidence.split()).casefold() not in " ".join(source_text.split()).casefold():
             return None
-    safe, _ = deidentify_draft_fields({"reason": reason.strip()})
-    return {"capability": canonical, "reason": safe["reason"]}
+    return {"capability": canonical}
 
 
 def preserve_unconfirmed_possible_kc(previous, regenerated):
@@ -3304,11 +3317,9 @@ def preserve_unconfirmed_possible_kc(previous, regenerated):
     if not capability:
         return regenerated
     fields = dict(regenerated.fields) if isinstance(regenerated, FormDraft) else None
-    selected = fields.get("key_capabilities", []) if fields is not None else regenerated.key_capabilities
+    selected = (fields.get("key_capabilities") or []) if fields is not None else regenerated.key_capabilities
     selected = [kc for kc in selected if _kc_identity(kc) != _kc_identity(capability)]
-    # An old reason may now fail the text guard. Retain only its identity,
-    # with an empty reason so preview/Add validation cannot display it.
-    possible = _validated_possible_key_capability(candidate, []) or {"capability": capability, "reason": ""}
+    possible = {"capability": capability}
     links = _derive_curriculum_links_from_kcs(selected)
     if fields is not None:
         fields.update(key_capabilities=selected, curriculum_links=links)
