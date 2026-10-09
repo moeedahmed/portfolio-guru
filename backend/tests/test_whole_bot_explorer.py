@@ -91,7 +91,9 @@ def catalogue():
 
 
 def limits(**kwargs):
-    return ExplorationLimits(**{"response_seconds": .2, "poll_interval": 0, **kwargs})
+    # The fake client answers at once; 0.2s per reply timed out on a loaded CI
+    # runner (9 Oct 2026), so give each reply real headroom.
+    return ExplorationLimits(**{"response_seconds": 3, "poll_interval": 0, **kwargs})
 
 
 async def run(client, tmp_path, **kwargs):
