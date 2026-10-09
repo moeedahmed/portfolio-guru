@@ -87,7 +87,7 @@ def repo(tmp_path):
     git(work, "symbolic-ref", "HEAD", "refs/heads/main", env=base_env)
     scripts = work / "scripts"
     scripts.mkdir()
-    for name in ("release_loop.sh", "release_card.py", "release_bootstrap.py", "staging_proof.py"):
+    for name in ("release_loop.sh", "release_card.py", "release_bootstrap.py", "staging_proof.py", "telegram_journey_proof.py"):
         shutil.copy(SCRIPTS / name, scripts / name)
         (scripts / name).chmod(0o755)
     for name in ("preflight.sh", "telegram_qa_offline.sh", "telegram_bot_qa.sh", "dogfood_smoke.sh"):

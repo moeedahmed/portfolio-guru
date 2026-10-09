@@ -5,7 +5,7 @@ ROOT="${PORTFOLIO_GURU_APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 BACKEND="${ROOT}/backend"
 STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 ARTIFACT_ROOT="${TELEGRAM_BOT_QA_ARTIFACT_ROOT:-${ROOT}/.artifacts/telegram-bot-qa}"
-ARTIFACT_DIR="${ARTIFACT_ROOT}/${STAMP}"
+ARTIFACT_DIR="${ARTIFACT_ROOT}/${STAMP}-$$"
 RUN_LIVE="${RUN_LIVE_TELEGRAM:-auto}"
 REQUIRE_LIVE="${REQUIRE_TELEGRAM_LIVE:-1}"
 LIVE_APPROVAL_VALUE="portfolio-guru-live-qa-approved"
@@ -15,6 +15,8 @@ WHOLE_BOT=0
 WIDER_JOURNEYS=0
 FORM_VARIETY=0
 FORM_SWITCHING=0
+JOURNEY_OPTIONS=()
+SELECTION_COUNT=0
 
 # Captured read-only before backend/.env is read. A release live proof is
 # approved for one exact bot and one frozen singleton allowlist; the environment
@@ -43,10 +45,20 @@ while [[ $# -gt 0 ]]; do
     --wider-journeys) WIDER_JOURNEYS=1 ;;
     --form-variety) FORM_VARIETY=1 ;;
     --form-switching) FORM_SWITCHING=1 ;;
+    --only) [[ $# -gt 1 && -n "$2" ]] || { echo "--only needs comma-separated journey ids" >&2; exit 64; }
+      JOURNEY_OPTIONS+=(--only "$2"); SELECTION_COUNT=$((SELECTION_COUNT + 1)); shift ;;
+    --changed|--full) JOURNEY_OPTIONS+=("$1"); SELECTION_COUNT=$((SELECTION_COUNT + 1)) ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
+
+if (( SELECTION_COUNT > 1 )); then echo "--only, --changed and --full are mutually exclusive" >&2; exit 64; fi
+if (( SELECTION_COUNT > 0 )); then
+  if (( FOCUSED_RELEASE + WHOLE_BOT > 0 )); then echo "Journey selection is test-bot-only" >&2; exit 64; fi
+  if (( FORM_VARIETY + FORM_SWITCHING == 0 )); then WIDER_JOURNEYS=1; fi
+fi
+readonly SELECTION_COUNT
 
 if (( FOCUSED_RELEASE + WHOLE_BOT + WIDER_JOURNEYS + FORM_VARIETY + FORM_SWITCHING > 1 )); then
   echo "ERROR: --focused-release, --whole-bot, --wider-journeys, --form-variety and --form-switching are separate proof modes." >&2
@@ -161,7 +173,8 @@ for raw_line in Path(".env").read_text(encoding="utf-8").splitlines():
     if target and (key.startswith("APPROVED_") or key in {
         "PY", "ROOT", "BACKEND", "FOCUSED_RELEASE", "WHOLE_BOT", "WIDER_JOURNEYS", "FORM_VARIETY", "FORM_SWITCHING", "RUN_LIVE", "REQUIRE_LIVE",
         "DEFAULT_LIVE_ALLOWLIST", "LIVE_APPROVAL_VALUE", "TARGET_REFUSED_EXIT",
-        "DOTENV_PROTECTED_NAMES", "PROTECTED_NAMES_IN_FORCE", "BASH_ENV", "ENV",
+        "DOTENV_PROTECTED_NAMES", "PROTECTED_NAMES_IN_FORCE", "JOURNEY_OPTIONS", "SELECTION_COUNT",
+        "JOURNEY_RUNTIME_SHA", "TELEGRAM_JOURNEY_COVERAGE_REPORT", "BASH_ENV", "ENV",
         "SHELLOPTS", "BASHOPTS", "IFS", "CDPATH", "PYTHONPATH", "PYTHONHOME",
     }):
         print("printf '%s\\n' 'ERROR: dotenv attempted to replace a release control. Nothing was sent.' >&2; exit 21")
@@ -272,55 +285,17 @@ if [[ "$RUN_LIVE" == "0" || "$RUN_LIVE" == "false" ]]; then
 elif [[ "$HAS_TELETHON_ENV" == "1" ]]; then
   printf 'Live Telegram QA approved for target: %s\n' "${TELEGRAM_BOT_USERNAME:-portfolio_guru_bot}" >> "$SUMMARY"
   if [[ "$WIDER_JOURNEYS" == "1" || "$FORM_VARIETY" == "1" || "$FORM_SWITCHING" == "1" ]]; then
-    JOURNEY_NODES=(
-      tests/test_e2e.py::test_e2e_form_variety_ready_draft_to_cancel_journey
-      tests/test_e2e.py::test_e2e_form_variety_pdf_ready_draft_to_cancel_journey
-    )
     JOURNEY_MODE=form-variety
-    JOURNEY_REPORT="$ARTIFACT_DIR/form-variety.xml"
-    if [[ "$FORM_SWITCHING" == "1" ]]; then
-      JOURNEY_NODES=(tests/test_e2e.py::test_e2e_form_switching_to_cancel_journey)
-      JOURNEY_MODE=form-switching
-      JOURNEY_REPORT="$ARTIFACT_DIR/form-switching.xml"
-    fi
-    if [[ "$WIDER_JOURNEYS" == "1" ]]; then
-      JOURNEY_MODE=wider
-      JOURNEY_REPORT="$ARTIFACT_DIR/wider-journeys.xml"
-      JOURNEY_NODES+=(
-        tests/test_e2e.py::test_e2e_text_ready_draft_to_cancel_journey
-        tests/test_e2e.py::test_e2e_photo_ready_draft_to_cancel_journey
-        tests/test_e2e.py::test_e2e_voice_ready_draft_to_cancel_journey
-        tests/test_e2e.py::test_e2e_document_ready_draft_to_cancel_journey
-        tests/test_e2e.py::test_e2e_settings_read_only_journey
-        tests/test_e2e.py::test_e2e_form_switching_to_cancel_journey
-      )
-    fi
-    TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step "live-telegram-$JOURNEY_MODE" "$PY" -m pytest \
-      "${JOURNEY_NODES[@]}" -q -rs -m e2e --junitxml="$JOURNEY_REPORT"
-    # pytest succeeds when a local voice dependency is unavailable and skips
-    # that test. Preserve the reason in its log, but never record wider proof.
-    run_step "$JOURNEY_MODE-completeness" "$PY" - "$JOURNEY_REPORT" "$WIDER_JOURNEYS" "$FORM_SWITCHING" <<'PY'
-import sys
-import xml.etree.ElementTree as ET
-cases = ET.parse(sys.argv[1]).findall(".//testcase")
-expected = {
-    f"test_e2e_form_variety_ready_draft_to_cancel_journey[{code}]"
-    for code in ("LAT", "TEACH", "QIAT", "MGMT_ROTA", "SERIOUS_INC", "PROC_LOG", "US_CASE", "FORMAL_COURSE", "REFLECT_LOG")
-} | {"test_e2e_form_variety_pdf_ready_draft_to_cancel_journey"}
-if sys.argv[3] == "1":
-    expected = {"test_e2e_form_switching_to_cancel_journey"}
-if sys.argv[2] == "1":
-    expected |= {
-        "test_e2e_text_ready_draft_to_cancel_journey",
-        "test_e2e_photo_ready_draft_to_cancel_journey",
-        "test_e2e_voice_ready_draft_to_cancel_journey",
-        "test_e2e_document_ready_draft_to_cancel_journey",
-        "test_e2e_settings_read_only_journey",
-        "test_e2e_form_switching_to_cancel_journey",
-    }
-assert len(cases) == len(expected) and {case.get("name") for case in cases} == expected, "Incomplete journey report"
-assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "Journeys contain skipped, failed or missing proof"
-PY
+    if [[ "$FORM_SWITCHING" == 1 ]]; then JOURNEY_MODE=form-switching; fi
+    if [[ "$WIDER_JOURNEYS" == 1 ]]; then JOURNEY_MODE=wider; fi
+    JOURNEY_REPORT="${TELEGRAM_JOURNEY_COVERAGE_REPORT:-$ARTIFACT_DIR/journey-coverage.json}"
+    RUNTIME_OPTIONS=()
+    if [[ -n "${JOURNEY_RUNTIME_SHA:-}" ]]; then RUNTIME_OPTIONS=(--sha "$JOURNEY_RUNTIME_SHA"); fi
+    TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step "live-telegram-$JOURNEY_MODE" "$PY" \
+      "$ROOT/scripts/telegram_journey_proof.py" --root "$ROOT" --mode "$JOURNEY_MODE" \
+      --python "$PY" --report "$JOURNEY_REPORT" ${RUNTIME_OPTIONS[@]+"${RUNTIME_OPTIONS[@]}"} ${JOURNEY_OPTIONS[@]+"${JOURNEY_OPTIONS[@]}"}
+    cat "$ARTIFACT_DIR/live-telegram-$JOURNEY_MODE.log"
+    printf -- '- %s: completed (coverage above distinguishes fresh/reused/partial proof)\n' "$JOURNEY_MODE" >> "$SUMMARY"
   elif [[ "$FOCUSED_RELEASE" == "1" ]]; then
     TELEGRAM_E2E_ARTIFACT_DIR="$ARTIFACT_DIR" run_step live-telegram-focused "$PY" -m pytest \
       tests/test_e2e.py::test_e2e_cbd_ready_draft_to_cancel_journey \

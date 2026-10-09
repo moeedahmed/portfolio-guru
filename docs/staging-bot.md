@@ -42,7 +42,9 @@ From a clean feature branch, after the offline checks and a commit:
 
 ```bash
 scripts/stage.sh deploy                         # defaults to HEAD
-scripts/stage.sh smoke --sha <full-40-hex-sha>
+scripts/stage.sh smoke --sha <full-40-hex-sha> --changed
+# Once before asking for Ship: force the complete sixteen-journey run.
+scripts/stage.sh smoke --sha <full-40-hex-sha> --full
 # For a visible change: Moeed tries @portfolio_guru_test_bot and taps Ship.
 scripts/stage.sh approve --sha <full-40-hex-sha> --note "Moeed tried the test bot and tapped Ship"
 scripts/stage.sh status --sha <full-40-hex-sha>
@@ -61,8 +63,9 @@ It fetches all origin branches, deploys the exact detached SHA into
 `~/projects/portfolio-guru-staging`, installs the existing requirements in its own
 venv, and checks stable PID plus exact runtime identity. It never pushes main.
 
-`smoke` runs the existing focused CBD-ready-draft-to-Cancel journey from the
-staging checkout, and checks its runtime before and after. It requires existing
+`smoke` now defaults to the sixteen-journey staging catalogue with `--changed`: it
+runs missing or changed proof and reuses matching passes. It checks the staging
+runtime before and after. It requires existing
 Telethon session/API credentials in the calling environment (Moeed's own account).
 The only allowed target and singleton recipient allowlist are
 `portfolio_guru_test_bot`; conflicting target settings fail before sending.
@@ -70,18 +73,29 @@ The only allowed target and singleton recipient allowlist are
 a redacted transcript under staging's `.artifacts/telegram-bot-qa/`.
 This sends test-bot messages when explicitly run; it is never routine CI.
 
-Opt in to broader proof with `scripts/stage.sh smoke --sha <full-40-hex-sha> --wider`.
-This runs synthetic text CBD, photo, OGG/Opus voice and PDF cases through
+`--wider` remains a compatibility alias for this catalogue. `--only text,settings`
+selects individual journey ids; `--full` forces all sixteen once before asking for
+Ship. Partial smoke is labelled `automated=partial` and cannot earn approval.
+Full coverage can combine fresh passes and earlier passes whose dependency
+fingerprints match the exact candidate SHA. Approval and the release gate
+recompute fingerprints from that SHA’s Git files; legacy focused-only receipts,
+missing journeys and stale proof fail closed. The release card/digest and
+production focused-release proof remain unchanged.
+
+The catalogue runs synthetic text CBD, photo, OGG/Opus voice and PDF cases through
 capture → Choose form → form choice → preview → one encounter-date correction
 via the bot's reply-to-edit route → refreshed preview, then one `/cancel` in
 `finally`. Gathering mode must already be on; a missing Choose form fails proof.
 Settings opens each safe view and picker, then Back. Kaizen writing-style
 sampling is excluded because it automatically builds and activates a profile.
 It never presses Save/Approve/Submit, changes settings or links Kaizen. The
-same test-bot-only target guard and runtime/receipt checks apply. Default smoke
-is unchanged. Voice requires local macOS `say` (Samantha) and `ffmpeg`/libopus;
-a skip is reported and cannot earn passing wider proof. Each new journey keeps
-its own redacted transcript on success or failure.
+same test-bot-only target guard and runtime/receipt checks apply. Voice requires local macOS `say` (Samantha) and `ffmpeg`/libopus;
+a skip is reported and cannot earn passing wider proof. Each fresh journey keeps
+its own redacted transcript on success or failure. Matching proof prints
+`already passed at <sha>` and is never counted as a fresh pass. The local ledger
+is staging’s gitignored `.artifacts/telegram-bot-qa/journey-passes.json`. A failed
+batch retains completed passes but cannot promote; interrupted reruns revoke
+the selected old proof before sending.
 
 Proofs live in
 `~/.openclaw/data/portfolio-guru-staging/staging-proofs/<sha>.json`.

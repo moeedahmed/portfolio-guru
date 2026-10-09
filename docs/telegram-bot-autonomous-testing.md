@@ -210,8 +210,30 @@ never pressed. Each new journey writes a separate transcript, including failure
 and exactly one `/cancel` in `finally`, without a leading reset or Cancel
 button click. Voice uses local `say` + `ffmpeg`/libopus; unavailable
 tools skip with a reason, and skipped/missing journeys fail wider completeness.
-This does not change `--focused-release` or default staging smoke, satisfy the
+This does not change production `--focused-release`, satisfy the
 whole-bot aggregate, or establish live proof until explicitly run.
+
+Staging journey proof is remembered in the gitignored local
+`.artifacts/telegram-bot-qa/journey-passes.json`, scoped to the test bot.
+Fingerprints hash `bot.py`, its transitive local imports (including lazy imports),
+runtime data/dependency files, the QA/verification scripts, and `test_e2e.py`
+plus its local harness and synthetic inputs. This is deliberately conservative:
+a shared `bot.py` or shared test-file change invalidates every journey; unrelated
+docs and tests do not. Both committed source equality and the exact staging
+runtime are checked before and after the run. Skips, failures and incomplete
+JUnit cases never create passes; completed journeys survive a later batch failure.
+
+Use `--only text,settings` for a bounded run, `--changed` for missing/changed
+fingerprints (also the default for `stage.sh smoke`), and `--full` to force every
+journey once before asking for Ship. Selection flags imply `--wider-journeys`
+when no catalogue mode is given; they cannot weaken focused-release or whole-bot
+proof. IDs are `LAT`, `TEACH`, `QIAT`, `MGMT_ROTA`, `SERIOUS_INC`, `PROC_LOG`,
+`US_CASE`, `FORMAL_COURSE`, `REFLECT_LOG`, `teaching-pdf`, `text`, `photo`, `voice`,
+`document`, `settings`, `form-switching`. An unchanged pass prints
+`already passed at <sha> (reused; no fresh pass)`. Partial smoke cannot approve a
+release: all sixteen current fingerprints must be covered at the release SHA,
+either fresh or reused, and the staging approval/release gate verifies them
+against that SHA’s Git objects. No live run is added to CI.
 
 `--form-variety` selects ten short, sequential ready-draft journeys on the same
 allowlisted test bot: LAT (shift leadership), TEACH, QIAT, MGMT_ROTA, SERIOUS_INC,

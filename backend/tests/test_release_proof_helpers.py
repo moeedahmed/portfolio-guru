@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import shutil
 import pytest
 from pathlib import Path
 
@@ -26,7 +27,9 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 with open(os.environ['FAKE_QA_LOG'], 'a') as log:
     log.write(' '.join(sys.argv[1:]) + '\\n')
-if sys.argv[1] == '-':
+if sys.argv[1].endswith('.py'):
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+elif sys.argv[1] == '-':
     code = sys.stdin.read()
     if 'from tests.telegram_live_harness import has_telethon_env' in code:
         print(os.environ.get('FAKE_HAS_TELETHON', '1'))
@@ -49,7 +52,7 @@ else:
                 names.append(name)
         if os.environ.get('FAKE_MISSING_JOURNEY'): names.pop(0)
         for name in names:
-            case = ET.SubElement(suite, 'testcase', name=name)
+            case = ET.SubElement(suite, 'testcase', name=name, classname='tests.test_e2e')
             if os.environ.get('FAKE_VOICE_SKIP') and 'voice' in name:
                 ET.SubElement(case, 'skipped', message='local say/ffmpeg unavailable')
             if os.environ.get('FAKE_SWITCH_SKIP') and 'form_switching' in name:
@@ -59,6 +62,21 @@ else:
         ET.ElementTree(suite).write(report)
 ''')
     python.chmod(0o755)
+    scripts = root / 'scripts'
+    scripts.mkdir()
+    for name in ('telegram_journey_proof.py', 'telegram_bot_qa.sh'):
+        shutil.copy(ROOT / 'scripts' / name, scripts / name)
+    (scripts / 'verify_live_runtime.py').write_text('print("synthetic runtime verified")\n')
+    (root / 'backend/tests').mkdir()
+    (root / 'backend/bot.py').write_text('import extraction\n')
+    (root / 'backend/extraction.py').write_text('VALUE = 1\n')
+    (root / 'backend/tests/test_e2e.py').write_text('SYNTHETIC_INPUT = "case"\n')
+    (root / 'backend/tests/conftest.py').write_text('')
+    (root / '.gitignore').write_text('.artifacts/\nbackend/venv/\n__pycache__/\n')
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=QA', '-c', 'user.email=qa@example.invalid',
+                    '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'synthetic fixture'], check=True)
     env = {
         "PATH": os.environ["PATH"], "HOME": str(tmp_path),
         "PORTFOLIO_GURU_APP_DIR": str(root), "FAKE_QA_LOG": str(log),
@@ -79,7 +97,7 @@ def test_wider_mode_selects_exact_sixteen_journeys(wider_qa_harness):
     result = _run_wider_qa(wider_qa_harness)
     assert result.returncode == 0, result.stdout + result.stderr
     live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_text' in line)
-    assert live.count('tests/test_e2e.py::') == 8  # nine parametrised forms + seven other journeys
+    assert live.count('tests/test_e2e.py::') == 16  # nine parametrised forms + seven other journeys
     assert 'test_e2e_form_variety_ready_draft_to_cancel_journey' in live
     assert 'test_e2e_form_variety_pdf_ready_draft_to_cancel_journey' in live
     for kind in ('text', 'photo', 'voice', 'document'):
@@ -94,7 +112,7 @@ def test_form_variety_mode_selects_only_ten_journeys(wider_qa_harness):
     result = _run_wider_qa(wider_qa_harness, flags=('--form-variety',))
     assert result.returncode == 0, result.stdout + result.stderr
     live = next(line for line in wider_qa_harness[1].read_text().splitlines() if '::test_e2e_form_variety' in line)
-    assert live.count('tests/test_e2e.py::') == 2
+    assert live.count('tests/test_e2e.py::') == 10
     assert 'test_e2e_form_variety_ready_draft_to_cancel_journey' in live
     assert 'test_e2e_form_variety_pdf_ready_draft_to_cancel_journey' in live
     assert 'form-variety-completeness: PASS' in result.stdout
@@ -303,3 +321,133 @@ def test_whole_bot_never_accepts_missing_proof(tmp_path, approved):
     if approved:
         assert "tests.whole_bot_aggregate" in log.read_text()
         assert "test_e2e_cbd" not in log.read_text()
+
+
+def _live_calls(harness):
+    return [line for line in harness[1].read_text().splitlines() if line.startswith('-m pytest tests/test_e2e.py::')]
+
+
+def _fixture_commit(root):
+    subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=QA', '-c', 'user.email=qa@example.invalid',
+                    '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture change'], check=True)
+
+
+def test_journey_ledger_reuses_without_claiming_fresh_pass(wider_qa_harness):
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    first_calls = _live_calls(wider_qa_harness)
+    result = _run_wider_qa(wider_qa_harness, flags=('--changed',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _live_calls(wider_qa_harness) == first_calls
+    assert result.stdout.count('already passed at') == 16
+    assert 'fresh PASS' not in result.stdout
+    assert '16/16 covered; 0 fresh' in result.stdout
+
+
+def test_journey_changed_reruns_dependency_but_not_unrelated_file(wider_qa_harness):
+    root = wider_qa_harness[0]
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    (root / 'backend/unrelated.py').write_text('IGNORED = 2\n')
+    _fixture_commit(root)
+    assert _run_wider_qa(wider_qa_harness, flags=('--changed',)).returncode == 0
+    assert len(_live_calls(wider_qa_harness)) == 1
+    (root / 'backend/extraction.py').write_text('VALUE = 2\n')
+    _fixture_commit(root)
+    result = _run_wider_qa(wider_qa_harness, flags=('--changed',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_live_calls(wider_qa_harness)) == 2
+    assert result.stdout.count('fresh PASS') == 16
+
+
+def test_journey_only_selects_named_ids_and_records_partial_coverage(wider_qa_harness):
+    result = _run_wider_qa(wider_qa_harness, flags=('--only', 'text,settings'))
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = _live_calls(wider_qa_harness)
+    assert len(calls) == 1 and calls[0].count('tests/test_e2e.py::') == 2
+    assert 'test_e2e_text' in calls[0] and 'test_e2e_settings' in calls[0]
+    assert '2/16 covered' in result.stdout
+
+
+def test_journey_full_forces_all_even_after_cached_pass(wider_qa_harness):
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    result = _run_wider_qa(wider_qa_harness, flags=('--full',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_live_calls(wider_qa_harness)) == 2
+    assert _live_calls(wider_qa_harness)[-1].count('tests/test_e2e.py::') == 16
+    assert result.stdout.count('fresh PASS') == 16
+    assert 'already passed at' not in result.stdout
+
+
+def test_failed_batch_remembers_completed_passes_and_reruns_only_skip(wider_qa_harness):
+    result = _run_wider_qa(wider_qa_harness, extra={'FAKE_VOICE_SKIP': '1'})
+    assert result.returncode == 1
+    result = _run_wider_qa(wider_qa_harness, flags=('--changed',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _live_calls(wider_qa_harness)[-1].count('tests/test_e2e.py::') == 1
+    assert '::test_e2e_voice' in _live_calls(wider_qa_harness)[-1]
+    assert result.stdout.count('already passed at') == 15
+
+
+def test_dirty_dependency_never_earns_runtime_sha_proof(wider_qa_harness):
+    (wider_qa_harness[0] / 'backend/bot.py').write_text('VALUE = 999\n')
+    result = _run_wider_qa(wider_qa_harness)
+    assert result.returncode == 1
+    assert 'differ from committed runtime SHA' in result.stdout
+    assert not _live_calls(wider_qa_harness)
+
+
+@pytest.mark.parametrize('flags', [('--only', 'typo'), ('--only', '')])
+def test_unknown_or_empty_journey_ids_never_send(wider_qa_harness, flags):
+    result = _run_wider_qa(wider_qa_harness, flags=flags)
+    assert result.returncode != 0
+    if wider_qa_harness[1].exists(): assert not _live_calls(wider_qa_harness)
+
+
+@pytest.mark.parametrize('flags', [('--only', 'text', '--full'), ('--changed', '--full'),
+                                 ('--focused-release', '--only', 'text'), ('--whole-bot', '--full')])
+def test_journey_selection_refuses_ambiguous_or_release_mode(wider_qa_harness, flags):
+    result = _run_wider_qa(wider_qa_harness, flags=flags)
+    assert result.returncode == 64
+    assert not wider_qa_harness[1].exists()
+
+
+def test_release_coverage_is_checked_against_exact_git_files(wider_qa_harness):
+    import importlib.util
+    import json
+    spec = importlib.util.spec_from_file_location('coverage_check', ROOT / 'scripts/telegram_journey_proof.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    root = wider_qa_harness[0]
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    sha = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    reports = list((root / '.artifacts/telegram-bot-qa').glob('*/journey-coverage.json'))
+    report = json.loads(reports[0].read_text())
+    checker.validate_coverage(report, root, sha, committed=True)
+    # A new SHA containing an unrelated file may reuse complete content proof.
+    (root / 'backend/unrelated.py').write_text('VALUE = 42\n')
+    _fixture_commit(root)
+    later = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    report['sha'] = later
+    checker.validate_coverage(report, root, later, committed=True)
+    # Matching the SHA label alone cannot hide changed journey dependencies.
+    (root / 'backend/extraction.py').write_text('VALUE = 3\n')
+    _fixture_commit(root)
+    changed = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    report['sha'] = changed
+    with pytest.raises(ValueError, match='stale'):
+        checker.validate_coverage(report, root, changed, committed=True)
+
+
+def test_ledger_keeps_proof_for_each_previously_passed_fingerprint(wider_qa_harness):
+    root = wider_qa_harness[0]
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    (root / 'backend/extraction.py').write_text('VALUE = 2\n')
+    _fixture_commit(root)
+    assert _run_wider_qa(wider_qa_harness).returncode == 0
+    calls = _live_calls(wider_qa_harness)
+    (root / 'backend/extraction.py').write_text('VALUE = 1\n')
+    _fixture_commit(root)
+    result = _run_wider_qa(wider_qa_harness)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _live_calls(wider_qa_harness) == calls
+    assert result.stdout.count('already passed at') == 16

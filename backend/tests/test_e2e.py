@@ -61,7 +61,7 @@ FORM_VARIETY_CASES = {
               "Learning outcomes: structure an SBAR handover and identify escalation triggers. "
               "Learners practised scenarios and gave positive feedback. Reflection: rehearsal helped; I will allow more discussion time."),
     "QIAT": ("QUALITY", "QIAT", True,
-             "In my Emergency Medicine placement I led a QI project on equipment checks. "
+             "Stage of Training: ST4 (Higher). In my Emergency Medicine placement I led a QI project on equipment checks. "
              "My QI PDP goal was reliable daily checks; I attended local QI education. "
              "I was involved in the project: baseline measurement, process mapping, PDSA and remeasurement. "
              "Checks improved from 60 to 90 percent. Reflection: staff feedback simplified the checklist. "

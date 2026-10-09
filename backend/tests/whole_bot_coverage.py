@@ -61,7 +61,9 @@ def registration_digest(slots):
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
 # Consent now enters/falls back through case_conv; dispatch tests prove state retention.
-REGISTRATION_DIGEST = 'd0cb3143c5c620a24b0c11a07c8c8e4552cb77659a866b88b21e8b0542d65a37'
+# 9 Oct 2026: possible-KC Add reaches the existing approval callback slot;
+# the global ACTION handler excludes it. Offline routing tests prove ownership.
+REGISTRATION_DIGEST = 'a3088dc52a663a8f53fa12d10562ceeb66cfb07aee098a05c25dbf74ae160580'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
