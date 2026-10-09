@@ -1889,6 +1889,8 @@ def _forget_last_filing(context) -> None:
     conversation mid-case, and a short "file as DOPS" could silently reload
     the old case text instead of belonging to the new one.
     """
+    if not _case_is_open(context):
+        context.user_data.pop("case_user_text", None)
     _clear_filing_retry_state(context)
     context.user_data.pop("last_filed_case_text", None)
 
@@ -6361,7 +6363,7 @@ def _case_user_words(context) -> list[str]:
     return []
 
 
-def _without_unsupported_reflection(context, draft):
+def _without_unsupported_reflection(context, draft, *, reflection_reply: str = ""):
     # 9 Oct 2026: similarity is not evidence of meaning. Require authored
     # words in their original order, allowing punctuation and small inflections.
     # Retain the doctor's reflective sentences when generated wording fails.
@@ -6369,9 +6371,18 @@ def _without_unsupported_reflection(context, draft):
     sources = [part.strip() for text in words
                for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
     reflection_markers = _SOURCE_OUTCOME_OR_REFLECTION_MARKERS[_SOURCE_OUTCOME_OR_REFLECTION_MARKERS.index("learned"):]
-    reflective_sources = [source for source in sources if has_personal_reflective_input(source)
-                          or any(marker in source.lower() for marker in reflection_markers)]
-    fallback = "\n\n".join(reflective_sources)
+    reflective_sources = []
+    for text in words:
+        if re.match(r"^(?:(?:my )?reflection|(?:my |key |main )?learning points?|"
+                    r"(?:what )?I (?:learned|learnt))\s*:", text.strip(), re.IGNORECASE):
+            reflective_sources.append(text.strip())
+        else:
+            reflective_sources.extend(source for source in re.split(r"(?<=[.!?])\s+|\n+", text)
+                                      if source.strip() and (has_personal_reflective_input(source)
+                                      or any(marker in source.lower() for marker in reflection_markers)))
+    # A reply to the reflection prompt is itself reflective input. Use its
+    # complete authored wording if extraction adds unsupported words.
+    fallback = reflection_reply.strip() or "\n\n".join(source.strip() for source in reflective_sources)
     # A small explicit vocabulary avoids aggressive stemming conflating
     # content words. Unsupported broader rewordings safely use the fallback.
     inflections = {"learned": "learn", "learnt": "learn", "learning": "learn",
@@ -6419,6 +6430,9 @@ def _remember_case_context_source(
     source = str(input_source or "").strip().lower()
     if source == "same case":
         return  # Reuse retains the saved words; its label grants no new provenance.
+    if context.user_data.get("last_filed_case_text") and not _case_is_open(context):
+        # Actual capture starts here, after side questions have been routed.
+        _forget_last_filing(context)
     words = context.user_data.setdefault("case_user_text", _case_user_words(context))
     text = str(user_text or "").strip()
     if text and text not in words:
@@ -13561,6 +13575,7 @@ async def _regenerate_active_draft_with_feedback(
     append_to_case: bool = False,
     input_source: str = "text",
     progress_message=None,
+    reflection_reply: bool = False,
 ) -> int:
     """Regenerate an active approval draft using extra text or extracted media."""
     msg = update.message or update.callback_query.message
@@ -13575,6 +13590,9 @@ async def _regenerate_active_draft_with_feedback(
         await msg.reply_text("I couldn't read any useful extra detail from that. Try again with text, voice, image, or document.")
         return AWAIT_APPROVAL
 
+    reflection_reply = reflection_reply or (
+        [gap["key"] for gap in _draft_gaps(context)] == ["reflection"]
+    )
     _remember_case_context_source(context, input_source,
                                   user_text=feedback_text if input_source in {"text", "voice", "audio"} else None)
     if append_to_case:
@@ -13636,6 +13654,10 @@ async def _regenerate_active_draft_with_feedback(
         # stage of training (or date) they were never asked for before.
         _apply_profile_training_stage(updated, update.effective_user.id, form_type)
         _apply_default_dates(updated, form_type)
+        updated = _without_unsupported_reflection(
+            context, updated,
+            reflection_reply=feedback_text if reflection_reply and input_source in {"text", "voice", "audio"} else "",
+        )
         _store_draft(context, updated)
         # The gate above already judged this exact case and form, so the
         # reflection decision here reads that fresh judgement rather than a
@@ -14132,10 +14154,6 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Clear post_reset flag if set (belt and braces)
     context.user_data.pop("post_reset", None)
-    if (context.user_data.get("last_filed_case_text") and not _case_is_open(context)
-            and not context.user_data.get("_pending_doc")):
-        # A fresh capture cannot borrow the previous case's reflective act.
-        context.user_data.pop("case_user_text", None)
 
     # Clear stale status state from previous sessions, but keep active prompts
     # editable while the user is adding bundle/source-detail context, or
@@ -17474,6 +17492,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             raw_text,
             append_to_case=True,
             input_source="text",
+            reflection_reply=True,
         )
 
     if _is_submit_inquiry(raw_text):

@@ -730,20 +730,31 @@ async def test_reflection_fields_are_grounded_individually_in_doctor_words():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reflection", [
-    "I learned to check understanding before ending a referral.", "Escalate earlier.",
+@pytest.mark.parametrize("explicit_prompt", [False, True])
+@pytest.mark.parametrize("reflection,generated", [
+    ("I learned to check understanding before ending a referral.",
+     "I learned to check understanding before ending a referral."),
+    ("Escalate earlier.", "Escalate earlier."),
+    ("Escalate earlier.", "I will escalate earlier."),
+    ("I learned:\nEscalate earlier.\nCheck drug allergies.",
+     "I learned to escalate earlier and check drug allergies."),
 ])
-async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(reflection):
+async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(reflection, generated, explicit_prompt):
     sim = BotSimulator()
     context = sim._make_context()
     source = "Synthetic ED chest pain assessed with senior review."
     context.user_data.update(_context(source, source="photo", has_user_context=False).user_data)
     context.user_data["chosen_form"] = "CBD"
-    draft = CBDData(clinical_reasoning=source, reflection="")
+    draft = CBDData(patient_presentation=source, clinical_reasoning=source,
+                    stage_of_training="Higher", trainee_role="Assessed the synthetic case",
+                    clinical_setting="Emergency Department", level_of_supervision="Direct", reflection="")
     await bot._show_draft_review(sim._make_text_update(source).message, context, draft, "CBD", edit=False)
     assert "Still needed:" in sim.get_last_text()
-    context.user_data["awaiting_reflection_detail"] = True
-    with patch("bot.extract_cbd_data", new=AsyncMock(return_value=draft.model_copy(update={"reflection": reflection}))), \
+    assert [gap["key"] for gap in bot._draft_gaps(context)] == ["reflection"]
+    if explicit_prompt:
+        context.user_data["awaiting_reflection_detail"] = True
+    with patch("bot.extract_cbd_data", new=AsyncMock(return_value=draft.model_copy(update={"reflection": generated}))), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
          patch("bot.get_voice_profile", return_value=""), \
          patch("bot.assess_form_essentials", new=AsyncMock(return_value={
              item["key"]: bot.ESSENTIAL_PRESENT for item in bot._form_essential_requirements("CBD")
@@ -1116,7 +1127,8 @@ async def test_draft_flow_never_sends_draft_ready_below(deletion_fails):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("own_words", [True, False])
 @pytest.mark.parametrize("reuse_mode", ["text", "button"])
-async def test_saved_case_reuse_keeps_own_word_provenance(own_words, reuse_mode, monkeypatch, tmp_path):
+@pytest.mark.parametrize("ask_status", [False, True])
+async def test_saved_case_reuse_keeps_own_word_provenance(own_words, reuse_mode, ask_status, monkeypatch, tmp_path):
     isolate_bot_storage(monkeypatch, tmp_path)
     sim = BotSimulator()
     context = sim._make_context()
@@ -1126,9 +1138,17 @@ async def test_saved_case_reuse_keeps_own_word_provenance(own_words, reuse_mode,
     bot._store_draft(context, CBDData(reflection=reflection))
     await _capture_approved_fields(sim, context, status="partial")
     assert context.user_data["last_filed_case_text"] == reflection
+    if ask_status:
+        with patch("bot.has_credentials", return_value=True), \
+             patch("bot.consent.has_current_consent", new=AsyncMock(return_value=True)), \
+             patch("bot.check_can_file", new=AsyncMock(return_value=(True, 0, 10, "free"))):
+            assert await bot.handle_case_input(sim._make_text_update("Did it save?"), context) == bot.ConversationHandler.END
+        assert context.user_data["last_filed_case_text"] == reflection
+        assert context.user_data["case_user_text"] == ([reflection] if own_words else [])
     if reuse_mode == "text":
-        assert await bot._handle_reuse_request(sim._make_text_update("Use the same case for DOPS"),
-                                             context, sim.user_id, "Use the same case for DOPS") == bot.AWAIT_FORM_CHOICE
+        assert await bot.handle_case_input(
+            sim._make_text_update("Use the same case for DOPS"), context,
+        ) == bot.AWAIT_FORM_CHOICE
     else:
         with patch("bot.recommend_form_types", new=AsyncMock(return_value=[])):
             assert await bot.handle_same_case_another(
@@ -1137,3 +1157,15 @@ async def test_saved_case_reuse_keeps_own_word_provenance(own_words, reuse_mode,
     bot._remember_case_context_source(context, "same case")
     bot._store_draft(context, FormDraft(form_type="DOPS", fields={"reflection": reflection}))
     assert bot._load_draft(context).fields["reflection"] == (reflection if own_words else "")
+
+
+@pytest.mark.parametrize("label", ["I learned:", "Reflection:", "Learning points:"])
+def test_labelled_multiline_reflection_fallback_keeps_the_whole_authored_turn(label):
+    reflection = f"{label}\nEscalate earlier.\nCheck drug allergies."
+    context = _context("OCR: I learned to perform a surgical airway independently.",
+                       source="photo", has_user_context=False)
+    context.user_data["case_user_text"] = [reflection]
+    draft = CBDData(reflection="I will escalate earlier and check drug allergies.")
+    filtered = bot._without_unsupported_reflection(context, draft)
+    assert filtered.reflection == reflection
+    assert bot._without_unsupported_reflection(context, filtered) == filtered

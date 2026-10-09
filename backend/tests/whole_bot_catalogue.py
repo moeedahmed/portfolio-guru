@@ -84,7 +84,10 @@ def producer_digest():
 # captions/replies/reuse stay separate from OCR. Existing controls unchanged.
 # 9 Oct 2026: word support and verbatim authored-reflection fallback shared
 # by preview, storage and filing; existing controls unchanged.
-PRODUCER_DIGEST = '52103cc1a914c9770872e34bdc48746769a2ec39f44e7cb5de3cd9400d95a062'
+# 10 Oct 2026: status questions retain saved-case authorship; reflection-prompt
+# replies and labelled multiline reflection retain their complete verbatim fallback.
+# Existing controls, callback payloads and approval ownership are unchanged.
+PRODUCER_DIGEST = '1d79eb1e5dfdf04993a6dfc4c8f6b9d9e171e4764a43e0f2d1e8cbaa1488a273'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -232,6 +235,7 @@ def reviewed_units(slots):
 # FORM branch candidates also include the tested post-setup case entry point.
 # 9 Oct 2026: retired KC callbacks removed from active approval ownership.
 # 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
+# 10 Oct 2026: rechecked after provenance fixes; semantic requirements unchanged.
 CATALOGUE_DIGEST = 'a8ae9cc094612f3bd05722452b9b3a613dc3f23b3e2d3a63e3bbec79503cef8d'
 
 
