@@ -94,6 +94,9 @@ class FakeKaizen:
         self.requests = []
         self.include_curriculum = False
         self.saved_overrides = {}  # Persistence faults, independent of filer input.
+        self.login_landing = "https://kaizenep.com/activities"
+        self.accept_sessions = True
+        self.form_bounces = 0  # -1 keeps bouncing; positive values count down.
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -120,15 +123,27 @@ class FakeKaizen:
                 if host == "eportfolio.rcem.ac.uk":
                     return self.redirect("https://auth.kaizenep.com/sign-in")
                 if host == "auth.kaizenep.com":
+                    if path == "/verification":
+                        return self.respond('<h1>Verify your sign-in</h1><label>One-time code<input name="code"></label>')
                     return self.respond('<form method="post" action="/username"><input name="login"><button type="submit">Sign in</button></form>')
                 if host != "kaizenep.com":
                     return self.respond(status=403)
-                if "fake_session=synthetic" not in self.headers.get("Cookie", ""):
+                if not owner.accept_sessions or "fake_session=synthetic" not in self.headers.get("Cookie", ""):
                     return self.redirect("https://auth.kaizenep.com/sign-in")
+                if path == "/welcome":
+                    return self.respond('<h1>Account verification pending</h1><p>No portfolio is available here.</p>')
+                if path == "/dashboard":
+                    return self.respond('<title>Portfolio dashboard</title><h1>Higher Trainee portfolio</h1>')
+                if path == "/events/list":
+                    return self.respond('<h1>Activities</h1>')
                 if path == "/activities":
                     links = ''.join(f'<a href="{d["url"]}">{d["form_type"]} saved draft</a>' for d in owner.drafts)
-                    return self.respond(f'<h1>Activities</h1>{links}')
+                    return self.respond(f'<h1>Higher Trainee portfolio</h1><h2>Activities</h2>{links}')
                 if path.startswith("/events/new-section/"):
+                    if owner.form_bounces:
+                        if owner.form_bounces > 0:
+                            owner.form_bounces -= 1
+                        return self.redirect("https://kaizenep.com/events/list")
                     uuid = path.rsplit("/", 1)[1]
                     form_type = next((ft for ft, form_uuid in FORM_UUIDS.items() if form_uuid == uuid), None)
                     if form_type:
@@ -149,7 +164,8 @@ class FakeKaizen:
                 if host == "auth.kaizenep.com" and self.path == "/sign-in":
                     owner.login_attempts += 1
                     if values.get("login") == [USERNAME] and values.get("password") == [PASSWORD]:
-                        return self.redirect("https://kaizenep.com/activities", Set_Cookie="fake_session=synthetic; Domain=kaizenep.com; Path=/; Secure; HttpOnly")
+                        owner.accept_sessions = True
+                        return self.redirect(owner.login_landing, Set_Cookie="fake_session=synthetic; Domain=kaizenep.com; Path=/; Secure; HttpOnly")
                     return self.respond('<p id="error-message">Authentication failed: invalid credentials.</p>')
                 if host != "kaizenep.com" or "fake_session=synthetic" not in self.headers.get("Cookie", ""):
                     return self.respond(status=403)
