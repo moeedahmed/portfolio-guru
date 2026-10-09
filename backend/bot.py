@@ -6362,22 +6362,36 @@ def _case_user_words(context) -> list[str]:
 
 
 def _without_unsupported_reflection(context, draft):
-    # 9 Oct 2026: a narrative or caption cannot legitimise unrelated OCR learning.
-    # Reuse the extractor's existing wording-similarity judgement per field,
-    # against separately retained authored input, for optional fields too.
-    from extractor import _fields_are_repetitive, _normalise_for_similarity
-
+    # 9 Oct 2026: similarity is not evidence of meaning. Require authored
+    # words in their original order, allowing punctuation and small inflections.
+    # Retain the doctor's reflective sentences when generated wording fails.
     words = _case_user_words(context)
     sources = [part.strip() for text in words
                for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
-    exact_sources = [*sources, *words, "\n\n".join(words)]
     reflection_markers = _SOURCE_OUTCOME_OR_REFLECTION_MARKERS[_SOURCE_OUTCOME_OR_REFLECTION_MARKERS.index("learned"):]
-    sources = [source for source in sources if has_personal_reflective_input(source)
-               or any(marker in source.lower() for marker in reflection_markers)]
-    sources += ["\n\n".join(sources)] if sources else []
-    # Similarity is for restructuring actual reflection, not creating a
-    # reflective act from narrative or reversing a doctor's negative statement.
+    reflective_sources = [source for source in sources if has_personal_reflective_input(source)
+                          or any(marker in source.lower() for marker in reflection_markers)]
+    fallback = "\n\n".join(reflective_sources)
+    # A small explicit vocabulary avoids aggressive stemming conflating
+    # content words. Unsupported broader rewordings safely use the fallback.
+    inflections = {"learned": "learn", "learnt": "learn", "learning": "learn",
+                   "escalated": "escalate", "escalating": "escalate", "escalates": "escalate"}
+    stopwords = {"a", "an", "the", "to", "that", "be"}
     negations = {"not", "no", "never", "nothing", "cannot", "without", "t"}
+
+    def tokens(text):
+        return [inflections.get(word, word) for word in re.findall(r"\w+", text.lower())
+                if word not in stopwords]
+
+    def supported(sentence, source):
+        candidate, authored = tokens(sentence), tokens(source)
+        if not candidate or (set(candidate) & negations) != (set(authored) & negations):
+            return False
+        # Keep content words together: a bag of words or subsequence could
+        # splice an action in one clause onto an outcome in another.
+        return any(candidate == authored[start:start + len(candidate)]
+                   for start in range(len(authored) - len(candidate) + 1))
+
     fields = _draft_fields_for_review(draft)
     updates = {}
     for key in _find_reflection_keys(fields, _draft_form_type(draft)):
@@ -6385,14 +6399,9 @@ def _without_unsupported_reflection(context, draft):
         if not value:
             continue
         sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", value) if part.strip()]
-        if not all(any(_normalise_for_similarity(sentence) in _normalise_for_similarity(source)
-                       for source in exact_sources)
-                   or any((set(_normalise_for_similarity(sentence).split()) & negations)
-                          == (set(_normalise_for_similarity(source).split()) & negations)
-                          and _fields_are_repetitive(sentence, source)
-                          for source in sources)
+        if not all(any(supported(sentence, source) for source in sources)
                    for sentence in sentences):
-            updates[key] = ""
+            updates[key] = fallback
     if not updates:
         return draft
     if isinstance(draft, FormDraft):

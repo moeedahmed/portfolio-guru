@@ -566,6 +566,72 @@ async def _capture_approved_fields(sim, context, *, status="failed"):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "DOPS"])
+@pytest.mark.parametrize("generated", [
+    "I learned to escalate later next time.",
+    "I learned to escalate earlier next time and perform a surgical airway independently.",
+    "I learned to escalate earlier next time. I can perform a surgical airway independently.",
+])
+async def test_unsupported_reflection_falls_back_in_preview_storage_and_filing(form_type, generated):
+    sim = BotSimulator()
+    context = sim._make_context()
+    own = "I learned to escalate earlier next time."
+    context.user_data.update(_context(f"Synthetic ED assessment. {own}").user_data)
+    context.user_data["chosen_form"] = form_type
+    draft = (CBDData(reflection=generated) if form_type == "CBD" else
+             FormDraft(form_type=form_type, fields={"reflection": generated}))
+    await bot._show_draft_review(sim._make_text_update(own).message,
+                                 context, draft, form_type, edit=False)
+    stored = bot._load_draft(context)
+    assert bot._draft_fields_for_review(stored)["reflection"] == own
+    assert own in sim.get_last_text()
+    assert generated not in sim.get_last_text()
+    assert not context.user_data.get("needs_reflection_detail")
+    bot._store_pending_draft(context, draft)
+    assert bot._draft_fields_for_review(bot._load_pending_draft(context))["reflection"] == own
+    # Legacy stored drafts get the same result at the filing boundary.
+    context.user_data["draft_data"] = bot._serialise_draft(draft)
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"].startswith(own)
+    assert generated not in fields["reflection"]
+
+
+def test_reflection_fallback_uses_only_authored_reflective_sentences_verbatim():
+    own = ["  Synthetic ED assessment. I learned to escalate earlier next time.  ",
+           "\nNext time I will check understanding with my senior.\n"]
+    context = _context("OCR: I learned to perform a surgical airway independently.")
+    context.user_data["case_user_text"] = own
+    draft = CBDData(reflection="I learned to perform a surgical airway independently.")
+    filtered = bot._without_unsupported_reflection(context, draft)
+    assert filtered.reflection == ("I learned to escalate earlier next time.\n\n"
+                                   "Next time I will check understanding with my senior.")
+    assert bot._without_unsupported_reflection(context, filtered) == filtered
+
+
+@pytest.mark.parametrize("own,field", [
+    ("next time I will escalate sooner to my senior", "Next time, I will escalate sooner to my senior."),
+    ("I learned to escalate earlier next time.", "I learnt to escalate earlier next time."),
+    ("Learning to escalate earlier next time.", "Learned to escalate earlier next time."),
+    ("Next time I will be escalating sooner to my senior.", "Next time I will escalate sooner to my senior."),
+])
+def test_faithful_light_reflection_rewording_is_kept(own, field):
+    draft = CBDData(reflection=field)
+    assert bot._without_unsupported_reflection(_context(own), draft).reflection == field
+
+
+@pytest.mark.parametrize("own,field", [
+    ("I learned not to escalate later next time.", "I learned to escalate later next time."),
+    ("I learned to ask my senior to assess me.", "I learned to ask me to assess my senior."),
+    ("I learned to escalate earlier. Next time I will discharge later.",
+     "I learned to escalate later."),
+    ("I learned to escalate earlier and discharge later.", "I learned to escalate later."),
+])
+def test_reflection_support_preserves_polarity_roles_and_sentence_grounding(own, field):
+    draft = CBDData(reflection=field)
+    assert bot._without_unsupported_reflection(_context(own), draft).reflection == own.replace(". Next", ".\n\nNext")
+
+
+@pytest.mark.asyncio
 async def test_typed_case_then_uncaptioned_dops_image_cannot_supply_reflection(tmp_path, monkeypatch):
     """Doctor-authored clinical facts do not make later OCR their reflection."""
     monkeypatch.delenv("PG_GATHERING_MODE", raising=False)
@@ -655,12 +721,12 @@ async def test_reflection_fields_are_grounded_individually_in_doctor_words():
                                  context, draft, "REFLECT_LOG", edit=False)
     stored = bot._load_draft(context)
     assert stored.fields["replay_differently"] == own_reflection
-    assert stored.fields["learned"] == ""
+    assert stored.fields["learned"] == own_reflection
     assert own_reflection in sim.get_last_text()
     assert ocr_reflection not in sim.get_last_text()
     fields = await _capture_approved_fields(sim, context)
     assert fields["replay_differently"].startswith(own_reflection)
-    assert fields["learned"] == ""
+    assert fields["learned"].startswith(own_reflection)
 
 
 @pytest.mark.asyncio
@@ -709,14 +775,15 @@ async def test_genuine_plural_learning_has_the_same_reflection_in_preview_and_fi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("narrative,ocr_reflection", [
-    ("I communicated clearly with the family.", "I learned to communicate clearly with the family."),
-    ("I reviewed the ECG before discharge.", "I learned to review the ECG before discharge."),
-    ("I will not escalate earlier next time.", "I will escalate earlier next time."),
+@pytest.mark.parametrize("narrative,ocr_reflection,expected", [
+    ("I communicated clearly with the family.", "I learned to communicate clearly with the family.", ""),
+    ("I reviewed the ECG before discharge.", "I learned to review the ECG before discharge.", ""),
+    ("I will not escalate earlier next time.", "I will escalate earlier next time.",
+     "I will not escalate earlier next time."),
     ("I learned to escalate earlier next time. I communicated clearly with the family.",
-     "I learned to communicate clearly with the family."),
+     "I learned to communicate clearly with the family.", "I learned to escalate earlier next time."),
 ])
-async def test_similar_doctor_narrative_does_not_authenticate_ocr_learning(narrative, ocr_reflection):
+async def test_similar_doctor_narrative_does_not_authenticate_ocr_learning(narrative, ocr_reflection, expected):
     sim = BotSimulator()
     context = sim._make_context()
     context.user_data.update(
@@ -727,11 +794,15 @@ async def test_similar_doctor_narrative_does_not_authenticate_ocr_learning(narra
     draft = FormDraft(form_type="DOPS", fields={"trainee_performance": narrative, "reflection": ocr_reflection})
     await bot._show_draft_review(sim._make_text_update(narrative).message,
                                  context, draft, "DOPS", edit=False)
-    assert bot._load_draft(context).fields["reflection"] == ""
+    assert bot._load_draft(context).fields["reflection"] == expected
     assert ocr_reflection not in sim.get_last_text()
     context.user_data["draft_data"] = bot._serialise_draft(draft)
     fields = await _capture_approved_fields(sim, context)
-    assert fields["reflection"] == ""
+    if expected:
+        assert fields["reflection"].startswith(expected)
+    else:
+        assert fields["reflection"] == ""
+    assert ocr_reflection not in fields["reflection"]
 
 
 @pytest.mark.asyncio
@@ -764,10 +835,10 @@ async def test_improve_case_keeps_authored_reply_without_promoting_old_ocr(selec
     assert own_reflection in "\n".join(context.user_data["case_user_text"])
     assert old_ocr not in "\n".join(context.user_data["case_user_text"])
     assert bot._load_draft(context).fields["replay_differently"] == own_reflection
-    assert bot._load_draft(context).fields["learned"] == ""
+    assert bot._load_draft(context).fields["learned"] == own_reflection
     fields = await _capture_approved_fields(sim, context)
     assert fields["replay_differently"].startswith(own_reflection)
-    assert fields["learned"] == ""
+    assert fields["learned"].startswith(own_reflection)
 
 
 @pytest.mark.asyncio
@@ -851,7 +922,7 @@ async def test_enrichment_before_form_choice_retains_only_actual_reply(source):
     draft = FormDraft(form_type="REFLECT_LOG", fields={"learned": old_ocr, "replay_differently": own_reflection})
     with patch("bot._analyse_selected_form", new=AsyncMock(return_value=draft)):
         assert await bot.handle_form_choice(sim._make_callback_update("FORM|REFLECT_LOG"), context) == bot.AWAIT_APPROVAL
-    assert bot._load_draft(context).fields["learned"] == ""
+    assert bot._load_draft(context).fields["learned"] == own_reflection
     assert bot._load_draft(context).fields["replay_differently"] == own_reflection
 
 

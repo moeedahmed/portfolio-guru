@@ -82,7 +82,9 @@ def producer_digest():
 # 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
 # 9 Oct 2026: reflection provenance checks retained authored words per field;
 # captions/replies/reuse stay separate from OCR. Existing controls unchanged.
-PRODUCER_DIGEST = '8c9776e4c46810d9e50d7ba844aab423c9f769d9779d597c4faa03d22bb795ed'
+# 9 Oct 2026: word support and verbatim authored-reflection fallback shared
+# by preview, storage and filing; existing controls unchanged.
+PRODUCER_DIGEST = '52103cc1a914c9770872e34bdc48746769a2ec39f44e7cb5de3cd9400d95a062'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

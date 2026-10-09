@@ -1069,8 +1069,8 @@ class TestFlowWalker:
         assert _DRAFT_DIVIDER not in preview
         assert '🤖 *AI assistance*' not in preview
 
-    def test_draft_preview_never_quotes_raw_source_text(self, thin_draft):
-        """The preview must describe the source type but never quote raw case text."""
+    def test_draft_preview_keeps_authored_reflection_without_raw_source_cue(self, thin_draft):
+        """Verbatim reflection fallback retains no raw source cue or identifiers."""
         from bot import _format_draft_preview_for_context
         from tests.bot_simulator import BotSimulator
 
@@ -1092,7 +1092,7 @@ class TestFlowWalker:
         assert 'Source cue' not in preview
         assert 'John Smith' not in preview
         assert '943 476 5919' not in preview
-        assert 'reflected on escalation' not in preview
+        assert 'Troponin positive, managed as ACS and reflected on escalation next time.' in preview
 
     def test_photo_without_doctor_words_blanks_reflection_without_a_source_warning(self, thin_draft):
         from bot import _format_draft_preview_for_context, _set_reflection_detail_gate
