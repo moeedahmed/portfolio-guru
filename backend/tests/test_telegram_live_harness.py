@@ -74,6 +74,72 @@ async def test_wider_media_stops_at_ready_draft_and_cancels(wider_journey_harnes
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['photo', 'document', 'voice'])
+@pytest.mark.parametrize('gathering', [True, False])
+@pytest.mark.parametrize('edit_in_place', [True, False])
+async def test_wider_media_real_reply_shapes_and_history_matching(
+    wider_journey_harness, monkeypatch, tmp_path, kind, gathering, edit_in_place,
+):
+    """Use the real poller: progress edits, capture, form choice, review.
+
+    Reply shapes come from handle_document_intent, handle_case_input,
+    _gathering_reply and _build_explicit_form_keyboard in bot.py.
+    """
+    from unittest.mock import AsyncMock
+    from message_policy import render_message
+    journeys, client, _, clicks, artifacts, message = wider_journey_harness
+    histories = []
+
+    def observed(text, *controls, id=10):
+        reply = message(text, *controls)
+        reply.id, reply.out, reply.reply_markup = id, False, None
+        return reply
+
+    reset = observed('↩️ Cancelled. Send an anonymised case when you’re ready.')
+    histories.append([reset])
+    current_id = 10 if edit_in_place else 20
+    if kind != 'voice':
+        intent = observed(
+            '📷 Image received — how would you like to use it?' if kind == 'photo'
+            else '📄 How would you like to use this document?',
+            ('📝 Read text' if kind == 'photo' else '📝 Use as case', 'DOCUSE|info'),
+            ('📎 Attach only', 'DOCUSE|attach'), ('📎 Read + attach', 'DOCUSE|both'),
+            ('❌ Remove', 'DOCUSE|ignore'), id=current_id,
+        )
+        histories.append([intent, reset])
+    else:
+        intent = reset
+    progress = observed('🎙️ Voice note read. Finding matching forms…' if kind == 'voice'
+                        else f'📄 Reading {kind}…', id=current_id)
+    # Old read buttons are still returned during processing; they must not
+    # cause a second click. Progress itself has no actionable buttons.
+    histories.append([progress, intent])
+    if gathering:
+        captured = observed(render_message('gathering_captured'),
+                            ('📋 Choose form', 'GATHER|done'),
+                            ('❌ Discard case', 'ACTION|cancel'), id=current_id)
+        histories.append([captured, progress])
+    form_id = current_id if edit_in_place else current_id + 1
+    choice = observed('I’ll use *Case-Based Discussion* for this entry.\n\n'
+                      'Select the form below to draft from what you sent.',
+                      ('🩺 Case-based discussion', 'FORM|CBD_2021'),
+                      ('📋 Forms', 'FORM|show_all'), ('❌ Cancel', 'ACTION|cancel'), id=form_id)
+    histories.append([choice, progress])
+    review = observed('🩺 Here is your Case-Based Discussion draft:',
+                      ('💾 Save to Kaizen', 'APPROVE|draft'), ('❌ Cancel', 'ACTION|cancel'),
+                      id=form_id if edit_in_place else form_id + 1)
+    histories.extend([[review, choice], [observed('↩️ Cancelled.', id=30)],
+                      [observed('↩️ Cancelled. Cleanup.', id=40)]])
+    client.get_messages = AsyncMock(side_effect=histories)
+    monkeypatch.setattr(journeys, 'wait_for_matching_message', harness.wait_for_matching_message)
+    await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
+    assert clicks == ((['DOCUSE|info'] if kind != 'voice' else [])
+                      + (['GATHER|done'] if gathering else []) + ['FORM|CBD_2021', 'ACTION|cancel'])
+    assert client.get_messages.call_count == len(histories)
+    assert artifacts[f'portfolio-guru-{kind}-transcript.json'][-1].received.endswith('Cleanup.')
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('bad_reply', ['wrong-save', 'wrong-cancel', 'extra-control', 'unknown-gap', 'timeout'])
 async def test_wider_media_failure_retains_transcript_and_cleans_up(wider_journey_harness, tmp_path, bad_reply):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness

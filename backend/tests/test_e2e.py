@@ -138,7 +138,7 @@ async def _wider_wait(client, transcript, action, *, before=None, min_id=None, *
 async def _wider_click(client, transcript, message, payload, **expect):
     # Explicit safe navigation/read controls only. Save is observed, never clicked.
     assert payload in {
-        "DOCUSE|info", "FORM|CBD", "FORM|CBD_2021", "FORM|best",
+        "DOCUSE|info", "GATHER|done", "FORM|CBD", "FORM|CBD_2021", "FORM|best",
         "ACTION|cancel", "CANCEL|draft", "ACTION|portfolio_defaults",
         "REMIND|menu", "ACTION|voice", "ACTION|settings", "VOICE|back_to_settings",
     }, "Protected or unreviewed control"
@@ -172,16 +172,24 @@ async def _media_ready_draft_to_cancel(client, path, kind):
     transcript = []
     try:
         sent = await client.send_message(BOT_USERNAME, "/cancel")
-        await _wider_wait(client, transcript, "reset:/cancel", min_id=sent.id, expect_text_any=("cancelled",))
+        reset = await _wider_wait(client, transcript, "reset:/cancel", min_id=sent.id, expect_text_any=("cancelled",))
         transcript.append(TelegramExchange(step="upload", action=f"send:{kind}:{path.name}", received="Upload attempted"))
         sent = await client.send_file(
             BOT_USERNAME, str(path), voice_note=kind == "voice", force_document=kind == "document",
             caption=None if kind == "voice" else "Synthetic training note only.",
         )
-        next_controls = dict(expect_buttons=True, expect_button_any=("Read text", "Use as case", "CBD", "Save to Kaizen", "Save draft to Kaizen"))
-        reply = await _wider_wait(client, transcript, f"after:{kind}", min_id=sent.id, **next_controls)
-        # At most one read and one form choice. Any other branch fails closed.
-        for allowed in ({"DOCUSE|info"}, {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}):
+        next_controls = dict(expect_buttons=True, expect_button_any=(
+            "Read text", "Use as case", "Choose form", "CBD", "Case-based discussion",
+            "Best fit", "Save to Kaizen", "Save draft to Kaizen",
+        ))
+        # The bot can edit an earlier progress bubble, or send a fresh one.
+        # Use the last observed fingerprint as the CBD journey does, rather
+        # than requiring every response to have an id newer than the upload.
+        reply = await _wider_wait(client, transcript, f"after:{kind}",
+                                  before=message_fingerprint(reset), **next_controls)
+        # Read-only capture -> default gathering -> CBD choice -> review.
+        # Gathering-off users skip Choose form. No other branch is clicked.
+        for allowed in ({"DOCUSE|info"}, {"GATHER|done"}, {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}):
             payload = next((_payload(b) for row in (reply.buttons or []) for b in row if _payload(b) in allowed), None)
             if payload:
                 reply = await _wider_click(client, transcript, reply, payload, **next_controls)
