@@ -182,7 +182,7 @@ async def test_signed_out_passwordless_user_is_asked_to_sign_in_again_and_keeps_
     assert state == bot.AWAIT_APPROVAL
     assert "Kaizen has signed you out" in sim.get_last_text()
     assert ("🔒 Sign in again", "ACTION|pwl_reconnect") in sim.get_last_buttons()
-    assert ("🔗 Reconnect Kaizen", "ACTION|setup") not in sim.get_last_buttons()
+    assert ("🔗 Connect Kaizen", "ACTION|setup") not in sim.get_last_buttons()
     assert context.user_data.get("draft_data") is not None
     # Expected daily for passwordless users: never page the operator.
     alert.assert_not_awaited()

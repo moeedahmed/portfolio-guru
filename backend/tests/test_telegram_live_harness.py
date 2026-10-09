@@ -367,9 +367,9 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
         intent = observed(
             '📷 Image received — how would you like to use it?' if kind == 'photo'
             else '📄 How would you like to use this document?',
-            ('📝 Read text' if kind == 'photo' else '📝 Use as case', 'DOCUSE|info'),
-            ('📎 Attach only', 'DOCUSE|attach'), ('📎 Read + attach', 'DOCUSE|both'),
-            ('❌ Remove', 'DOCUSE|ignore'), id=current_id,
+            ('📝 Use as case', 'DOCUSE|info'),
+            ('📎 Attach as evidence', 'DOCUSE|attach'), ('📎 Read + attach', 'DOCUSE|both'),
+            ('❌ Remove file', 'DOCUSE|ignore'), id=current_id,
         )
         histories.append([intent, reset])
     else:
@@ -382,7 +382,7 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
     if gathering:
         captured = observed(render_message('gathering_captured'),
                             ('📋 Choose form', 'GATHER|done'),
-                            ('❌ Discard case', 'ACTION|cancel'), id=current_id)
+                            ('❌ Cancel', 'ACTION|cancel'), id=current_id)
         histories.append([captured, progress])
     form_id = current_id if edit_in_place else current_id + 1
     choice = observed('I’ll use *Case-Based Discussion* for this entry.\n\n'

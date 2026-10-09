@@ -221,7 +221,7 @@ def test_save_stays_available_while_the_reflection_is_missing():
     _store_draft(context, CBDData(clinical_reasoning="Assessed chest pain.", reflection=""))
 
     labels = {button.text for row in _build_approval_keyboard(context=context).inline_keyboard for button in row}
-    assert "💾 Save draft to Kaizen" in labels
+    assert "💾 Save to Kaizen" in labels
 
 
 def test_actual_learning_point_source_unlocks_save_without_warning():

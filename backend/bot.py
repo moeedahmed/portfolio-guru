@@ -1183,7 +1183,7 @@ def _reminder_keyboard(kind: str) -> InlineKeyboardMarkup:
     import proactive_reminders as pr
 
     first = (
-        InlineKeyboardButton("📅 Set next month", callback_data="ACTION|health_review_setup")
+        InlineKeyboardButton("📅 Choose review month", callback_data="ACTION|health_review_setup")
         if kind == pr.AFTER
         else InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")
     )
@@ -1316,7 +1316,7 @@ def _reminder_settings_view(user_id: int):
                 InlineKeyboardButton("🔔 On", callback_data="REMIND|on"),
                 InlineKeyboardButton("🔕 Off", callback_data="REMIND|level|off"),
             ],
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ])
         return text, keyboard
     level = _REMINDER_LEVEL_LABELS.get(state.get("level") or "normal", "Normal")
@@ -1342,7 +1342,7 @@ def _reminder_settings_view(user_id: int):
             InlineKeyboardButton("🔕 Off", callback_data="REMIND|level|off"),
             InlineKeyboardButton("⏸️ Pause 2 weeks", callback_data="REMIND|pause|14"),
         ],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
     ])
     return text, keyboard
 
@@ -2759,7 +2759,7 @@ def _combined_gathering_case(context) -> tuple[str, str]:
 def _gathering_done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("📋 Choose form", callback_data="GATHER|done"),
-        InlineKeyboardButton("❌ Discard case", callback_data="ACTION|cancel"),
+        InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel"),
     ]])
 
 
@@ -2896,12 +2896,12 @@ _KB_CANCEL = InlineKeyboardMarkup([[_BTN_CANCEL]])
 # upstream LLM outage). Pairs with ACTION|retry_template — the bot re-runs
 # `_analyse_selected_form` using context.user_data["chosen_form"].
 _KB_RETRY_TEMPLATE = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_template")],
+    [InlineKeyboardButton("🔄 Retry draft", callback_data="ACTION|retry_template")],
     [_BTN_CANCEL],
 ])
 
 _KB_RETRY_SETUP = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_setup_login")],
+    [InlineKeyboardButton("🔄 Retry sign-in", callback_data="ACTION|retry_setup_login")],
     [_BTN_CANCEL],
 ])
 
@@ -3006,9 +3006,9 @@ def _passwordless_keyboard(
     if not watched:
         rows.append([InlineKeyboardButton("✅ I've signed in", callback_data=f"ACTION|{done_action}")])
     if done_action == "passwordless_done":
-        rows.append([InlineKeyboardButton("🔑 Share my login instead", callback_data="ACTION|setup_password")])
+        rows.append([InlineKeyboardButton("🔑 Share my login (recommended)", callback_data="ACTION|setup_password")])
     if not watched:
-        rows.append([InlineKeyboardButton("🔁 New link", callback_data=f"ACTION|{link_action}"), _BTN_CANCEL])
+        rows.append([InlineKeyboardButton("🔁 Get a new link", callback_data=f"ACTION|{link_action}"), _BTN_CANCEL])
     else:
         rows.append([_BTN_CANCEL])
     return InlineKeyboardMarkup(rows)
@@ -4083,7 +4083,7 @@ def _refresh_portfolio_confirm_text() -> str:
 def _refresh_portfolio_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Sync Kaizen", callback_data="ACTION|confirm_refresh_portfolio")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
     ])
 
 
@@ -4102,7 +4102,7 @@ def _health_refresh_confirm_text() -> str:
 def _health_refresh_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|confirm_refresh_for_health")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
     ])
 
 
@@ -4152,7 +4152,7 @@ def _health_view_keyboard(
             ))
         if needs_review_month:
             detail.append(InlineKeyboardButton(
-                f"📅 {'ARCP' if month_label_trainee else 'Appraisal'} month",
+                "📅 Choose review month",
                 callback_data="ACTION|health_review_setup",
             ))
         if detail:
@@ -4174,7 +4174,7 @@ def _health_view_keyboard(
             ),
         ])
         rows.append([
-            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")
         ])
 
     elif view == "action_queue" and queue in {"draft", "awaiting"}:
@@ -4204,7 +4204,7 @@ def _health_view_keyboard(
                 callback_data="ACTION|health_queue|draft|0",
             ))
         rows.append(cross_link + [InlineKeyboardButton(
-            "🔙 Health", callback_data="ACTION|health_view|priorities"
+            "📊 Portfolio health", callback_data="ACTION|health_view|priorities"
         )])
 
     # Direct callers and buttons sent before V2.1 used one combined page
@@ -4223,7 +4223,7 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")
         ])
 
     # Buttons sent before V2.1 used one combined page number. Keep their
@@ -4241,12 +4241,12 @@ def _health_view_keyboard(
         if pager:
             rows.append(pager)
         rows.append([
-            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")
         ])
 
     elif view in {"about", "more", "coverage", "curriculum", "scan"}:
         rows.append([
-            InlineKeyboardButton("🔙 Health", callback_data="ACTION|health_view|priorities")
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")
         ])
 
     return InlineKeyboardMarkup(rows)
@@ -4255,7 +4255,7 @@ def _health_view_keyboard(
 def _health_refresh_route_keyboard() -> InlineKeyboardMarkup:
     """Offered when a tapped button belongs to a report this chat no longer holds."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health")],
+        [InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")],
     ])
 
 
@@ -4263,7 +4263,7 @@ def _health_empty_keyboard() -> InlineKeyboardMarkup:
     """Useful next routes when a scan can see no portfolio evidence."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 Refresh health", callback_data="ACTION|health"),
+            InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health"),
             InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
         ],
         [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
@@ -4583,7 +4583,7 @@ def _health_review_month_picker_keyboard(reference=None) -> InlineKeyboardMarkup
         ))
     rows = [choices[index:index + 3] for index in range(0, len(choices), 3)]
     rows.append([
-        InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")
+        InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -4596,9 +4596,9 @@ def _health_review_month_confirmation_keyboard(review_month) -> InlineKeyboardMa
             callback_data=f"ACTION|health_review_confirm|{token}",
         )],
         [InlineKeyboardButton(
-            "📅 Choose another month", callback_data="ACTION|health_review_setup"
+            "📅 Choose review month", callback_data="ACTION|health_review_setup"
         )],
-        [InlineKeyboardButton("🔙 Cancel", callback_data="ACTION|health_view|priorities")],
+        [InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health_view|priorities")],
     ])
 
 
@@ -4776,13 +4776,9 @@ def _health_sync_recovery_keyboard(status: str) -> InlineKeyboardMarkup:
     """
     if status == "auth_required":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
+            [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
         ])
-    retry_button = (
-        InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|health")
-        if status == "timed_out"
-        else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|health")
-    )
+    retry_button = InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health")
     return InlineKeyboardMarkup([
         [
             retry_button,
@@ -4796,17 +4792,15 @@ def _refresh_portfolio_result_keyboard(status: str) -> InlineKeyboardMarkup:
     if status in {"ok", "partial"}:
         rows.append([
             InlineKeyboardButton("📊 Portfolio health", callback_data="ACTION|health"),
-            InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
         ])
     elif status == "auth_required":
-        rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
-        rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")])
+        rows.append([InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")])
+        rows.append([InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")])
     else:
         rows.append([
-            InlineKeyboardButton("🔄 Continue scan", callback_data="ACTION|refresh_portfolio")
-            if status == "timed_out"
-            else InlineKeyboardButton("🔄 Retry", callback_data="ACTION|refresh_portfolio"),
-            InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings"),
+            InlineKeyboardButton("🔄 Sync Kaizen", callback_data="ACTION|refresh_portfolio"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings"),
         ])
     return InlineKeyboardMarkup(rows)
 
@@ -4904,7 +4898,6 @@ def _settings_view_components(
     pathway_label = _pathway_label(_get_or_default_health_profile(user_id).pathway)
     voice_profile = get_voice_profile(user_id)
     voice_status = "Active" if voice_profile else "Not set"
-    voice_cta = "Writing style"
 
     plan_lines = []
     if connected is False:
@@ -4927,17 +4920,14 @@ def _settings_view_components(
         plan_lines.append(kaizen_row)
     plan_block = ("\n".join(plan_lines) + "\n\n") if plan_lines else ""
 
-    # Short enough to sit beside another button on a phone screen.
-    setup_button_label = "Connect Kaizen" if connected is False else "Kaizen login"
-
     portfolio_defaults_summary = f"{training_level} · {pathway_label} · {curriculum_label}"
 
     # Everyday settings in an even two-per-row grid; Reset data alone on the
     # last row because it is the one destructive choice.
     buttons: list[list[InlineKeyboardButton]] = [
         [
-            InlineKeyboardButton(f"🔗 {setup_button_label}", callback_data="ACTION|setup"),
-            InlineKeyboardButton(f"✍️ {voice_cta}", callback_data="ACTION|voice"),
+            InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup"),
+            InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice"),
         ],
         [
             InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults"),
@@ -5409,7 +5399,7 @@ def _build_form_choice_keyboard(recommendations, curriculum="2025"):
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([
         InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
-        InlineKeyboardButton("🔄 Restart", callback_data="CANCEL|form"),
+        InlineKeyboardButton("❌ Cancel", callback_data="CANCEL|form"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -5459,7 +5449,7 @@ def _build_category_picker_keyboard(user_id):
             row = []
     if row:
         rows.append(row)
-    rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|back")])
+    rows.append([InlineKeyboardButton("📋 Suggested forms", callback_data="FORM|back")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -5486,7 +5476,7 @@ def _build_category_forms_keyboard(user_id, cat_slug):
         emoji = FORM_EMOJIS.get(actual_ft) or FORM_EMOJIS.get(base_ft, "📋")
         buttons.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"FORM|{actual_ft}"))
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")])
+    rows.append([InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -5569,83 +5559,15 @@ def _is_stale_case_button(context, data: str | None) -> bool:
     return parts[2] != context.user_data.get("case_token")
 
 
-def _draft_possible_kc(draft):
-    from curriculum import validate_curriculum
-    if isinstance(draft, CBDData):
-        selected = draft.key_capabilities
-    elif isinstance(draft, FormDraft):
-        schema = FORM_SCHEMAS.get(schema_form_type(draft.form_type), {})
-        if not any(field.get("type") == "kc_tick" for field in schema.get("fields", [])):
-            return None
-        selected = draft.fields.get("key_capabilities") or []
-    else:
-        return None
-    possible = validate_curriculum({"possible_key_capability": draft.possible_key_capability})["possible_key_capability"]
-    if possible and not possible.get("removed") and possible["capability"] in selected:
-        return possible
-    return None
-
-
-def _draft_kc_removal_locked(context):
-    # The Kaizen amendment/retry filer cannot clear already-ticked KCs.
-    return bool(context.user_data.get("amend_mode") or context.user_data.get("kaizen_draft_url"))
-
-
-def _possible_kc_button_row(context):
-    if context is None or _draft_kc_removal_locked(context):
-        return []
-    possible = _draft_possible_kc(_load_draft(context))
-    if not possible:
-        return []
-    code = possible["capability"].split(":", 1)[0]
-    return [InlineKeyboardButton(f"➖ Remove {code}", callback_data=_case_button("ACTION|remove_possible_kc", context))]
-
-
-async def _remove_possible_key_capability(query, context):
-    """Claim and update the current draft before awaiting, so repeated taps lose."""
-    draft = _load_draft(context)
-    possible = _draft_possible_kc(draft)
-    if (not possible or _draft_kc_removal_locked(context) or context.user_data.get("filing_in_progress") or
-            query.data != f"ACTION|remove_possible_kc|{context.user_data.get('case_token')}"):
-        await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
-        return None
-    from extractor import _derive_curriculum_links_from_kcs
-    if isinstance(draft, CBDData):
-        kcs = [kc for kc in draft.key_capabilities if kc != possible["capability"]]
-        updated = draft.model_copy(update={"key_capabilities": kcs,
-            "curriculum_links": _derive_curriculum_links_from_kcs(kcs), "possible_key_capability": {**possible, "removed": True}})
-    else:
-        fields = dict(draft.fields)
-        kcs = [kc for kc in (fields.get("key_capabilities") or []) if kc != possible["capability"]]
-        fields["key_capabilities"] = kcs
-        fields["curriculum_links"] = _derive_curriculum_links_from_kcs(kcs)
-        updated = draft.model_copy(update={"fields": fields, "possible_key_capability": {**possible, "removed": True}})
-    _store_draft(context, updated)
-    if context.user_data.get("pending_draft_data"):
-        _store_pending_draft(context, updated)
-    await query.answer()
-    await _safe_edit_text(query.message, _format_draft_preview_for_context(updated, context) + _draft_reply_hint(context),
-                          parse_mode="Markdown", reply_markup=_active_draft_keyboard(context))
-    return AWAIT_APPROVAL
-
-
 def _build_approval_keyboard(
     improved_once: bool = False,
     can_back_to_missing: bool = False,
     context=None,
 ):
     rows = []
-    possible_row = _possible_kc_button_row(context)
-    if possible_row:
-        rows.append(possible_row)
     save, cancel = _case_button("APPROVE|draft", context), _case_button("CANCEL|draft", context)
-    gaps = _draft_gaps(context) if context is not None else []
-    # Save is always offered: it only ever makes a Kaizen draft, which the
-    # doctor can finish there. Gaps are filled by replying, not by buttons.
-    if gaps:
-        rows.append([InlineKeyboardButton("💾 Save draft to Kaizen", callback_data=save)])
-    else:
-        rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
+    # Gaps and curriculum changes are handled by replying to the draft.
+    rows.append([InlineKeyboardButton("💾 Save to Kaizen", callback_data=save)])
     if can_back_to_missing:
         rows.append(_nav_row("Back", "ACTION|back_to_missing", "Cancel", cancel))
     else:
@@ -5654,8 +5576,7 @@ def _build_approval_keyboard(
 
 
 def _build_amend_keyboard(improved_once: bool = False, context=None) -> InlineKeyboardMarkup:
-    possible_row = _possible_kc_button_row(context)
-    return InlineKeyboardMarkup(([possible_row] if possible_row else []) + [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("💾 Save to Kaizen", callback_data=_case_button("APPROVE|draft", context))],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
     ])
@@ -5665,11 +5586,11 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📝 Use as case", callback_data="DOCUSE|info"),
-            InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
         ],
         [
             InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
-            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("❌ Remove file", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5684,7 +5605,7 @@ def _build_evidence_artifact_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
-            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("❌ Remove file", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5703,12 +5624,12 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
             # will not: it reads text off it (report wording, labels, notes) and
             # refuses to read the clinical picture itself without the doctor's
             # own account. The label now says what actually happens.
-            InlineKeyboardButton("📝 Read text", callback_data="DOCUSE|info"),
-            InlineKeyboardButton("📎 Attach only", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("📝 Use as case", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
         ],
         [
             InlineKeyboardButton("📎 Read + attach", callback_data="DOCUSE|both"),
-            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("❌ Remove file", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5716,8 +5637,8 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
 def _build_video_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📎 Attach", callback_data="DOCUSE|attach"),
-            InlineKeyboardButton("❌ Remove", callback_data="DOCUSE|ignore"),
+            InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
+            InlineKeyboardButton("❌ Remove file", callback_data="DOCUSE|ignore"),
         ],
     ])
 
@@ -5755,9 +5676,9 @@ _FILING_UNCERTAIN_TEXT = (
 def _build_uncertain_filing_keyboard() -> InlineKeyboardMarkup:
     """One keyboard for every save whose outcome is unknown (timeout, crash)."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔗 Check Kaizen drafts", url="https://kaizenep.com/activities")],
+        [InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")],
         [
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing"),
             InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
         ],
     ])
@@ -5783,8 +5704,8 @@ def _has_retryable_failed_filing_draft(context) -> bool:
 def _build_failed_filing_input_gate_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
-            InlineKeyboardButton("✏️ Edit", callback_data="CASE|improve"),
+            InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton("✏️ Edit draft", callback_data="CASE|improve"),
         ],
         [
             InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="CASE|new"),
@@ -5797,7 +5718,7 @@ def _build_open_case_new_case_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("➕ New case", callback_data="CASE|new"),
-            InlineKeyboardButton("✏️ Add to draft", callback_data="CASE|improve"),
+            InlineKeyboardButton("✏️ Edit draft", callback_data="CASE|improve"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="ACTION|cancel")],
     ])
@@ -5928,7 +5849,7 @@ def _build_post_filing_keyboard(
 
     if status == "failed":
         rows.append([
-            InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+            InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing"),
             InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|file"),
         ])
         rows.append([_BTN_CANCEL])
@@ -5947,7 +5868,7 @@ def _build_post_filing_keyboard(
         if not saved_url and FORM_UUIDS.get(form_type):
             rows.append([InlineKeyboardButton("🔗 Open Kaizen", url="https://kaizenep.com/activities")])
         if uncertain:
-            rows.append([InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")])
+            rows.append([InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing")])
         if uncertain:
             rows.append([_BTN_CANCEL])
         return InlineKeyboardMarkup(rows)
@@ -5975,8 +5896,8 @@ def _build_edit_field_keyboard(draft=None):
         editable = [f for f in fields if f["type"] in ("text", "date", "dropdown")][:6]
         buttons = []
         for field in editable:
-            label = field["label"][:20]
-            buttons.append(InlineKeyboardButton(f"✏️ {label}", callback_data=f"FIELD|{field['key']}"))
+            label = _friendly_field_name(field["key"])
+            buttons.append(InlineKeyboardButton(f"✏️ Edit {label}", callback_data=f"FIELD|{field['key']}"))
         # Arrange in rows of 2
         rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
         rows.append([InlineKeyboardButton("🔙 Back", callback_data="CANCEL|edit")])
@@ -5984,16 +5905,16 @@ def _build_edit_field_keyboard(draft=None):
     # Default CBD keyboard
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📅 Date", callback_data="FIELD|date_of_encounter"),
-            InlineKeyboardButton("🏥 Setting", callback_data="FIELD|clinical_setting"),
+            InlineKeyboardButton("✏️ Edit Date of encounter", callback_data="FIELD|date_of_encounter"),
+            InlineKeyboardButton("✏️ Edit Clinical setting", callback_data="FIELD|clinical_setting"),
         ],
         [
-            InlineKeyboardButton("🩺 Presentation", callback_data="FIELD|patient_presentation"),
-            InlineKeyboardButton("📝 Case discussion", callback_data="FIELD|clinical_reasoning"),
+            InlineKeyboardButton("✏️ Edit Patient presentation", callback_data="FIELD|patient_presentation"),
+            InlineKeyboardButton("✏️ Edit Case discussion", callback_data="FIELD|clinical_reasoning"),
         ],
         [
-            InlineKeyboardButton("💭 Reflection", callback_data="FIELD|reflection"),
-            InlineKeyboardButton("📚 SLOs", callback_data="FIELD|curriculum_links"),
+            InlineKeyboardButton("✏️ Edit Reflection", callback_data="FIELD|reflection"),
+            InlineKeyboardButton("✏️ Edit Curriculum links", callback_data="FIELD|curriculum_links"),
         ],
         [InlineKeyboardButton("🔙 Back", callback_data="CANCEL|edit")],
     ])
@@ -7174,7 +7095,7 @@ async def _ask_to_retry_essentials_check(
 def _build_change_form_keyboard(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
     back_to = "FORM|back" if context.user_data.get("form_recommendations") else "FORM|show_all"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔀 Choose a different form", callback_data=back_to)],
+        [InlineKeyboardButton("📋 Suggested forms" if back_to == "FORM|back" else "📋 Forms", callback_data=back_to)],
         [_BTN_CANCEL],
     ])
 
@@ -8503,7 +8424,7 @@ async def _confirm_passwordless_connection(context, watch: dict) -> None:
                 watch,
                 _PASSWORDLESS_CONNECTED_AGAIN_TEXT + " Your draft is still waiting.",
                 InlineKeyboardMarkup([[
-                    InlineKeyboardButton("💾 Save the draft now", callback_data="ACTION|pwl_reconnected"),
+                    InlineKeyboardButton("💾 Save to Kaizen", callback_data="ACTION|pwl_reconnected"),
                 ]]),
             )
         else:
@@ -9226,7 +9147,7 @@ async def _voice_run_kaizen_sample(
 
     rows = []
     if getattr(result, "reason", None) in RECONNECT_REASONS:
-        rows.append([InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")])
+        rows.append([InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")])
     rows.extend([
         [
             InlineKeyboardButton("✍️ Manual examples", callback_data="VOICE|path_manual"),
@@ -9277,7 +9198,7 @@ def _voice_post_activation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("➕ New case", callback_data="ACTION|file"),
-            InlineKeyboardButton("✍️ Update profile", callback_data="ACTION|voice"),
+            InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice"),
         ],
     ])
 
@@ -9349,7 +9270,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Analysis took too long — please try again. This usually works on a second attempt.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -9362,7 +9283,7 @@ async def _build_voice_profile(update: Update, context: ContextTypes.DEFAULT_TYP
             update, context,
             "⚠️ Couldn't analyse your writing style. Try again or send different examples.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Retry", callback_data="ACTION|voice")],
+                [InlineKeyboardButton("✍️ Writing style", callback_data="ACTION|voice")],
             ]),
             flow_key="voice",
         )
@@ -9395,7 +9316,7 @@ async def handle_info_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     rows = []
     if primary:
         rows.append(primary)
-    rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")])
+    rows.append([InlineKeyboardButton("🏠 Menu", callback_data="ACTION|back_to_menu")])
     await query.message.edit_text(
         WHAT_IS_THIS_MSG,
         reply_markup=InlineKeyboardMarkup(rows),
@@ -9547,7 +9468,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.edit_text(
             WHAT_IS_THIS_MSG,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|back_to_menu")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="ACTION|back_to_menu")],
             ]),
         )
 
@@ -9559,7 +9480,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         # place and returns there, not to the generic filing menu. ``health``
         # runs the autonomous scan-to-report flow; ``health_limited`` is the
         # recovery path that skips the Kaizen scan and shows the limited view.
-        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
+        back_btn = InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not _kaizen_connected(user_id):
@@ -9813,7 +9734,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
-                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+                    [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
                 ]),
             )
             return ConversationHandler.END
@@ -9829,7 +9750,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 "🔗 Connect your Kaizen account first, then you can sync Kaizen evidence.",
                 reply_markup=InlineKeyboardMarkup([
                     [_BTN_SETUP],
-                    [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+                    [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
                 ]),
             )
             return ConversationHandler.END
@@ -9851,7 +9772,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     elif action == "confirm_refresh_for_health":
-        back_btn = InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")
+        back_btn = InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")
         back_markup = InlineKeyboardMarkup([[back_btn]])
 
         if not _kaizen_connected(user_id):
@@ -9939,7 +9860,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                     InlineKeyboardButton("📊 Pathway", callback_data="ACTION|change_pathway"),
                 ],
                 [InlineKeyboardButton("📚 Curriculum", callback_data="ACTION|change_curriculum")],
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+                [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
             ]),
         )
 
@@ -9951,7 +9872,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                     InlineKeyboardButton("📘 2025 Update", callback_data="SET_CURRICULUM|2025"),
                     InlineKeyboardButton("📗 2021 Curriculum", callback_data="SET_CURRICULUM|2021"),
                 ],
-                [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
+                [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
             ]),
         )
 
@@ -9965,7 +9886,7 @@ async def handle_action_button(update: Update, context: ContextTypes.DEFAULT_TYP
                 InlineKeyboardButton("🎓 HST", callback_data="SETLEVEL|HIGHER"),
                 InlineKeyboardButton("🎓 Non-training", callback_data="SETLEVEL|SAS"),
             ],
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
+            [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
         ])
         await query.message.edit_text(
             "🎓 Which Kaizen portfolio applies to you?",
@@ -11144,7 +11065,7 @@ def _build_pathway_keyboard(*, from_settings: bool = False) -> InlineKeyboardMar
         [InlineKeyboardButton("🗂 Appraisal only", callback_data=f"{prefix}|{Pathway.appraisal_only.value}")],
     ]
     if from_settings:
-        rows.append([InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")])
+        rows.append([InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -11858,7 +11779,7 @@ async def handle_set_curriculum(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(
         f"✅ Set to {label} — I'll only show you the relevant forms.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|settings")],
+            [InlineKeyboardButton("⚙️ Settings", callback_data="ACTION|settings")],
         ]),
     )
 
@@ -11877,7 +11798,7 @@ async def handle_set_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"✅ Portfolio set to {_training_level_label(level)}.",
         reply_markup=InlineKeyboardMarkup([
             # Back returns to Portfolio defaults, where the choice was offered.
-            [InlineKeyboardButton("🔙 Back", callback_data="ACTION|portfolio_defaults")],
+            [InlineKeyboardButton("📋 Portfolio defaults", callback_data="ACTION|portfolio_defaults")],
         ]),
     )
 
@@ -12590,7 +12511,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
-                        InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_recommend"),
+                        InlineKeyboardButton("🔄 Retry forms", callback_data="ACTION|retry_recommend"),
                     ],
                 ]),
             )
@@ -12612,7 +12533,7 @@ async def _process_case_text(message, context: ContextTypes.DEFAULT_TYPE, user_i
             render_message("ai_temporarily_unavailable"),
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_recommend"),
+                    InlineKeyboardButton("🔄 Retry forms", callback_data="ACTION|retry_recommend"),
                     InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all"),
                 ],
             ]),
@@ -12666,6 +12587,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route callback queries based on prefix."""
     query = update.callback_query
     data = query.data
+    if data.split("|")[:2] in (["ACTION", "remove_possible_kc"], ["ACTION", "add_possible_kc"]):
+        return await _answer_unhandled_button(update, context)
     if _is_stale_case_button(context, data):
         await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
         return None
@@ -12685,9 +12608,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_user.id,
         _case_review_state_snapshot(context),
     )
-
-    if data.startswith("ACTION|remove_possible_kc|"):
-        return await _remove_possible_key_capability(query, context)
 
     if data.startswith("INFO|privacy_"):
         await query.answer()
@@ -13994,7 +13914,7 @@ async def handle_template_review_text(update: Update, context: ContextTypes.DEFA
             prompt_text = "Looks like a new case — start fresh or fold it into the current one?"
             markup = InlineKeyboardMarkup([[
                 InlineKeyboardButton("➕ New case", callback_data="CASE|new"),
-                InlineKeyboardButton("✏️ Edit", callback_data="CASE|improve"),
+                InlineKeyboardButton("✏️ Edit draft", callback_data="CASE|improve"),
             ]])
             await _edit_last_bot_msg(
                 context,
@@ -15309,7 +15229,7 @@ async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_
 
     if matches:
         rows = [matches[i:i+2] for i in range(0, len(matches), 2)]
-        rows.append([InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")])
+        rows.append([InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all")])
         await update.message.reply_text(
             f"Found {len(matches)} form{'s' if len(matches) != 1 else ''} matching \"{update.message.text.strip()}\":",
             reply_markup=InlineKeyboardMarkup(rows),
@@ -15318,7 +15238,7 @@ async def handle_form_search_text(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(
             "No forms matched — try another term.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")]
+                [InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all")]
             ]),
         )
     return AWAIT_FORM_CHOICE
@@ -15373,7 +15293,7 @@ async def handle_form_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(
             "Type part of the form name to search:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back", callback_data="FORM|show_all")]
+                [InlineKeyboardButton("📋 Forms", callback_data="FORM|show_all")]
             ]),
         )
         return AWAIT_FORM_SEARCH
@@ -16607,12 +16527,12 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 f"❌ Filing didn't complete\n"
                 f"{form_name}\n\n"
                 "Your Kaizen session has expired, but your draft is kept. "
-                "Tap 'Reconnect Kaizen' to sign in again, or try again."
+                "Tap 'Connect Kaizen' to sign in again, or try again."
             )
             end_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔗 Reconnect Kaizen", callback_data="ACTION|setup")],
+                [InlineKeyboardButton("🔗 Connect Kaizen", callback_data="ACTION|setup")],
                 [
-                    InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing"),
+                    InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing"),
                     InlineKeyboardButton(_POST_FILING_NEW_CASE_LABEL, callback_data="ACTION|reset"),
                 ],
             ])
@@ -16663,7 +16583,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 "Tapping retry will try an alternative save method."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -16684,7 +16604,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
             rows = _build_field_edit_buttons(skipped)
-            rows.append([InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")])
+            rows.append([InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing")])
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -16729,7 +16649,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
                 else "Try again, or fill the form manually in your portfolio."
             )
             msg = f"❌ Filing didn't complete\n{form_name}\n\n{body}{details_suffix}"
-            rows = [[InlineKeyboardButton("🔄 Retry", callback_data="ACTION|retry_filing")]]
+            rows = [[InlineKeyboardButton("🔄 Retry save", callback_data="ACTION|retry_filing")]]
             if kaizen_url:
                 rows.append([InlineKeyboardButton("🔗 Open Kaizen", url=kaizen_url)])
             rows.append([
@@ -17649,6 +17569,12 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 updates = {}
 
             summary = updates.pop("__summary__", "") if isinstance(updates, dict) else ""
+            if isinstance(updates, dict) and not re.search(
+                r"\b(?:KCs?|key capabilit(?:y|ies)|curriculum|SLO\d+)\b", raw_text, re.IGNORECASE,
+            ):
+                # Unrelated edits must not undo the doctor's KC selection.
+                updates.pop("key_capabilities", None)
+                updates.pop("curriculum_links", None)
             if updates:
                 # Keep the doctor's correction as source evidence for later
                 # edits, and reassess it before accepting doctor-owned facts.
@@ -17663,9 +17589,21 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 if gate is not None:
                     return gate
                 previous = draft
+                metadata = {}
+                if "key_capabilities" in updates:
+                    checked = validate_curriculum({"key_capabilities": updates["key_capabilities"]})
+                    selected = checked["key_capabilities"]
+                    updates.update(checked)
+                    updates["curriculum_links"] = list(dict.fromkeys(kc.split()[0] for kc in selected))
+                    old_kcs = _draft_fields_for_review(draft).get("key_capabilities") or []
+                    metadata = {
+                        "possible_key_capability": None,
+                        "excluded_key_capabilities": list(dict.fromkeys(
+                            kc for kc in [*draft.excluded_key_capabilities, *old_kcs] if kc not in selected)),
+                    }
                 if isinstance(draft, FormDraft):
                     # Carry preview metadata as well as the edited filing fields.
-                    draft = draft.model_copy(update={"fields": {**draft.fields, **updates}})
+                    draft = draft.model_copy(update={"fields": {**draft.fields, **updates}, **metadata})
                 else:
                     # A model may use null to clear a field. Restore its
                     # empty default and validate before replacing the draft.
@@ -17675,7 +17613,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                         if key in type(draft).model_fields
                     }
                     try:
-                        draft = type(draft).model_validate({**draft.model_dump(), **updates})
+                        draft = type(draft).model_validate({**draft.model_dump(), **updates, **metadata})
                     except ValueError:
                         await update.message.reply_text(
                             "I couldn't apply that change. Your previous draft is unchanged; try rephrasing it.",
@@ -17683,9 +17621,12 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                         )
                         return AWAIT_APPROVAL
                 from extractor import preserve_possible_kc_selection
-                draft = preserve_possible_kc_selection(previous, draft)
+                if not metadata:
+                    draft = preserve_possible_kc_selection(previous, draft)
                 draft = _blank_judged_missing_essentials(context, draft, case_text, chosen_form or "CBD")
                 _store_draft(context, draft)
+                if context.user_data.get("pending_draft_data"):
+                    _store_pending_draft(context, draft)
                 _set_reflection_detail_gate(context, draft)
                 preview = _format_draft_preview_for_context(draft, context, chosen_form)
                 ack_line = f"✏️ Updated: {summary}\n\n" if summary else "✏️ Draft updated.\n\n"
@@ -18444,7 +18385,7 @@ def build_application() -> Application:
                     handle_callback,
                     pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
                 ),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:(?:add_reflection_detail|retry_filing|back_to_missing)$|remove_possible_kc\|[0-9a-f]+$)"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing|back_to_missing)$"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -18582,7 +18523,7 @@ def build_application() -> Application:
             handle_action_button,
             # Buttons that move the case conversation must reach case_conv, or
             # the state they return is thrown away (Retry left the case stuck).
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$|remove_possible_kc\|).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$|(?:remove_possible_kc|add_possible_kc)(?:\||$)).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

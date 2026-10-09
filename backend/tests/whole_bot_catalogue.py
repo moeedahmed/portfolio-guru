@@ -29,7 +29,7 @@ def payload_branch(payload):
     if family == "ACTION" and len(parts) > 2:
         if parts[1] == "health_queue":
             return "|".join(parts[:3]) + "|*"
-        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more", "remove_possible_kc"}:
+        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more"}:
             return "|".join(parts[:2]) + "|*"
     return payload
 
@@ -72,10 +72,10 @@ def producer_digest():
 # 9 Oct 2026: third KC selected by default with Remove instead of Add.
 # 9 Oct 2026: Remove syncs the pending snapshot and is hidden/rejected for
 # saved-draft amendments and reopens; existing callback payloads are unchanged.
-PRODUCER_DIGEST = 'bce426dba7626160ec087393ba59663e93d5ce19e509fd07a8ce018de4eb0597'
+# 9 Oct 2026: KC Remove button dropped; one label per button action.
+PRODUCER_DIGEST = 'ccdbbe81fddf18830427ed60e469092081d7881f7622413926b3c88e77a4553f'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
-ACTION|remove_possible_kc|*
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
@@ -218,8 +218,8 @@ def reviewed_units(slots):
 
 
 # Registration candidate paths shift when consent moves into case_conv.
-# 9 Oct 2026: reviewed ACTION|remove_possible_kc|* and its approval-state owner.
-CATALOGUE_DIGEST = '36804a8a2e30f07f4188ba569d7c18e42748dd7bb3b3570a58306cac786c88b0'
+# 9 Oct 2026: retired KC callbacks removed from active approval ownership.
+CATALOGUE_DIGEST = '8dfe777d7134852697a45ce8a4d9deca3d7662e22ba0c0083082838df70bf264'
 
 
 def requirements_digest(units):

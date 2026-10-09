@@ -815,6 +815,19 @@ async def test_generate_backs_off_longer_on_rate_limit(monkeypatch):
 POSSIBLE_CASE = "I assessed an ankle injury and discussed imaging with my supervisor."
 
 
+
+async def _remove_kc_by_reply(sim, context, capability="SLO2 KC1"):
+    import bot
+    draft = bot._load_draft(context)
+    fields = draft.fields if hasattr(draft, "fields") else draft.model_dump()
+    selected = [kc for kc in fields["key_capabilities"] if kc.split(":", 1)[0] != capability]
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=draft.form_type)
+    with patch("bot.classify_intent", AsyncMock(return_value="edit_detail")), \
+         patch("bot.extract_field_updates", AsyncMock(return_value={"key_capabilities": selected})), \
+         patch("bot._essentials_gate_before_draft", AsyncMock(return_value=None)):
+        return await bot.handle_mid_conversation_text(sim._make_text_update("remove " + capability), context)
+
+
 def _possible_kc():
     return {"capability": "SLO2 KC1", "reason": "You discussed the imaging decision with a senior.",
             "evidence": "discussed imaging with my supervisor"}
@@ -854,52 +867,6 @@ async def test_possible_kc_is_selected_by_default_when_valid_and_case_grounded(f
         assert generate.await_count == 2  # same bounded review, no extra model call
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("generic", [False, True])
-async def test_remove_kc_tap_updates_preview_and_filing_payload(generic):
-    import bot
-    from extractor import KC_FULL_TEXT
-    from models import CBDData, FormDraft
-    from tests.bot_simulator import BotSimulator
-    possible = {**_possible_kc(), "capability": KC_FULL_TEXT["SLO2 KC1"]}
-    selected = [KC_FULL_TEXT["SLO4 KC1"]]
-    draft = (FormDraft(form_type="TEACH", fields={"key_capabilities": selected, "curriculum_links": ["SLO4"]},
-                       possible_key_capability=possible) if generic else
-             CBDData(key_capabilities=selected, curriculum_links=["SLO4"], possible_key_capability=possible))
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data["case_text"] = POSSIBLE_CASE
-    bot._store_draft(context, draft)
-    loaded = bot._load_draft(context)
-    payload = loaded.fields if generic else bot._cbd_filing_fields(loaded)
-    assert payload["key_capabilities"] == [*selected, KC_FULL_TEXT["SLO2 KC1"]]
-    assert "possible_key_capability" not in payload
-    before = bot._format_draft_preview_for_context(loaded, context)
-    assert "Possible extra:" not in before
-    assert "SLO2" in before
-    assert "↳ KC1" in before
-    markup = bot._active_draft_keyboard(context)
-    callback = next(b.callback_data for row in markup.inline_keyboard for b in row if "remove_possible_kc" in b.callback_data)
-    assert any(b.text == "➖ Remove SLO2 KC1" for row in markup.inline_keyboard for b in row)
-    assert len(callback.encode("utf-8")) <= 64
-    update = sim._make_callback_update(callback)
-    with patch("bot._audit_event"), patch("bot._safe_edit_text", new=AsyncMock()) as edit:
-        state = await bot.handle_callback(update, context)
-        assert state == bot.AWAIT_APPROVAL
-        after = bot._load_draft(context)
-        payload = after.fields if generic else bot._cbd_filing_fields(after)
-        assert payload["key_capabilities"] == selected
-        assert payload["curriculum_links"] == ["SLO4"]
-        assert after.possible_key_capability == {"capability": KC_FULL_TEXT["SLO2 KC1"], "removed": True}
-        text = edit.call_args.args[1]
-        assert "Possible extra:" not in text
-        assert "SLO2" not in text
-        assert "↳ KC1" in text
-        assert edit.call_args.args[0] is update.callback_query.message
-        assert not any("remove_possible_kc" in b.callback_data for row in edit.call_args.kwargs["reply_markup"].inline_keyboard for b in row)
-        # The old tap cannot remove again or re-render.
-        assert await bot.handle_callback(update, context) is None
-        assert edit.await_count == 1
 
 
 def test_possible_kc_has_no_button_or_preview_line_with_three_supported_links():
@@ -928,31 +895,12 @@ async def test_possible_generic_kc_is_selected_once_despite_existing_breadth_heu
     assert draft.possible_key_capability["capability"].startswith("SLO1 KC1:")
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("stale,filing", [(True, False), (False, True)])
-async def test_possible_kc_tap_cannot_mutate_a_newer_or_filing_draft(stale, filing):
-    import bot
-    from models import CBDData
-    from tests.bot_simulator import BotSimulator
-    sim = BotSimulator()
-    context = sim._make_context()
-    draft = CBDData(key_capabilities=["SLO4 KC1"], possible_key_capability=_possible_kc())
-    bot._store_draft(context, draft)
-    callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if "remove_possible_kc" in b.callback_data)
-    if stale:
-        bot._store_draft(context, draft.model_copy(update={"clinical_reasoning": "Newer draft"}))
-    context.user_data["filing_in_progress"] = filing
-    before = bot._load_draft(context)
-    with patch("bot._audit_event"), patch("bot._safe_edit_text", new=AsyncMock()) as edit:
-        assert await bot.handle_callback(sim._make_callback_update(callback), context) is None
-    assert bot._load_draft(context) == before
-    edit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
 @pytest.mark.parametrize("remove_extra", [False, True])
-async def test_approval_filer_receives_three_kcs_by_default_or_two_after_remove(form_type, remove_extra):
+async def test_approval_filer_receives_three_kcs_by_default_or_two_after_reply_remove(form_type, remove_extra):
     import bot
     from extractor import KC_FULL_TEXT
     from models import CBDData, FormDraft
@@ -968,8 +916,7 @@ async def test_approval_filer_receives_three_kcs_by_default_or_two_after_remove(
     context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
     bot._store_draft(context, draft)
     if remove_extra:
-        callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if "remove_possible_kc" in b.callback_data)
-        assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
     save = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if b.callback_data.startswith("APPROVE|"))
     route = AsyncMock(return_value={"status": "failed", "filled": [], "skipped": [],
                                    "error": "offline payload capture", "method": "deterministic"})
@@ -1023,9 +970,8 @@ async def test_remove_then_date_only_regeneration_keeps_two_kcs(form_type):
     context = sim._make_context()
     context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
     bot._store_draft(context, draft)
-    callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if 'remove_possible_kc' in b.callback_data)
     with patch('bot._safe_edit_text', AsyncMock()):
-        assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
     payload = {'date_of_encounter': '2026-10-08', 'key_capabilities': [*selected, offered['capability']], 'curriculum_links': ['SLO4', 'SLO2']}
     with patch('extractor._generate', AsyncMock(return_value=json.dumps(payload))), patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)), patch('bot.get_voice_profile', return_value=''), patch('bot._safe_edit_text', AsyncMock()):
         for _ in range(2):
@@ -1035,7 +981,7 @@ async def test_remove_then_date_only_regeneration_keeps_two_kcs(form_type):
             assert offered['capability'] not in fields['key_capabilities']
             assert fields['key_capabilities'] == selected
             assert 'SLO2' not in fields['curriculum_links']
-            assert updated.possible_key_capability == {'capability': offered['capability'], 'removed': True}
+            assert offered['capability'] in updated.excluded_key_capabilities
             assert 'SLO2' not in bot._format_draft_preview(updated)
             assert not any('possible_kc' in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
 
@@ -1078,9 +1024,8 @@ async def test_removed_kc_survives_field_edit_reconstruction_then_regeneration(f
     offered = {'capability': KC_FULL_TEXT['SLO2 KC1']}
     bot._store_draft(context, FormDraft(form_type=form_type,
         fields={'key_capabilities': selected, 'curriculum_links': ['SLO4']}, possible_key_capability=offered))
-    callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if 'remove_possible_kc' in b.callback_data)
     with patch('bot._safe_edit_text', AsyncMock()):
-        assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
     offered = {**offered, 'removed': True}
     context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
     feedback = 'Change the date to 8 October 2026'
@@ -1089,7 +1034,7 @@ async def test_removed_kc_survives_field_edit_reconstruction_then_regeneration(f
          patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)):
         assert await bot.handle_mid_conversation_text(sim._make_text_update(feedback), context) == bot.AWAIT_APPROVAL
     edited = bot._load_draft(context)
-    assert edited.possible_key_capability == offered
+    assert edited.possible_key_capability is None
     # The regenerated model attempts to restore the removed candidate.
     regenerated = edited.model_copy(update={'fields': {**edited.fields, 'key_capabilities': [*selected, offered['capability']]}, 'possible_key_capability': None})
     with patch('bot.extract_form_data', AsyncMock(return_value=regenerated)), \
@@ -1099,7 +1044,7 @@ async def test_removed_kc_survives_field_edit_reconstruction_then_regeneration(f
     updated = bot._load_draft(context)
     assert updated.fields['key_capabilities'] == selected
     assert updated.fields['curriculum_links'] == ['SLO4']
-    assert updated.possible_key_capability == offered
+    assert offered["capability"] in updated.excluded_key_capabilities
     assert not any('possible_kc' in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
 
 
@@ -1128,7 +1073,7 @@ async def test_form_reanalysis_cannot_restore_a_removed_kc_from_active_or_pendin
     updated_fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
     assert updated_fields['key_capabilities'] == selected
     assert updated_fields['curriculum_links'] == ['SLO4']
-    assert updated.possible_key_capability == offered
+    assert offered["capability"] in updated.excluded_key_capabilities
     assert bot._load_pending_draft(context).possible_key_capability == offered
 
 
@@ -1152,7 +1097,7 @@ async def test_cbd_field_edit_cannot_restore_a_removed_kc():
     updated = bot._load_draft(context)
     assert updated.key_capabilities == selected
     assert updated.curriculum_links == ['SLO4']
-    assert updated.possible_key_capability == offered
+    assert offered["capability"] in updated.excluded_key_capabilities
 
 
 @pytest.mark.parametrize('selection', [None, []])
@@ -1163,7 +1108,7 @@ def test_removed_possible_kc_survives_cleared_generic_selection(selection):
     previous = FormDraft(form_type='TEACH', fields={}, possible_key_capability=offered)
     updated = preserve_possible_kc_selection(previous, previous.model_copy(update={'fields': {'key_capabilities': selection}}))
     assert updated.fields['key_capabilities'] == []
-    assert updated.possible_key_capability == offered
+    assert offered["capability"] in updated.excluded_key_capabilities
 
 
 # 2026-10-09: every draft boundary rejects invented catalogue identities.
@@ -1358,68 +1303,23 @@ async def test_earlier_show_draft_keeps_removed_kc_excluded(form_type):
     context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
     bot._store_pending_draft(context, draft)
     bot._store_draft(context, draft)
-    callback = bot._possible_kc_button_row(context)[0].callback_data
     with patch("bot._safe_edit_text", AsyncMock()), patch("bot._track_funnel_event"):
-        assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
         assert await bot.handle_callback(sim._make_callback_update("ACTION|continue_thin"), context) == bot.AWAIT_APPROVAL
     for updated in (bot._load_draft(context), bot._load_pending_draft(context)):
         fields = bot._cbd_filing_fields(updated) if form_type == "CBD" else updated.fields
         assert fields["key_capabilities"] == selected
         assert fields["curriculum_links"] == ["SLO4"]
-        assert updated.possible_key_capability.get("removed") is True
-    assert bot._possible_kc_button_row(context) == []
+        assert updated.possible_key_capability is None
+        assert possible["capability"] in updated.excluded_key_capabilities
+    assert not any("possible_kc" in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
+
+
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
-@pytest.mark.parametrize("saved_state", ["amend", "amend_without_url", "retry_reopen"])
-async def test_saved_draft_hides_remove_and_rejects_old_tap(form_type, saved_state):
-    import copy
-    import bot
-    from models import CBDData, FormDraft
-    from extractor import KC_FULL_TEXT
-    from tests.bot_simulator import BotSimulator
-    selected = [KC_FULL_TEXT[k] for k in ("SLO4 KC1", "SLO4 KC2")]
-    possible = {"capability": KC_FULL_TEXT["SLO2 KC1"]}
-    draft = (CBDData(key_capabilities=selected, possible_key_capability=possible)
-             if form_type == "CBD" else FormDraft(form_type=form_type,
-                 fields={"key_capabilities": selected}, possible_key_capability=possible))
-    sim = BotSimulator()
-    context = sim._make_context()
-    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
-    bot._store_draft(context, draft)
-    callback = bot._possible_kc_button_row(context)[0].callback_data
-    if saved_state.startswith("amend"):
-        context.user_data.update(last_amend_draft=context.user_data["draft_data"],
-            last_amend_case_text=POSSIBLE_CASE, last_amend_chosen_form=form_type)
-        if saved_state == "amend":
-            context.user_data["last_amend_draft_url"] = "https://kaizenep.com/draft/synthetic"
-        assert await bot.handle_amend_draft(sim._make_callback_update("AMEND|draft"), context) == bot.AWAIT_APPROVAL
-    else:
-        context.user_data["kaizen_draft_url"] = "https://kaizenep.com/draft/synthetic"
-    for keyboard in (bot._active_draft_keyboard(context), bot._build_approval_keyboard(context=context)):
-        assert not any("remove_possible_kc" in b.callback_data for row in keyboard.inline_keyboard for b in row)
-    # Prime the normal audit identity before checking that rejection changes
-    # neither the draft nor the surrounding workflow state.
-    bot._remember_audit_user(context, user_id=sim.user_id)
-    bot._audit_session_id(context)
-    before = copy.deepcopy(context.user_data)
-    update = sim._make_callback_update(callback)
-    with patch("bot._safe_edit_text", AsyncMock()) as edit, patch("bot.route_filing", AsyncMock()) as filing:
-        assert await bot.handle_callback(update, context) is None
-    assert context.user_data == before
-    updated = bot._load_draft(context)
-    assert updated.possible_key_capability == possible
-    fields = bot._cbd_filing_fields(updated) if form_type == "CBD" else updated.fields
-    assert fields["key_capabilities"] == selected + [possible["capability"]]
-    update.callback_query.answer.assert_awaited_once()
-    edit.assert_not_awaited()
-    filing.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
-async def test_regeneration_replacement_extra_has_own_remove_and_retains_all_exclusions(form_type):
+async def test_regeneration_replacement_extra_retains_all_reply_exclusions(form_type):
     import bot
     from models import CBDData, FormDraft
     from extractor import KC_FULL_TEXT
@@ -1438,12 +1338,11 @@ async def test_regeneration_replacement_extra_has_own_remove_and_retains_all_exc
     excluded = []
     extractor_name = "bot.extract_cbd_data" if form_type == "CBD" else "bot.extract_form_data"
     for old_extra, new_extra in (("SLO2 KC1", "SLO7 KC1"), ("SLO7 KC1", "SLO9 KC1")):
-        callback = bot._possible_kc_button_row(context)[0].callback_data
         with patch("bot._safe_edit_text", AsyncMock()):
-            assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+            assert await _remove_kc_by_reply(sim, context, old_extra) == bot.AWAIT_APPROVAL
         excluded.append(KC_FULL_TEXT[old_extra])
         # A stale model selection must not restore an excluded capability;
-        # the replacement still owns its Remove button.
+        # the replacement stays selected without a KC button.
         with patch(extractor_name, AsyncMock(return_value=make_draft(new_extra, excluded))), \
              patch("bot._essentials_gate_before_draft", AsyncMock(return_value=None)), \
              patch("bot.get_voice_profile", return_value=""), patch("bot._safe_edit_text", AsyncMock()):
@@ -1454,7 +1353,7 @@ async def test_regeneration_replacement_extra_has_own_remove_and_retains_all_exc
         assert fields["key_capabilities"] == selected + [KC_FULL_TEXT[new_extra]]
         assert updated.possible_key_capability == {"capability": KC_FULL_TEXT[new_extra]}
         assert updated.excluded_key_capabilities == excluded
-        assert bot._possible_kc_button_row(context)[0].text == f"➖ Remove {new_extra}"
+        assert not any("possible_kc" in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
         raw = updated.model_dump()
         target = raw if form_type == "CBD" else raw["fields"]
         target["key_capabilities"] = [*excluded, *fields["key_capabilities"]]

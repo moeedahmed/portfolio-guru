@@ -284,7 +284,7 @@ async def _form_variety_ready_draft_to_cancel(client, form_code, case_text, *, p
             sent = await client.send_file(BOT_USERNAME, str(document), force_document=True,
                                           caption="Synthetic training note only.")
         reply = await _wider_wait(client, transcript, f"after:{name}", before=before, min_id=sent.id,
-                                  expect_buttons=True, expect_button_any=("Read text", "Use as case", "Choose form"))
+                                  expect_buttons=True, expect_button_any=("Use as case", "Choose form"))
         if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
             reply = await _wider_click(client, transcript, reply, "DOCUSE|info",
                                        expect_buttons=True, expect_button_any=("Choose form",))
@@ -310,7 +310,7 @@ async def _form_variety_ready_draft_to_cancel(client, form_code, case_text, *, p
             form = next((_payload(b) for row in (reply.buttons or []) for b in row if _payload(b) in targets), None)
             assert form, f"Target form {form_code} missing from Forms list"
         reply = await _wider_click(client, transcript, reply, form,
-                                   expect_buttons=True, expect_button_any=("Save to Kaizen", "Save draft to Kaizen"))
+                                   expect_buttons=True, expect_button_any=("Save to Kaizen",))
         if classify_post_click_draft_state(reply) == "draft_with_gaps":
             # Only the two existing gap labels are reviewed. Match the entire
             # list, not a known prefix that could hide an unknown extra gap.
@@ -367,7 +367,7 @@ def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=N
     else:
         assert controls, f"Dead end on {state}"
         if state == "capture":
-            expected = [("📋 Choose form", "GATHER|done"), ("❌ Discard case", "ACTION|cancel")]
+            expected = [("📋 Choose form", "GATHER|done"), ("❌ Cancel", "ACTION|cancel")]
             assert "captured" in text.lower(), "Wrong capture screen"
         elif state == "recommendation":
             assert re.search(r"best fit|which form|form.*(?:entry|draft|create)|pick a form", text, re.I), "Wrong recommendation text"
@@ -375,7 +375,7 @@ def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=N
             assert all(p in {"FORM|show_all", "CANCEL|form", "FORM|best", "FORM|disabled"}
                        or (p.startswith("FORM|") and p[5:] in bot.FORM_UUIDS) for p in payloads), "Stale recommendation button"
             assert any(p == "FORM|best" or p[5:] in bot.FORM_UUIDS for p in payloads), "No suggested form"
-            navigation = {"FORM|show_all": "📋 Forms", "CANCEL|form": "🔄 Restart"}
+            navigation = {"FORM|show_all": "📋 Forms", "CANCEL|form": "❌ Cancel"}
             for label, payload in controls:
                 if payload in navigation:
                     assert label == navigation[payload], "Stale recommendation navigation label"
@@ -398,7 +398,7 @@ def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=N
             labels = {f"FORM|cat_{slug}": label for label, slug in bot._CAT_SLUGS.items()}
             assert all(p in labels or p == "FORM|back" for p in payloads), "Stale category button"
             assert any(p in labels for p in payloads), "Dead end: no offered categories"
-            expected = [(labels.get(p, "🔙 Back"), p) for p in payloads] if snapshot is None else snapshot[1]
+            expected = [(labels.get(p, "📋 Suggested forms"), p) for p in payloads] if snapshot is None else snapshot[1]
             if snapshot is not None:
                 assert text == snapshot[0], "Category picker text changed"
         elif state.startswith("category:"):
@@ -409,7 +409,7 @@ def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=N
             expected = []
             for _, payload in controls:
                 if payload == "FORM|show_all":
-                    expected.append(("🔙 Back", payload))
+                    expected.append(("📋 Forms", payload))
                     continue
                 code = payload.removeprefix("FORM|")
                 base = code.removesuffix("_2021")
@@ -421,7 +421,7 @@ def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=N
         elif state == "draft":
             assert form and bot._form_display_name(form).lower() in text.lower() and "draft" in text.lower(), "Wrong form draft"
             classification = classify_post_click_draft_state(reply)
-            save_label = "💾 Save to Kaizen" if classification == "ready" else "💾 Save draft to Kaizen"
+            save_label = "💾 Save to Kaizen"
             expected = [(save_label, "APPROVE|draft"), ("❌ Cancel", "CANCEL|draft")]
             assert "CANCEL|draft" in payloads, "Dead end: draft Cancel missing"
         else:
@@ -552,19 +552,19 @@ async def _media_ready_draft_to_cancel(client, path, kind):
                 BOT_USERNAME, str(path), voice_note=kind == "voice", force_document=kind == "document",
                 caption=None if kind == "voice" else "Synthetic training note only.",
             )
-        capture_controls = dict(expect_buttons=True, expect_button_any=("Read text", "Use as case", "Choose form", "CBD", "Case-based discussion"))
+        capture_controls = dict(expect_buttons=True, expect_button_any=("Use as case", "Choose form", "CBD", "Case-based discussion"))
         reply = await _wider_wait(client, transcript, f"after:{kind}", before=before, min_id=sent.id, **capture_controls)
         if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
             reply = await _wider_click(client, transcript, reply, "DOCUSE|info", **capture_controls)
         # Choose form must be observed. Gathering-off or a direct-form shortcut
         # is incomplete proof, rather than a silently shortened journey.
         reply = await _wider_click(client, transcript, reply, "GATHER|done",
-                                   expect_buttons=True, expect_button_any=("CBD", "Case-based discussion", "Forms", "Restart"))
+                                   expect_buttons=True, expect_button_any=("CBD", "Case-based discussion", "Forms", "Cancel"))
         form = next((_payload(b) for row in (reply.buttons or []) for b in row
                      if _payload(b) in {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}), None)
         assert form, "CBD choice missing"
         reply = await _wider_click(client, transcript, reply, form,
-                                   expect_buttons=True, expect_button_any=("Save to Kaizen", "Save draft to Kaizen"))
+                                   expect_buttons=True, expect_button_any=("Save to Kaizen",))
         if classify_post_click_draft_state(reply) == "draft_with_gaps":
             # The recommended form decides the gap (supervision for CBD, the
             # learning point for a reflection); the bot must name it and ask.
@@ -621,21 +621,21 @@ async def test_e2e_settings_read_only_journey(telethon_client):
         settings = await _wider_wait(telethon_client, transcript, "send:/settings", min_id=sent.id,
                                      expect_text_any=("Settings",), expect_buttons=True)
         defaults = await _wider_click(telethon_client, transcript, settings, "ACTION|portfolio_defaults",
-                                       expect_text_any=("Portfolio defaults",), expect_button_any=("Back",))
+                                       expect_text_any=("Portfolio defaults",), expect_button_any=("Settings",))
         for payload, title in (
             ("ACTION|change_level", "portfolio"),
             ("ACTION|change_pathway", "pathway"),
             ("ACTION|change_curriculum", "curriculum"),
         ):
             picker = await _wider_click(telethon_client, transcript, defaults, payload,
-                                       expect_text_any=(title,), expect_button_any=("Back",))
+                                       expect_text_any=(title,), expect_button_any=("Portfolio defaults",))
             assert title in picker.raw_text.lower()
             defaults = await _wider_click(telethon_client, transcript, picker, "ACTION|portfolio_defaults",
-                                         expect_text_any=("Portfolio defaults",), expect_button_any=("Back",))
+                                         expect_text_any=("Portfolio defaults",), expect_button_any=("Settings",))
         settings = await _wider_click(telethon_client, transcript, defaults, "ACTION|settings",
                                      expect_text_any=("Settings",), expect_buttons=True)
         reminders = await _wider_click(telethon_client, transcript, settings, "REMIND|menu",
-                                      expect_text_any=("Reminders",), expect_button_any=("Back",))
+                                      expect_text_any=("Reminders",), expect_button_any=("Settings",))
         settings = await _wider_click(telethon_client, transcript, reminders, "ACTION|settings",
                                      expect_text_any=("Settings",), expect_buttons=True)
         sources = await _wider_click(telethon_client, transcript, settings, "ACTION|voice",

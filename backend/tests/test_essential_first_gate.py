@@ -764,7 +764,7 @@ async def test_missing_essentials_draft_at_once_with_the_gaps_named():
     assert "reflection" in hint and "level of supervision" in hint
     assert "patient presentation" not in hint, "only the gaps are named"
     buttons = sim.get_last_buttons()
-    assert ("💾 Save draft to Kaizen", "APPROVE|draft") in buttons
+    assert ("💾 Save to Kaizen", "APPROVE|draft") in buttons
 
 
 @pytest.mark.asyncio

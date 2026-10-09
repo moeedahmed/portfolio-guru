@@ -191,7 +191,7 @@ async def test_gathering_reply_offers_done_button(monkeypatch):
     assert sim.messages_sent[-1][1] == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -251,7 +251,7 @@ async def test_gathering_second_message_refreshes_ready_prompt(monkeypatch):
     assert sim.messages_sent[-1][0] == "reply"
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -280,7 +280,7 @@ async def test_gathering_ready_prompt_is_resent_below_new_case_detail(monkeypatc
     assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -608,7 +608,7 @@ async def test_second_text_addition_keeps_both_buttons(monkeypatch):
     assert "Case captured" in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -635,7 +635,7 @@ async def test_second_text_addition_disarms_previous_gathering_prompt(monkeypatc
     assert context.user_data["gathering_msg_id"] != 123
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -670,7 +670,7 @@ async def test_voice_addition_disarms_previous_gathering_prompt(monkeypatch):
     }]
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
 
@@ -715,7 +715,7 @@ async def test_gathering_prompt_idempotent_across_repeated_additions(monkeypatch
     ]
     expected_buttons = [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
     for text in additions:
         sim.clear_messages()
@@ -754,7 +754,7 @@ async def test_explicit_new_case_during_thin_detail_state_prompts_choice(monkeyp
     assert "current draft is still open" in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ('➕ New case', "CASE|new"),
-        ('✏️ Add to draft', "CASE|improve"),
+        ('✏️ Edit draft', "CASE|improve"),
         ('❌ Cancel', "ACTION|cancel"),
     ]
 

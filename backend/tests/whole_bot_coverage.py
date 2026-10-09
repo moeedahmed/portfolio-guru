@@ -64,7 +64,8 @@ def registration_digest(slots):
 # 9 Oct 2026: possible-KC Add reaches the existing approval callback slot;
 # the global ACTION handler excludes it. Offline routing tests prove ownership.
 # 9 Oct 2026: Remove replaces Add in the same approval callback slot; routing tests prove ownership.
-REGISTRATION_DIGEST = '0bb488491177e933eb27aa50ea07e530d4a8e2164e91c554b46884d0ea3dda64'
+# 9 Oct 2026: old Add/Remove taps reach the inert stale-button fallback.
+REGISTRATION_DIGEST = '2453391429d34f69ad346d1fd0b75eb447899ea79d95837e66e7b245918f0e20'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",

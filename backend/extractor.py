@@ -4080,7 +4080,8 @@ async def extract_field_updates(form_type: str, current_fields: dict, instructio
 
     today = datetime.now().strftime("%Y-%m-%d")
     field_summary = json.dumps(
-        {k: (str(v)[:120] if v is not None else None) for k, v in current_fields.items()},
+        {k: ([kc.split(":", 1)[0] for kc in v] if k == "key_capabilities" and isinstance(v, list)
+             else str(v)[:120] if v is not None else None) for k, v in current_fields.items()},
         indent=2,
         default=str,
     )
@@ -4104,6 +4105,8 @@ Identify which existing fields (and ONLY those listed above) the doctor wants to
 - If a field can't be matched confidently to one of the listed fields, do NOT include it.
 - If the instruction is not actually an edit (e.g. a question, a new case), return an empty updates object.
 - Keep new values short and matching the existing field's type/format.
+- For a KC edit, return the complete wanted key_capabilities list, keeping all KCs the doctor did not ask to remove. Use an empty list to remove all KCs.
+- For edits to other fields, do not change key_capabilities or curriculum_links.
 
 Return ONLY valid JSON in this shape:
 {{"updates": {{"field_name": "new_value"}}, "summary": "one short sentence describing what changed"}}

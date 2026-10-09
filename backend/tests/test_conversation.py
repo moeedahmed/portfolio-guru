@@ -51,7 +51,7 @@ class TestKeyboardBuilding:
         ]
         assert [(button.text, button.callback_data) for button in rows[-1]] == [
             ('📋 Forms', "FORM|show_all"),
-            ('🔄 Restart', "CANCEL|form"),
+            ('❌ Cancel', "CANCEL|form"),
         ]
         assert all(len(row) <= 2 for row in rows)
 
@@ -269,8 +269,8 @@ class TestMessagePolicy:
             for row in rows
             for button in row
         ] == [
-            ('🔄 Retry', "ACTION|retry_filing"),
-            ('✏️ Edit', "CASE|improve"),
+            ('🔄 Retry save', "ACTION|retry_filing"),
+            ('✏️ Edit draft', "CASE|improve"),
             ('➕ New case', "CASE|new"),
             ('❌ Cancel', "ACTION|cancel"),
         ]

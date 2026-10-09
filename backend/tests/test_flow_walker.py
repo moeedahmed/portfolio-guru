@@ -835,7 +835,7 @@ class TestFlowWalker:
 
         assert result == AWAIT_FORM_CHOICE
         assert 'rate-limited' in sim.get_last_text()
-        assert ('🔄 Retry', 'ACTION|retry_template') in sim.get_last_buttons()
+        assert ('🔄 Retry draft', 'ACTION|retry_template') in sim.get_last_buttons()
         assert context.user_data['chosen_form'] == 'MINI_CEX'
 
     @pytest.mark.asyncio
@@ -2427,7 +2427,7 @@ class TestFlowWalker:
         await handle_action_button(update, context)
 
         buttons = sim.get_last_buttons()
-        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('🔄 Retry save', 'ACTION|retry_filing') in buttons
         assert ('➕ New case', 'ACTION|file') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
         assert ('💬 Something missing?', 'FILING|feedback|CBD') not in buttons
@@ -2533,10 +2533,10 @@ class TestFlowWalker:
         text = sim.get_last_text()
         assert result == AWAIT_APPROVAL
         assert "Kaizen session has expired" in text
-        assert "Reconnect Kaizen" in text
+        assert "Connect Kaizen" in text
         buttons = sim.get_last_buttons()
-        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
-        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('🔗 Connect Kaizen', 'ACTION|setup') in buttons
+        assert ('🔄 Retry save', 'ACTION|retry_filing') in buttons
         assert ('➕ New case', 'ACTION|reset') in buttons
         # Draft must be preserved so Try again can pick it up
         assert context.user_data.get('draft_data') is not None
@@ -2774,8 +2774,8 @@ class TestFlowWalker:
         text = (sim.get_last_text() or '').lower()
         assert 'kept that draft open' in text
         buttons = sim.get_last_buttons()
-        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
-        assert ('✏️ Edit', 'CASE|improve') in buttons
+        assert ('🔄 Retry save', 'ACTION|retry_filing') in buttons
+        assert ('✏️ Edit draft', 'CASE|improve') in buttons
         assert ('➕ New case', 'CASE|new') in buttons
         assert ('❌ Cancel', 'ACTION|cancel') in buttons
 
@@ -2859,7 +2859,7 @@ class TestFlowWalker:
         gate_labels = labels(_build_failed_filing_input_gate_keyboard())
 
         assert '🔄 Retry' not in review_labels
-        assert '🔄 Retry' in gate_labels
+        assert '🔄 Retry save' in gate_labels
 
     @pytest.mark.asyncio
     async def test_media_feedback_on_fresh_draft_skips_retry_gate(self, thin_draft):
@@ -3789,7 +3789,7 @@ class TestRecentPortfolioFixes:
         buttons = [(b.text, b.callback_data) for row in keyboard.inline_keyboard for b in row]
 
         assert ('📋 Another form', 'ACTION|same_case_another') not in buttons
-        assert ('🔄 Retry', 'ACTION|retry_filing') in buttons
+        assert ('🔄 Retry save', 'ACTION|retry_filing') in buttons
 
     def test_post_filing_keyboard_links_to_saved_draft_url_when_present(self):
         """When the filer captures the post-save Kaizen URL, the Open button
@@ -5434,7 +5434,7 @@ class TestVoiceProfileTwoPathFlow:
 
         assert result == AWAIT_VOICE_EXAMPLES
         buttons = sim.get_last_buttons()
-        assert ('🔗 Reconnect Kaizen', 'ACTION|setup') in buttons
+        assert ('🔗 Connect Kaizen', 'ACTION|setup') in buttons
         assert ('✍️ Manual examples', 'VOICE|path_manual') in buttons
         assert ('🔙 Back', 'VOICE|back_to_choice') in buttons
 
