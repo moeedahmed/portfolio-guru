@@ -87,7 +87,9 @@ def producer_digest():
 # 10 Oct 2026: status questions retain saved-case authorship; reflection-prompt
 # replies and labelled multiline reflection retain their complete verbatim fallback.
 # Existing controls, callback payloads and approval ownership are unchanged.
-PRODUCER_DIGEST = '1d79eb1e5dfdf04993a6dfc4c8f6b9d9e171e4764a43e0f2d1e8cbaa1488a273'
+# 10 Oct 2026: reflection fallback requires a prompted reply; status, reuse,
+# form, cancel and edit controls retain their handlers and pending reflection.
+PRODUCER_DIGEST = 'd13b2d30446da5f4c536ab7bf67db515b5b1336b3b07a79da6d6a34bcba17e3c'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

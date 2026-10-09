@@ -762,10 +762,123 @@ async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(ref
         assert await bot.handle_mid_conversation_text(sim._make_text_update(reflection), context) == bot.AWAIT_APPROVAL
     assert reflection in "\n".join(context.user_data["case_user_text"])
     assert source not in "\n".join(context.user_data["case_user_text"])
-    assert bot._load_draft(context).reflection == reflection
-    assert "your reflection" not in sim.get_last_text()
+    # An unprompted short instruction is not a verbatim reflection fallback.
+    expected = "" if not explicit_prompt and reflection == "Escalate earlier." and generated != reflection else reflection
+    assert bot._load_draft(context).reflection == expected
+    if expected:
+        assert "your reflection" not in sim.get_last_text()
     fields = await _capture_approved_fields(sim, context)
-    assert fields["reflection"].startswith(reflection)
+    if expected:
+        assert fields["reflection"].startswith(expected)
+    else:
+        assert fields["reflection"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("awaiting_reflection", [False, True])
+async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(awaiting_reflection):
+    sim = BotSimulator()
+    context = sim._make_context()
+    source = "Synthetic ED chest pain assessed with senior review."
+    context.user_data.update(_context(source, source="photo", has_user_context=False).user_data)
+    context.user_data["chosen_form"] = "CBD"
+    draft = CBDData(patient_presentation=source, clinical_reasoning=source,
+                    stage_of_training="Higher", trainee_role="Assessed the synthetic case",
+                    clinical_setting="Emergency Department", level_of_supervision="Direct", reflection="")
+    await bot._show_draft_review(sim._make_text_update(source).message, context, draft, "CBD", edit=False)
+    assert [gap["key"] for gap in bot._draft_gaps(context)] == ["reflection"]
+    if awaiting_reflection:
+        await bot.handle_callback(sim._make_callback_update("ACTION|add_reflection_detail"), context)
+    else:
+        # Exercise the doctor's Edit button and its actual text handler.
+        assert await bot.handle_approval_edit(sim._make_callback_update("EDIT|draft"), context) == bot.AWAIT_EDIT_VALUE
+    feedback = "change the date to 3 Oct"
+    regenerated = draft.model_copy(update={
+        "date_of_encounter": "2026-10-03", "reflection": "I learned to escalate earlier.",
+    })
+    with patch("bot.extract_cbd_data", new=AsyncMock(return_value=regenerated)), \
+         patch("bot.extract_field_updates", new=AsyncMock(return_value={})), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")), \
+         patch("bot.get_voice_profile", return_value=""), \
+         patch("bot.assess_form_essentials", new=AsyncMock(return_value={
+             item["key"]: bot.ESSENTIAL_PRESENT for item in bot._form_essential_requirements("CBD")
+         })):
+        handler = bot.handle_mid_conversation_text if awaiting_reflection else bot.handle_edit_value_with_intent
+        assert await handler(sim._make_text_update(feedback), context) == bot.AWAIT_APPROVAL
+    assert bot._load_draft(context).date_of_encounter == "2026-10-03"
+    assert bot._load_draft(context).reflection == ""
+    assert "I learned to escalate earlier." not in sim.get_last_text()
+    assert context.user_data.get("awaiting_reflection_detail", False) is awaiting_reflection
+    fields = await _capture_approved_fields(sim, context)
+    assert fields["reflection"] == ""
+    assert fields["date_of_encounter"] == "2026-10-03"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message,intent,last_status", [
+    ("Did it save?", "question_general", "success"),
+    ("Did it save?", "question_general", None),
+    ("Did it save?", "edit_detail", None),
+    ("Will this be sent to my supervisor?", "question_general", None),
+    ("Use the same case for DOPS", "edit_detail", None),
+    ("Change this to a DOPS", "edit_detail", None),
+    ("cancel this", "edit_detail", None),
+])
+async def test_reflection_prompt_side_messages_keep_draft_and_next_reflection(message, intent, last_status):
+    sim = BotSimulator()
+    context = sim._make_context()
+    source = "Synthetic ED chest pain assessed with senior review."
+    context.user_data.update(_context(source).user_data)
+    context.user_data["chosen_form"] = "CBD"
+    draft = CBDData(patient_presentation=source, reflection="")
+    bot._store_draft(context, draft)
+    await bot.handle_callback(sim._make_callback_update("ACTION|add_reflection_detail"), context)
+    before = dict(context.user_data)
+    if last_status:
+        context.user_data.update(last_filing_status=last_status, last_filing_form_name="CBD")
+    regenerate = AsyncMock(return_value=bot.AWAIT_APPROVAL)
+    with patch("bot._regenerate_active_draft_with_feedback", new=regenerate), \
+         patch("bot.extract_field_updates", new=AsyncMock(return_value={})) as field_updates, \
+         patch("bot.classify_intent", new=AsyncMock(return_value=intent)), \
+         patch("bot.answer_question", new=AsyncMock(return_value="Use the draft controls above.")):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(message), context) == bot.AWAIT_APPROVAL
+    regenerate.assert_not_awaited()
+    field_updates.assert_not_awaited()
+    assert context.user_data["draft_data"] == before["draft_data"]
+    assert context.user_data["case_text"] == source
+    assert context.user_data["case_user_text"] == before["case_user_text"]
+    assert context.user_data.get("awaiting_reflection_detail") is True
+    if last_status:
+        assert "saved to Kaizen as a draft" in sim.get_last_text()
+    elif "supervisor" in message:
+        assert "No supervisor request" in sim.get_last_text()
+    elif message == "cancel this":
+        assert "haven't cancelled" in sim.get_last_text()
+    reflection = "Escalate earlier."
+    with patch("bot._regenerate_active_draft_with_feedback", new=regenerate), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(reflection), context) == bot.AWAIT_APPROVAL
+    regenerate.assert_awaited_once()
+    assert regenerate.await_args.args[2] == reflection
+    assert regenerate.await_args.kwargs["reflection_reply"] is True
+    assert not context.user_data.get("awaiting_reflection_detail")
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_awaiting_reflection_uses_cancel_handler():
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text="Synthetic chest pain case", awaiting_reflection_detail=True)
+    bot._store_draft(context, CBDData(reflection=""))
+    cancel = AsyncMock(return_value=bot.ConversationHandler.END)
+    regenerate = AsyncMock()
+    with patch("bot.cancel_command", new=cancel), \
+         patch("bot._regenerate_active_draft_with_feedback", new=regenerate), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")):
+        update = sim._make_text_update("Cancel")
+        assert await bot.handle_mid_conversation_text(update, context) == bot.ConversationHandler.END
+    cancel.assert_awaited_once_with(update, context)
+    regenerate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

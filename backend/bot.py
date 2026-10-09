@@ -13590,9 +13590,6 @@ async def _regenerate_active_draft_with_feedback(
         await msg.reply_text("I couldn't read any useful extra detail from that. Try again with text, voice, image, or document.")
         return AWAIT_APPROVAL
 
-    reflection_reply = reflection_reply or (
-        [gap["key"] for gap in _draft_gaps(context)] == ["reflection"]
-    )
     _remember_case_context_source(context, input_source,
                                   user_text=feedback_text if input_source in {"text", "voice", "audio"} else None)
     if append_to_case:
@@ -17485,16 +17482,6 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(_pending_media_context_kept_text(pending_label))
         return AWAIT_DOC_INTENT
 
-    if context.user_data.pop("awaiting_reflection_detail", False) and has_draft and case_text:
-        return await _regenerate_active_draft_with_feedback(
-            update,
-            context,
-            raw_text,
-            append_to_case=True,
-            input_source="text",
-            reflection_reply=True,
-        )
-
     if _is_submit_inquiry(raw_text):
         if context.user_data.get("_pending_doc"):
             pending_kind = (context.user_data.get("_pending_doc") or {}).get("kind") or "document"
@@ -17581,6 +17568,27 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         classifier_failed=classifier_failed,
         draft_has_gaps=has_draft and bool(_draft_gaps(context)),
     )
+
+    if context.user_data.get("awaiting_reflection_detail") and has_draft and case_text:
+        # Control messages keep their normal ownership; waiting for a
+        # reflection does not make an edit, status question or form request
+        # the doctor's learning. Side messages leave the prompt waiting.
+        if _is_recent_filing_status_question(raw_text) or is_reuse_request(raw_text) or (
+            extract_explicit_form_type(raw_text, require_intent=False)
+            and not has_personal_reflective_input(raw_text)
+        ):
+            return await _answer_mid_flow_question(
+                update, context, raw_text,
+                case_text=case_text, has_draft=has_draft, has_pending=has_pending,
+            )
+        if raw_text.lower().rstrip(".!?") == "cancel":
+            return await cancel_command(update, context)
+        if turn.kind is WorkflowTurnKind.ENRICH:
+            context.user_data.pop("awaiting_reflection_detail", None)
+            return await _regenerate_active_draft_with_feedback(
+                update, context, raw_text,
+                append_to_case=True, input_source="text", reflection_reply=True,
+            )
 
     if amend_mode:
         if turn.kind is WorkflowTurnKind.CONFIRM_STATE_CHANGE and turn.state_action == "start_new_case":
