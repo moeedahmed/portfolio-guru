@@ -70,7 +70,12 @@ def assert_private(sim, caplog):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("typo", ["doctor at example dot test", "doctor@example", "doctor.example.test"])
+@pytest.mark.parametrize("typo", [
+    "doctor at example dot test", "doctor@example", "doctor.example.test",
+    "doctor name@example.test", "doctor@exam ple.test", "doctor@.example.test",
+    "doctor@example..test", ".doctor@example.test", "doctor..name@example.test",
+    "doctor@example.test@other.test", "doctor@-example.test", "doctor@example-.test",
+])
 async def test_username_typo_can_be_corrected_without_stale_connect_buttons(typo, caplog):
     sim = BotSimulator()
     context = sim._make_context()
@@ -211,6 +216,11 @@ async def test_unfinished_passwordless_link_expires_and_new_link_replaces_old_bu
     clock["now"] += timedelta(minutes=11)
     await bot._passwordless_watch_job(context)
     assert record.status == "expired" and record.request is None
+    import funnel_metrics as fm
+    expired = [r for r in fm.iter_records() if r["event"] == "connect_link_expired"]
+    assert len(expired) == 1
+    assert expired[0]["user_id"] == sim.user_id
+    assert expired[0]["metadata"] == {} and expired[0]["username"] is None
     assert sim.get_last_text() == "⌛ That sign-in link expired before Kaizen connected. Get a new link to try again."
     assert latest_buttons(sim) == [
         ("🔁 Get a new link", "ACTION|passwordless_link"),
@@ -234,7 +244,6 @@ async def test_unfinished_passwordless_link_expires_and_new_link_replaces_old_bu
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="First case before linking is discarded: the connect guard clears user_data without retaining the case to resume Best fit.")
 async def test_first_case_is_retained_while_the_doctor_connects():
     sim = BotSimulator()
     context = sim._make_context()
@@ -245,7 +254,6 @@ async def test_first_case_is_retained_while_the_doctor_connects():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="Username validation only checks whether '@' and '.' occur, so a doubled @ typo advances to the password step.")
 async def test_doubled_at_email_typo_stays_on_username_step():
     sim = BotSimulator()
     context = sim._make_context()
@@ -259,8 +267,11 @@ async def test_doubled_at_email_typo_stays_on_username_step():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("landing", ["https://kaizenep.com/verification", "https://kaizenep.com/welcome"])
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="_login accepts any kaizenep.com URL after submission, including verification or non-portfolio landing pages, and claims login success.")
+@pytest.mark.parametrize("landing", [
+    "https://kaizenep.com/verification", "https://kaizenep.com/welcome",
+    "https://kaizenep.com/one-time-code", "https://kaizenep.com/login",
+    "https://kaizenep.com/verification#/dashboard", "https://kaizenep.com/not-dashboard",
+])
 async def test_non_portfolio_post_login_page_cannot_be_reported_as_connected(monkeypatch, landing, caplog):
     from engine.providers.kaizen import KaizenInfrastructureError
 
@@ -276,9 +287,190 @@ async def test_non_portfolio_post_login_page_cannot_be_reported_as_connected(mon
     # a mock that invents success on a different host.
     import fnmatch
     assert fnmatch.fnmatch(landing, "**/kaizenep.com/**")
-    try:
-        connected = await filer._login(page, USERNAME, PASSWORD)
-    except KaizenInfrastructureError:
-        connected = False
+    with pytest.raises(KaizenInfrastructureError):
+        await filer._login(page, USERNAME, PASSWORD)
     assert_private(BotSimulator(), caplog)
-    assert connected is not True
+
+
+@pytest.mark.asyncio
+@pytest.mark.consent_gate
+@pytest.mark.parametrize("role", ["hst", "unknown"])
+@pytest.mark.parametrize("needs_consent", [True, False])
+async def test_pending_first_case_resumes_best_fit_after_setup(monkeypatch, role, needs_consent):
+    from models import FormTypeRecommendation
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_test_kaizen_login", AsyncMock(return_value=role))
+    monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=[
+        FormTypeRecommendation(form_type="CBD", rationale="Synthetic discussion", uuid=filer.FORM_UUIDS["CBD"]),
+    ]))
+    monkeypatch.setattr(bot, "check_can_file", AsyncMock(return_value=(True, 0, 5, "free")))
+    if not needs_consent:
+        await bot.consent.record_consent(sim.user_id)
+
+    await bot.handle_case_input(sim._make_text_update(CASE), context)
+    # The email recovery route must also retain the case, not clear it again.
+    email = sim._make_text_update(USERNAME)
+    email.message.delete = AsyncMock()
+    assert await bot.handle_case_input(email, context) == bot.AWAIT_PASSWORD
+    password = sim._make_text_update(PASSWORD)
+    password.message.delete = AsyncMock()
+    state = await bot.setup_password(password, context)
+    if role == "unknown":
+        assert state == bot.AWAIT_TRAINING_LEVEL
+        state = await bot.setup_training_level(sim._make_callback_update("SETLEVEL|HIGHER"), context)
+    if needs_consent:
+        assert "Best fit:" not in (sim.get_last_text() or "")
+        bot.recommend_form_types.assert_not_awaited()
+        state = await bot.handle_consent_callback(sim._make_callback_update(f"CONSENT|accept|{sim.user_id}"), context)
+    assert state == bot.AWAIT_FORM_CHOICE
+    assert "Best fit:" in sim.get_last_text()
+    assert context.user_data["case_text"] == CASE
+    assert bot.recommend_form_types.await_args.args[0] == CASE
+
+
+@pytest.mark.asyncio
+@pytest.mark.consent_gate
+async def test_declining_setup_consent_discards_pending_case(monkeypatch):
+    sim = BotSimulator()
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_test_kaizen_login", AsyncMock(return_value="hst"))
+    await bot.handle_case_input(sim._make_text_update(CASE), context)
+    email = sim._make_text_update(USERNAME)
+    email.message.delete = AsyncMock()
+    await bot.setup_username(email, context)
+    password = sim._make_text_update(PASSWORD)
+    password.message.delete = AsyncMock()
+    await bot.setup_password(password, context)
+    await bot.handle_consent_callback(sim._make_callback_update(f"CONSENT|decline|{sim.user_id}"), context)
+    assert "case_text" not in context.user_data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler_name, callback, expected", [
+    ("setup_start", "ACTION|setup", bot.AWAIT_USERNAME),
+    ("setup_password_start", "ACTION|setup_password", bot.AWAIT_USERNAME),
+    ("passwordless_setup_start", "ACTION|connect_passwordless", bot.AWAIT_PASSWORDLESS),
+    ("passwordless_setup_new_link", "ACTION|passwordless_link", bot.AWAIT_PASSWORDLESS),
+    ("passwordless_setup_done", "ACTION|passwordless_done", bot.ConversationHandler.END),
+    ("passwordless_reconnect", "ACTION|pwl_reconnect", None),
+    ("passwordless_reconnected", "ACTION|pwl_reconnected", None),
+    ("setup_retry_login", "ACTION|retry_setup_login", bot.AWAIT_USERNAME),
+    ("setup_training_level", "SETLEVEL|HIGHER", bot.ConversationHandler.END),
+    ("setup_curriculum", "SETCURRICULUM|2025", bot.ConversationHandler.END),
+    ("setup_cancel", "ACTION|cancel", bot.ConversationHandler.END),
+    ("handle_action_button", "ACTION|pwl_reconnect", None),
+])
+@pytest.mark.parametrize("error_text", ["Query is too old and response timeout expired", "Query ID is invalid"])
+async def test_old_connect_buttons_still_complete_the_handler(monkeypatch, handler_name, callback, expected, error_text):
+    from telegram.error import BadRequest
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.job_queue = None
+    update = sim._make_callback_update(callback)
+    update.callback_query.answer.side_effect = BadRequest(error_text)
+    monkeypatch.setattr(bot, "_create_passwordless_link", AsyncMock(return_value=handoff.ConnectLink(
+        url="https://connect.example.test/handoff#synthetic", expires_in_seconds=600, session_id="synthetic",
+    )))
+    monkeypatch.setattr(bot, "_probe_kept_kaizen_session", AsyncMock(return_value="hst"))
+    result = await getattr(bot, handler_name)(update, context)
+    assert result == expected
+    assert sim.messages_sent
+
+
+@pytest.mark.asyncio
+async def test_connect_answer_does_not_swallow_other_telegram_errors():
+    from telegram.error import BadRequest, NetworkError
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    for error in (BadRequest("Unrelated request failure"), NetworkError("Transport failed")):
+        update = sim._make_callback_update("ACTION|setup_password")
+        update.callback_query.answer.side_effect = error
+        with pytest.raises(type(error)):
+            await bot.setup_password_start(update, context)
+        assert not sim.messages_sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_id", [111, 99999999, 6912896590])
+async def test_connected_event_keeps_user_and_cohort_without_credentials(user_id):
+    import funnel_metrics as fm
+
+    sim = BotSimulator(user_id=user_id)
+    context = sim._make_context()
+    await bot._finish_setup_after_connect(sim._make_text_update("/setup"), context, "hst")
+    records = [r for r in fm.iter_records() if r["event"] == "credentials_connected"]
+    assert len(records) == 1
+    record = records[0]
+    assert record["user_id"] == user_id
+    assert record["synthetic"] is (user_id == 99999999)
+    assert record["operator"] is (user_id == 6912896590)
+    assert record["username"] is None and record["metadata"] == {}
+
+
+@pytest.mark.asyncio
+async def test_connect_choices_and_rejection_log_only_structural_metadata(monkeypatch):
+    import funnel_metrics as fm
+
+    sim = BotSimulator(user_id=111)
+    context = sim._make_context()
+    monkeypatch.setattr(bot, "_create_passwordless_link", AsyncMock(return_value=None))
+    await bot.setup_password_start(sim._make_callback_update("ACTION|setup_password"), context)
+    await bot.passwordless_setup_start(sim._make_callback_update("ACTION|connect_passwordless"), context)
+    await bot._show_login_rejected(sim._make_text_update(PASSWORD), context)
+    records = list(fm.iter_records())
+    assert [(r["event"], r["metadata"]) for r in records] == [
+        ("connect_method_chosen", {"method": "password"}),
+        ("connect_method_chosen", {"method": "passwordless"}),
+        ("connect_login_rejected", {}),
+    ]
+    assert all(r["user_id"] == 111 and r["username"] is None for r in records)
+    assert USERNAME not in repr(records) and PASSWORD not in repr(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rejected", [True, False])
+async def test_only_explicit_login_rejection_logs_rejected(monkeypatch, rejected):
+    from engine.providers.kaizen import KaizenInfrastructureError
+    import funnel_metrics as fm
+
+    sim = BotSimulator(user_id=111)
+    context = sim._make_context()
+    context.user_data["setup_username"] = USERNAME
+    probe = AsyncMock(return_value=False) if rejected else AsyncMock(side_effect=KaizenInfrastructureError("Synthetic outage"))
+    monkeypatch.setattr(bot, "_test_kaizen_login", probe)
+    update = sim._make_text_update(PASSWORD)
+    update.message.delete = AsyncMock()
+    state = await bot.setup_password(update, context)
+    assert state == (bot.AWAIT_USERNAME if rejected else bot.AWAIT_PASSWORD)
+    records = list(fm.iter_records())
+    assert [r["event"] for r in records] == (["connect_login_rejected"] if rejected else [])
+    if rejected:
+        assert records[0]["user_id"] == sim.user_id
+        assert records[0]["metadata"] == {} and records[0]["username"] is None
+    assert USERNAME not in repr(records) and PASSWORD not in repr(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("button_first", [True, False])
+async def test_password_choice_is_logged_once_for_button_or_direct_email(button_first):
+    import funnel_metrics as fm
+
+    sim = BotSimulator(user_id=111)
+    context = sim._make_context()
+    if button_first:
+        await bot.setup_password_start(sim._make_callback_update("ACTION|setup_password"), context)
+    update = sim._make_text_update(USERNAME)
+    update.message.delete = AsyncMock()
+    if button_first:
+        await bot.setup_username(update, context)
+    else:
+        await bot.handle_case_input(update, context)
+    records = [r for r in fm.iter_records() if r["event"] == "connect_method_chosen"]
+    assert len(records) == 1
+    assert records[0]["user_id"] == 111
+    assert records[0]["metadata"] == {"method": "password"}
+    assert records[0]["username"] is None

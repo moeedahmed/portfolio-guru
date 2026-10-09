@@ -61,13 +61,14 @@ def registration_digest(slots):
 # Reviewed registration shape: adding/reordering a slot requires a new exercised
 # scenario, not an automatically regenerated approval manifest.
 # Consent now enters/falls back through case_conv; dispatch tests prove state retention.
-REGISTRATION_DIGEST = 'd0cb3143c5c620a24b0c11a07c8c8e4552cb77659a866b88b21e8b0542d65a37'
+# Retained case -> watched setup -> Best fit is exercised in test_setup_connect_flow.
+REGISTRATION_DIGEST = 'a047eb74ed7c5a25608e6fdfb160931e94efde3675a249dfb6ac70b72836498e'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",
         "protected-boundary": "handle_approval_approve handle_approval_submit handle_reset_confirm handle_upgrade_button setup_password setup_retry_login reset_data passwordless_setup_done",
         "internal": "handle_assessor_intent_capture _track_command_use",
-        "safe": """_setup_wrong_input _answer_unhandled_button _reply_use_current_step arcp_command cancel_command curriculum_command gather_command
+        "safe": """_resume_setup_form_choice _setup_wrong_input _answer_unhandled_button _reply_use_current_step arcp_command cancel_command curriculum_command gather_command
             gather_done_callback handle_action_button handle_amend_draft handle_approval_edit
             handle_approval_media_feedback handle_attachment_confirm handle_callback handle_case_input
             handle_consent_callback handle_document_intent handle_edit_field

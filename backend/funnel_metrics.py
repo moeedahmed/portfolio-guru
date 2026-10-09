@@ -39,6 +39,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "has_missing",
         "tier",
         "reason",
+        "method",
         # Health interaction metadata is deliberately structural. Never add
         # review dates, evidence content, titles or URLs here.
         "view",

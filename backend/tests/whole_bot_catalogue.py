@@ -52,7 +52,9 @@ def producer_digest():
 # photo -> consent -> document intent and non-resuming state preservation.
 # Batch A (stop losing work): bot.py state/clean-up changes only; no keyboard
 # or callback payload added, removed or reworded.
-PRODUCER_DIGEST = 'fcab38c8b9c1d0486e97ed20f16da9fd2c3250f03d11d7544f1da278771b2c8c'
+# Login onboarding: case retention, validation, stale acknowledgements and structural
+# telemetry only. Existing copy/payloads are unchanged; FORM re-entry is dispatch-tested.
+PRODUCER_DIGEST = '8b1a877e4e6bd716bd6dd401b2907deefbd8fd683f13fdd2f53d71f1580bb23c'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -197,7 +199,8 @@ def reviewed_units(slots):
 
 
 # Registration candidate paths shift when consent moves into case_conv.
-CATALOGUE_DIGEST = '8dfe777d7134852697a45ce8a4d9deca3d7662e22ba0c0083082838df70bf264'
+# FORM branch candidates also include the tested post-setup case entry point.
+CATALOGUE_DIGEST = 'a8ae9cc094612f3bd05722452b9b3a613dc3f23b3e2d3a63e3bbec79503cef8d'
 
 
 def requirements_digest(units):
@@ -281,7 +284,7 @@ def catalogue_receipt(observations):
 AUDIT_TESTS = """test_reset_command test_funnel_metrics test_flow_walker test_e2e_offline test_whole_bot_coverage test_health_bot
  test_gathering_mode test_attachment_handoff test_essential_first_gate test_supervisor_bot
  test_consent_gate test_missing_essentials_replay_guard test_concurrent_user_isolation
- test_modality_clause_coverage test_setup_manual_profile_fallback test_attachment_upload_consent
+ test_modality_clause_coverage test_setup_manual_profile_fallback test_setup_connect_flow test_attachment_upload_consent
  test_curriculum_filing_recovery test_channel_contract test_forms test_kc_edit_retention
  test_filing_reliability test_filing_reliability_matrix""".split()
 
