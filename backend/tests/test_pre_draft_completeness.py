@@ -569,7 +569,8 @@ def _saving(context, draft):
 
 
 @pytest.mark.asyncio
-async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written():
+@pytest.mark.parametrize("source", ["text", "photo"])
+async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written(source):
     """Draft first (25 Sep 2026): Save is always available. A reflection the
     doctor never supplied is saved blank for them to write in Kaizen."""
     from bot import handle_approval_approve
@@ -578,6 +579,8 @@ async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written():
     context = sim._make_context()
     context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
     context.user_data["chosen_form"] = "CBD"
+    context.user_data["case_input_source"] = source
+    context.user_data["case_has_user_context"] = source != "photo"
     route_filing = _saving(context, _cbd_draft(reflection="This case reinforced early ECG review."))
 
     with patch("bot.get_credentials", return_value=("user", "pass")), \

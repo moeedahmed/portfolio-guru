@@ -367,7 +367,7 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
         intent = observed(
             '📷 Image received — how would you like to use it?' if kind == 'photo'
             else '📄 How would you like to use this document?',
-            ('📝 Use as case', 'DOCUSE|info'),
+            ('📝 Use text as case', 'DOCUSE|info'),
             ('📎 Attach as evidence', 'DOCUSE|attach'), ('📎 Read + attach', 'DOCUSE|both'),
             ('❌ Remove file', 'DOCUSE|ignore'), id=current_id,
         )

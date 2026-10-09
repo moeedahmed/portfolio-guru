@@ -157,7 +157,7 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ('📝 Use as case', "DOCUSE|info") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
     assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "_consent_pending_input" not in context.user_data

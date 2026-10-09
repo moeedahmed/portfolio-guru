@@ -111,8 +111,8 @@ _FORM_TYPE_UNKNOWN_TEXT = (
     "draft generation is disabled. Tap *Cancel* and try a different ticket."
 )
 _SAVE_DRAFT_REQUEST_TEXT = (
-    "📤 *Save the assessor draft on Kaizen?*\n\n"
-    "I'll fill the reviewed fields and tap *Save as draft*, nothing else. "
+    "💾 *Save to Kaizen?*\n\n"
+    "I'll save the reviewed fields as a draft, nothing else. "
     "I will *not* submit, sign, approve, send, or delete.\n\n"
     "You review and submit it yourself on Kaizen."
 )
@@ -208,7 +208,7 @@ def _writeback_plan_keyboard(ticket_uuid: str, *, can_save: bool) -> InlineKeybo
         rows.append(
             [
                 InlineKeyboardButton(
-                    "📤 Save draft in Kaizen",
+                    "💾 Save to Kaizen",
                     callback_data=f"{CALLBACK_NAMESPACE}|request-save-draft|{ticket_uuid}",
                 ),
             ]

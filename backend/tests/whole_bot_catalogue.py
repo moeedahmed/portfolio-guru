@@ -73,7 +73,9 @@ def producer_digest():
 # 9 Oct 2026: Remove syncs the pending snapshot and is hidden/rejected for
 # saved-draft amendments and reopens; existing callback payloads are unchanged.
 # 9 Oct 2026: KC Remove button dropped; one label per button action.
-PRODUCER_DIGEST = 'ccdbbe81fddf18830427ed60e469092081d7881f7622413926b3c88e77a4553f'
+# 9 Oct 2026: photo reflection hints use filled draft fields; source warning
+# removed, text-as-case and all Save labels aligned, descriptive KC edits validated.
+PRODUCER_DIGEST = '4a4025e27ab07c57d4d2ca20862ea51515318446f0d175d8957a2b855b5d86a9'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

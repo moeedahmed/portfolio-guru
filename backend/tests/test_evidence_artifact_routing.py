@@ -213,7 +213,7 @@ async def test_ordinary_document_upload_keeps_the_case_choices():
 
     assert result == AWAIT_DOC_INTENT
     buttons = sim.get_last_buttons()
-    assert ("📝 Use as case", "DOCUSE|info") in buttons
+    assert ("📝 Use text as case", "DOCUSE|info") in buttons
     assert ("📎 Read + attach", "DOCUSE|both") in buttons
 
     path = context.user_data["_pending_doc"]["path"]

@@ -168,7 +168,7 @@ def test_ai_declaration_is_visible_and_accountability_is_explicit():
         fields={"reflection": "I learned to pause and seek a second perspective."},
     )
     declared = _with_rcem_ai_declaration(draft)
-    preview = _format_draft_preview(draft, needs_reflection_detail=False)
+    preview = _format_draft_preview(draft)
     assert declared.fields["reflection"].endswith(AI_USE_DECLARATION)
     # The declaration lives once, inline in the reflection field; there is no
     # second "AI assistance" footer repeating it.
@@ -202,7 +202,7 @@ def test_genuine_non_first_person_learning_unlocks_save_with_keyboard_and_footer
     needs_reflection_detail = _set_reflection_detail_gate(context, draft)
     assert needs_reflection_detail is False
 
-    preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
+    preview = _format_draft_preview(draft)
     callbacks = _callbacks(
         _build_approval_keyboard()
     )
@@ -246,7 +246,7 @@ def test_actual_learning_point_source_unlocks_save_without_warning():
     needs_reflection_detail = _set_reflection_detail_gate(context, draft)
     assert needs_reflection_detail is False
 
-    preview = _format_draft_preview(draft, needs_reflection_detail=needs_reflection_detail)
+    preview = _format_draft_preview(draft)
     callbacks = _callbacks(
         _build_approval_keyboard()
     )
@@ -439,3 +439,39 @@ async def test_stale_improve_callback_without_draft_cannot_extract():
     assert state == AWAIT_CASE_INPUT
     assert "no longer active" in resume.call_args.args[2]
     extract.assert_not_awaited()
+
+
+@pytest.mark.parametrize("learned,needs_prompt", [
+    ("I learned to check understanding before ending a referral.", False),
+    ("", True),
+    ("   ", True),
+])
+def test_photo_reflection_hint_checks_the_draft_fields(learned, needs_prompt):
+    context = _context("Photo notes about a referral.", source="photo", has_user_context=False)
+    context.user_data.update(chosen_form="REFLECT_LOG", needs_reflection_detail=True)
+    draft = FormDraft(form_type="REFLECT_LOG", fields={
+        "date_of_encounter": "2026-10-09",
+        "reflection": "I referred the patient to the surgical team.",
+        "learned": learned,
+    })
+    bot._store_draft(context, draft)
+    hint = bot._draft_reply_hint(context)
+    assert ("your reflection" in hint) is needs_prompt
+    preview = bot._format_draft_preview_for_context(draft, context)
+    assert "Source:" not in preview
+    assert "I won't write them for you" not in preview
+
+
+def test_photo_source_with_supplied_learning_does_not_force_save_gate():
+    reflection = "I learned to check understanding before ending a referral."
+    context = _context(reflection, source="photo", has_user_context=False)
+    draft = FormDraft(form_type="REFLECT_LOG", fields={"reflection": reflection, "learned": reflection})
+    assert bot._set_reflection_detail_gate(context, draft) is False
+
+
+@pytest.mark.parametrize("form_type", ["CBD", "REFLECT_LOG"])
+def test_curriculum_preview_starts_after_a_blank_line(form_type):
+    fields = {"reflection": "Brief note.", "learned": "Check understanding.",
+              "curriculum_links": ["SLO9"], "key_capabilities": ["SLO9 KC2"]}
+    draft = CBDData(reflection="Brief note.", curriculum_links=["SLO9"], key_capabilities=["SLO9 KC2"]) if form_type == "CBD" else FormDraft(form_type=form_type, fields=fields)
+    assert "\n\n📚 *Curriculum:*" in bot._format_draft_preview(draft)

@@ -3,7 +3,7 @@ Portfolio Guru Telegram Bot — v2
 Multimodal input (text/voice/image) with approval flow before filing.
 """
 import asyncio
-from curriculum import validate_curriculum
+from curriculum import canonical_kcs, validate_curriculum
 import logging
 import os
 import kaizen_offline
@@ -5585,7 +5585,7 @@ def _build_amend_keyboard(improved_once: bool = False, context=None) -> InlineKe
 def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📝 Use as case", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📝 Use text as case", callback_data="DOCUSE|info"),
             InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
         ],
         [
@@ -5598,7 +5598,7 @@ def _build_doc_intent_keyboard() -> InlineKeyboardMarkup:
 def _build_evidence_artifact_keyboard() -> InlineKeyboardMarkup:
     """Choices for a certificate/award upload.
 
-    "Use as case" is deliberately absent: there is no clinical case in a
+    "Use text as case" is deliberately absent: there is no clinical case in a
     certificate, and offering to read one is what pushed a doctor into a
     Self-directed Learning Reflection they never described.
     """
@@ -5624,7 +5624,7 @@ def _build_image_intent_keyboard() -> InlineKeyboardMarkup:
             # will not: it reads text off it (report wording, labels, notes) and
             # refuses to read the clinical picture itself without the doctor's
             # own account. The label now says what actually happens.
-            InlineKeyboardButton("📝 Use as case", callback_data="DOCUSE|info"),
+            InlineKeyboardButton("📝 Use text as case", callback_data="DOCUSE|info"),
             InlineKeyboardButton("📎 Attach as evidence", callback_data="DOCUSE|attach"),
         ],
         [
@@ -5972,10 +5972,7 @@ def _format_draft_preview_for_context(
     return _format_draft_preview(
         draft,
         _chosen_form_reason(context, resolved_form_type),
-        input_source=context.user_data.get("case_input_source", "text"),
         include_safety_layer=include_safety_layer,
-        needs_reflection_detail=context.user_data.get("needs_reflection_detail", False),
-        has_user_context=bool(context.user_data.get("case_has_user_context", True)),
         name_check_degraded=bool(context.user_data.get("name_check_unavailable", False)),
     )
 
@@ -6206,39 +6203,6 @@ def _draft_coach_note(draft) -> str:
     return ""
 
 
-def _draft_reflection_needs_user_detail(draft) -> bool:
-    fields = _draft_fields_for_review(draft)
-    if not _find_reflection_keys(fields, _draft_form_type(draft)):
-        return False
-    reflection = _draft_reflection_text(draft).strip()
-    if not reflection:
-        return True
-    words = reflection.split()
-    if len(words) < 18:
-        return True
-    lowered = reflection.lower()
-    learning_markers = (
-        "i learned",
-        "i learnt",
-        "i will",
-        "next time",
-        "in future",
-        "i would",
-        "i need",
-        "i realised",
-        "i reflected",
-        "this taught me",
-    )
-    return not any(marker in lowered for marker in learning_markers)
-
-
-def _image_source_without_user_context(context) -> bool:
-    source = str(context.user_data.get("case_input_source") or "").strip().lower()
-    if source not in {"photo", "image"}:
-        return False
-    return not bool(context.user_data.get("case_has_user_context"))
-
-
 _ATTACHMENT_PHI_LABEL_WORDS = {
     "PATIENT_NAME": "a patient name",
     "CLINICIAN_NAME": "a clinician name",
@@ -6339,7 +6303,7 @@ def _attachment_confirmation_reason(context) -> str | None:
 def _build_attachment_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📎 Attach to Kaizen", callback_data="ATTACH|yes")],
-        [InlineKeyboardButton("💾 Save without file", callback_data="ATTACH|no")],
+        [InlineKeyboardButton("💾 Save to Kaizen", callback_data="ATTACH|no")],
         [_BTN_CANCEL],
     ])
 
@@ -6352,10 +6316,6 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
     # one must not hold up a save the way a CBD's required reflection does.
     if not _form_requires_reflection(form_type, draft):
         return False
-
-    source = str(context.user_data.get("case_input_source") or "").strip().lower()
-    if source in {"photo", "image"} and _image_source_without_user_context(context):
-        return True
 
     case_text = str(context.user_data.get("case_text") or "").strip()
     if case_text:
@@ -6375,8 +6335,6 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
     confirmed = context.user_data.get("rcem_personal_reflection_confirmed")
     if confirmed is False:
         return True
-    if confirmed is None:
-        return source in {"photo", "image"} and _draft_reflection_needs_user_detail(draft)
     return not bool(_draft_reflection_text(draft).strip())
 
 
@@ -6430,10 +6388,7 @@ def _format_draft_preview(
     draft,
     reason: str | None = None,
     *,
-    input_source: str | None = None,
     include_safety_layer: bool = True,
-    needs_reflection_detail: bool = False,
-    has_user_context: bool = True,
     name_check_degraded: bool = False,
 ) -> str:
     """Format draft data as a preview message. Dispatches based on type."""
@@ -6444,19 +6399,7 @@ def _format_draft_preview(
         if isinstance(preview_draft, FormDraft)
         else _format_cbd_draft(preview_draft)
     )
-    layer = (
-        _draft_transparency_layer(
-            preview_draft,
-            input_source=input_source,
-            needs_reflection_detail=needs_reflection_detail,
-            has_user_context=has_user_context,
-        )
-        if include_safety_layer
-        else ""
-    )
-    # The coach note asks for the same thing the review block just asked for.
-    # Showing both made the preview read as three competing instructions.
-    coach = "" if layer else _draft_coach_note_suffix(draft)
+    coach = _draft_coach_note_suffix(draft)
     degraded = (
         "\n🔍 Name checking ran with reduced cover for this draft — please "
         "double-check names yourself."
@@ -6466,7 +6409,7 @@ def _format_draft_preview(
     # The declaration is already inside preview_draft's reflection field via
     # _with_rcem_ai_declaration, exactly as it will be saved. Appending a
     # separate note here as well showed the doctor the same sentence twice.
-    return preview + layer + coach + degraded
+    return preview + coach + degraded
 
 
 def _draft_coach_note_suffix(draft) -> str:
@@ -6627,53 +6570,6 @@ def _format_preview_text_value(key: str, value) -> str:
 
     paragraphs = _short_preview_paragraphs(text)
     return "\n\n".join(paragraphs) if paragraphs else text
-
-
-_SOURCE_LABELS = {
-    "text": "text case note",
-    "voice": "voice transcript",
-    "audio": "audio transcript",
-    "photo": "photo/OCR text",
-    "image": "photo/OCR text",
-    "document": "document text",
-    "same case": "previous case",
-}
-
-def _source_label(input_source: str | None) -> str:
-    return _SOURCE_LABELS.get(str(input_source or "").strip().lower(), "case note")
-
-
-def _draft_transparency_layer(
-    draft,
-    *,
-    input_source: str | None = None,
-    needs_reflection_detail: bool = False,
-    has_user_context: bool = True,
-) -> str:
-    """Safety-critical review note shown before the approval keyboard.
-
-    The AI-use declaration already lives once, in the reflection field text
-    itself (see `_with_rcem_ai_declaration`); this layer must not repeat it
-    as a second footer. It only renders for a photo-only case, whose
-    reflection must come from the doctor's own words.
-
-    Names the source *type* only — it never quotes raw case text, so
-    patient-identifying detail in the source is not surfaced in the preview.
-    """
-    if not _draft_has_reflection_fields(draft) or not needs_reflection_detail:
-        return ""
-    # What is still missing is named once, in the closing reply hint. This
-    # note only adds what the hint cannot: a photo alone carries none of the
-    # doctor's own words, so the reflection must come from them.
-    if (
-        str(input_source or "").strip().lower() in _USER_CONTEXT_REQUIRED_SOURCES
-        and not has_user_context
-    ):
-        return (
-            f"\n⚠️ Source: {_source_label(input_source)}. Add your own interpretation "
-            "and reflection. I won't write them for you."
-        )
-    return ""
 
 
 def _template_requirements(form_type: str):
@@ -6853,13 +6749,21 @@ def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
     requirement differently.
     """
     gaps: list[dict] = []
-    if _draft_needs_reflection_detail_before_save(context, draft):
+    fields = _draft_fields_for_review(draft)
+    schema_fields = {
+        field["key"]: field for field in FORM_SCHEMAS.get(schema_form_type(form_type or ""), {}).get("fields", [])
+    }
+    reflection_keys = _find_reflection_keys(schema_fields or fields, form_type)
+    if schema_form_type(form_type or "") == "REFLECT_LOG":
+        # Description is the clinical narrative; reflective answers are separate.
+        reflection_keys = ["learned", "replay_differently", "focussing_on", "different_outcome", "why"]
+    if (_form_requires_reflection(form_type, draft)
+            and not any(not _is_missing_field_value(fields.get(key)) for key in reflection_keys)):
         gaps.append({
             "key": "reflection",
             "label": "your reflection (what you learned or would do differently)",
         })
 
-    fields = _draft_fields_for_review(draft)
     reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
     duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_form_type(form_type or ""), set())
     essential_labels = {
@@ -12193,14 +12097,6 @@ def _video_context_has_user_grounding(case_text: str) -> bool:
 
 
 _SOURCE_GROUNDING_REQUIRED_SOURCES = {"voice", "audio", "mixed"}
-
-# Photo/image OCR text is the *document* talking, never the doctor. Its clinical
-# vocabulary would satisfy `_case_context_has_user_grounding` on its own, so a
-# bare report photo would sail past the grounding check and be drafted into a
-# reflection the doctor never wrote. These sources are therefore gated on
-# `case_has_user_context` — did the user supply words of their own — rather than
-# on the extracted text.
-_USER_CONTEXT_REQUIRED_SOURCES = {"photo", "image"}
 
 _SOURCE_PATIENT_MARKERS = (
     "patient",
@@ -17572,9 +17468,17 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             if isinstance(updates, dict) and not re.search(
                 r"\b(?:KCs?|key capabilit(?:y|ies)|curriculum|SLO\d+)\b", raw_text, re.IGNORECASE,
             ):
-                # Unrelated edits must not undo the doctor's KC selection.
-                updates.pop("key_capabilities", None)
-                updates.pop("curriculum_links", None)
+                # Descriptive removals need no curriculum jargon. Accept a
+                # validated reduction of the current selection, while unrelated
+                # field edits must not add or restore capabilities.
+                try:
+                    selected = canonical_kcs(updates.get("key_capabilities"), strict=True)
+                except ValueError:
+                    selected = None
+                current = _draft_fields_for_review(draft).get("key_capabilities") or []
+                if selected is None or not set(selected) < set(current):
+                    updates.pop("key_capabilities", None)
+                    updates.pop("curriculum_links", None)
             if updates:
                 # Keep the doctor's correction as source evidence for later
                 # edits, and reassess it before accepting doctor-owned facts.

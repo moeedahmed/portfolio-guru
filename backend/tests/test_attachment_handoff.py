@@ -95,7 +95,7 @@ async def test_document_case_stores_attachment_path():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ('📝 Use as case', "DOCUSE|info") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
     assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "clinical-notes.pdf" not in _all_visible_text(sim)
@@ -141,7 +141,7 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     # any text to offer. Text was found here, so the choice is real and shown.
     extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
-    assert ('📝 Use as case', "DOCUSE|info") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
     assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert ('❌ Remove file', "DOCUSE|ignore") in buttons
@@ -1561,7 +1561,7 @@ def test_image_buttons_do_not_promise_interpretation():
     import bot
 
     labels = [b.text for row in bot._build_image_intent_keyboard().inline_keyboard for b in row]
-    assert any("Use as case" in label for label in labels)
+    assert any("Use text as case" in label for label in labels)
     assert not any("drafting" in label.lower() for label in labels)
 
 

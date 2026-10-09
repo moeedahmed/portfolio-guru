@@ -284,7 +284,7 @@ async def _form_variety_ready_draft_to_cancel(client, form_code, case_text, *, p
             sent = await client.send_file(BOT_USERNAME, str(document), force_document=True,
                                           caption="Synthetic training note only.")
         reply = await _wider_wait(client, transcript, f"after:{name}", before=before, min_id=sent.id,
-                                  expect_buttons=True, expect_button_any=("Use as case", "Choose form"))
+                                  expect_buttons=True, expect_button_any=("Use text as case", "Choose form"))
         if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
             reply = await _wider_click(client, transcript, reply, "DOCUSE|info",
                                        expect_buttons=True, expect_button_any=("Choose form",))
@@ -552,7 +552,7 @@ async def _media_ready_draft_to_cancel(client, path, kind):
                 BOT_USERNAME, str(path), voice_note=kind == "voice", force_document=kind == "document",
                 caption=None if kind == "voice" else "Synthetic training note only.",
             )
-        capture_controls = dict(expect_buttons=True, expect_button_any=("Use as case", "Choose form", "CBD", "Case-based discussion"))
+        capture_controls = dict(expect_buttons=True, expect_button_any=("Use text as case", "Choose form", "CBD", "Case-based discussion"))
         reply = await _wider_wait(client, transcript, f"after:{kind}", before=before, min_id=sent.id, **capture_controls)
         if any(_payload(b) == "DOCUSE|info" for row in (reply.buttons or []) for b in row):
             reply = await _wider_click(client, transcript, reply, "DOCUSE|info", **capture_controls)

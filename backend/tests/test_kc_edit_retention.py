@@ -166,6 +166,8 @@ async def test_first_draft_selection_is_never_topped_up():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
 @pytest.mark.parametrize('instruction,requested,expected', [
+    ('Remove teaching and supervision', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
+    ('Remove the teaching and supervision capability', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
     ('remove SLO9 KC2', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
     ('change the KCs to SLO1 KC1', ['SLO1 KC1'], ['SLO1 KC1']),
     ('change the KCs to SLO1 KC1 and SLO99 KC1', ['SLO1 KC1', 'SLO99 KC1'], ['SLO1 KC1']),

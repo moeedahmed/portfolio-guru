@@ -489,7 +489,8 @@ async def test_callback_request_save_draft_requires_explicit_confirmation(cache_
     kwargs = update.callback_query.message.reply_text.await_args.kwargs
     text = kwargs.get("text") or update.callback_query.message.reply_text.await_args.args[0]
     # Confirmation copy must name the action and the safety boundary the bot keeps.
-    assert "save as draft" in text.lower()
+    assert "Save to Kaizen" in text
+    assert "as a draft" in text.lower()
     assert "submit" in text.lower()
     keyboard = kwargs.get("reply_markup")
     callbacks = {btn.callback_data for row in keyboard.inline_keyboard for btn in row}

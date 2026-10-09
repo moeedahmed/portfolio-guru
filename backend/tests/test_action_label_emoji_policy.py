@@ -91,6 +91,8 @@ EXPECTED_MODEL_BACKED_RAW_BUTTON_SITES = Counter(
 
 
 def _assert_functional_action_label(label: str) -> None:
+    if re.search(r"^[^\w]*save\b", label, re.IGNORECASE):
+        assert label == "💾 Save to Kaizen", label
     assert not (set(label) & BANNED_DECORATIVE_EMOJI), label
     match = _EMOJI_CLUSTER.match(label)
     assert match is not None, f"missing leading functional emoji: {label!r}"
@@ -329,6 +331,10 @@ def test_one_label_per_callback_action_across_all_producers():
             elif isinstance(node, ast.Dict):
                 kws = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant)}
                 callback, label = kws.get('callback_data'), kws.get('text')
+            # Check labels even when callbacks are built dynamically.
+            text = _literal_or_prefixed_text(label, constants) if label is not None else None
+            if text is not None and re.search(r"^[^\w]*save\b", text, re.IGNORECASE):
+                assert text == "💾 Save to Kaizen", (str(path), text)
             if isinstance(callback, ast.Call) and getattr(callback.func, 'id', '') == '_case_button':
                 callback = callback.args[0]
             if isinstance(callback, ast.Name) and _scope_name(node, parents) == '_build_approval_keyboard':

@@ -1051,7 +1051,6 @@ class TestFlowWalker:
 
         preview = _format_draft_preview(
             thin_draft,
-            input_source='voice',
         )
 
         assert AI_USE_DECLARATION in preview
@@ -1065,7 +1064,7 @@ class TestFlowWalker:
         appear when the doctor's own reflective input is already present."""
         from bot import _DRAFT_DIVIDER, _format_draft_preview
 
-        preview = _format_draft_preview(thin_draft, input_source='voice')
+        preview = _format_draft_preview(thin_draft)
 
         assert _DRAFT_DIVIDER not in preview
         assert '🤖 *AI assistance*' not in preview
@@ -1095,7 +1094,7 @@ class TestFlowWalker:
         assert '943 476 5919' not in preview
         assert 'reflected on escalation' not in preview
 
-    def test_image_only_draft_asks_for_the_doctors_own_reflection(self, thin_draft):
+    def test_photo_source_does_not_force_a_warning_on_a_filled_draft(self, thin_draft):
         from bot import _format_draft_preview_for_context, _set_reflection_detail_gate
         from tests.bot_simulator import BotSimulator
 
@@ -1104,11 +1103,11 @@ class TestFlowWalker:
         context.user_data['case_input_source'] = 'photo'
         context.user_data['case_has_user_context'] = False
 
-        assert _set_reflection_detail_gate(context, thin_draft) is True
+        assert _set_reflection_detail_gate(context, thin_draft) is False
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
-        assert 'Add your own interpretation and reflection' in preview
-        assert "I won't write them for you" in preview
+        assert 'Source:' not in preview
+        assert "I won't write them for you" not in preview
 
     def test_image_with_user_context_can_show_save_when_reflection_is_useful(self, thin_draft):
         from bot import _build_approval_keyboard, _set_reflection_detail_gate
