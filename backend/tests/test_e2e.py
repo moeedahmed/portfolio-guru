@@ -210,7 +210,7 @@ async def _media_ready_draft_to_cancel(client, path, kind):
         # Choose form must be observed. Gathering-off or a direct-form shortcut
         # is incomplete proof, rather than a silently shortened journey.
         reply = await _wider_click(client, transcript, reply, "GATHER|done",
-                                   expect_buttons=True, expect_button_any=("CBD", "Case-based discussion", "Best fit"))
+                                   expect_buttons=True, expect_button_any=("CBD", "Case-based discussion", "Forms", "Restart"))
         form = next((_payload(b) for row in (reply.buttons or []) for b in row
                      if _payload(b) in {"FORM|CBD", "FORM|CBD_2021", "FORM|best"}), None)
         assert form, "CBD choice missing"

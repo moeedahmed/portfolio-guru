@@ -3520,10 +3520,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
             excluded = {_kc_identity(claim["capability"])
                         for claim in _validated_kc_drop_claims(merged_claims)}
             reviewed_kcs = [kc for kc in reviewed_kcs if _kc_identity(kc) not in excluded]
-        except Exception:
+        except Exception as exc:
             # Includes provider/timeout/shape errors; cancellation by the caller
-            # still propagates. Do not log provider output or clinical content.
-            logger.warning("Unusable CBD KC review; preserving original selection")
+            # still propagates. Log only the error class, never provider output
+            # or clinical content.
+            logger.warning("Unusable CBD KC review (%s); preserving original selection",
+                           type(exc).__name__)
         else:
             # Adopt atomically, and only curriculum fields, after validation.
             data["key_capabilities"] = reviewed_kcs
