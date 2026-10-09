@@ -53,6 +53,50 @@ KC_PREVIEW = "\n• SLO3 — Resuscitation\n  ↳ KC3: assessment\n  ↳ KC5: le
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("confirmed", [True, False])
+async def test_wider_clean_start_confirms_cancel_before_capture(wider_journey_harness, confirmed):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message("Cancelled. Send an anonymised case.") if confirmed else TimeoutError())
+    transcript = []
+    if confirmed:
+        await journeys._wider_clean_start(client, transcript)
+        assert transcript[-1].received == "Cancelled. Send an anonymised case."
+    else:
+        with pytest.raises(TimeoutError):
+            await journeys._wider_clean_start(client, transcript)
+    assert [call.args[1] for call in client.send_message.call_args_list] == ["/cancel"]
+    assert transcript[0].action == "send:/cancel"
+    assert transcript[-1].action == "start:/cancel"
+    client.send_file.assert_not_awaited()
+    assert not clicks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("journey", ["form-variety", "form-switching", "media", "settings"])
+async def test_wider_journeys_never_capture_after_unconfirmed_start(wider_journey_harness, journey):
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.extend([TimeoutError("start cancellation unconfirmed"), message("Cancelled cleanup")])
+    with pytest.raises(TimeoutError, match="start cancellation unconfirmed"):
+        if journey == "form-variety":
+            await journeys._form_variety_ready_draft_to_cancel(
+                client, "TEACH", "Synthetic teaching.", prefer_recommendation=True)
+        elif journey == "form-switching":
+            await journeys._form_switching_to_cancel(client)
+        elif journey == "media":
+            await journeys._media_ready_draft_to_cancel(client, None, "text")
+        else:
+            await journeys.test_e2e_settings_read_only_journey(client)
+    assert [call.args[1] for call in client.send_message.call_args_list] == ["/cancel", "/cancel"]
+    client.send_file.assert_not_awaited()
+    client.get_messages.assert_not_awaited()
+    assert not clicks
+    transcript = next(iter(artifacts.values()))
+    assert transcript[1].action == "start:/cancel"
+    assert transcript[1].received == "Response unconfirmed"
+    assert transcript[-1].received == "Cancelled cleanup"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('fault', [None, 'stale', 'stale-history', 'duplicate', 'dead-end', 'missing-back'])
 @pytest.mark.parametrize('draft_in_place', [False, True])
 async def test_form_switching_screen_checks_and_cleanup(
@@ -97,6 +141,7 @@ async def test_form_switching_screen_checks_and_cleanup(
     def cancelled():
         return screen("↩️ Cancelled. Send an anonymised case when you're ready.", replace=True)
 
+    replies.append(cancelled())
     capture()
     replies.append(categories())
     offered = [b.callback_data.split('cat_')[1] for row in bot._build_category_picker_keyboard(123).inline_keyboard
@@ -156,9 +201,9 @@ async def test_form_switching_screen_checks_and_cleanup(
         assert ('screen:edited-in-place' if draft_in_place else 'screen:replaced') in transitions
         assert not replies
     sends = [call.args[1] for call in client.send_message.call_args_list]
-    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
+    assert sends.count('/cancel') == 2 and sends[0] == sends[-1] == '/cancel'
     if not fault:
-        assert sends.count(sends[0]) == 3  # same single invented case throughout
+        assert sends.count(sends[1]) == 3  # same single invented case throughout
     assert artifacts['portfolio-guru-form-switching-transcript.json'][-1].received == 'Cancelled cleanup'
     assert not any(value.startswith(('APPROVE|', 'ACTION|setup', 'ACTION|reset', 'REMIND|')) for value in clicks)
 
@@ -187,6 +232,7 @@ def _ready_text(date='17 Mar 2026'):
 @pytest.mark.parametrize('variant', ['', '_2021'])
 async def test_form_variety_selects_target_and_cancels(wider_journey_harness, recommendation, variant):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     target = 'FORM|TEACH' + variant
     offered = ('Teaching Session', target) if recommendation == 'target' else (
         '👨‍🏫 Teaching Session' if recommendation == 'best' else 'CBD', 'FORM|best')
@@ -204,7 +250,7 @@ async def test_form_variety_selects_target_and_cancels(wider_journey_harness, re
         ['FORM|show_all', 'FORM|cat_TEACHING', target] if use_list else
         [target if recommendation == 'target' else 'FORM|best'])
     assert [call.args[1] for call in client.send_message.call_args_list] == [
-        'Synthetic teaching session.', '/cancel']
+        '/cancel', 'Synthetic teaching session.', '/cancel']
     assert artifacts['portfolio-guru-form-variety-TEACH-transcript.json'][-1].received == 'Cancelled cleanup'
     assert not replies
 
@@ -215,6 +261,7 @@ async def test_form_variety_selects_target_and_cancels(wider_journey_harness, re
                                 'Level of supervision and patient identifier', None])
 async def test_form_variety_gap_allowlist_and_failure_cleanup(wider_journey_harness, gap):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
                     message('Teaching', ('Teaching Session', 'FORM|TEACH')),
                     TimeoutError('draft timeout') if gap is None else
@@ -230,8 +277,8 @@ async def test_form_variety_gap_allowlist_and_failure_cleanup(wider_journey_harn
         with pytest.raises((AssertionError, TimeoutError)):
             await journeys._form_variety_ready_draft_to_cancel(client, 'TEACH', 'Synthetic teaching.', prefer_recommendation=True)
     sends = [call.args[1] for call in client.send_message.call_args_list]
-    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
-    assert len(sends) == (3 if known else 2)
+    assert sends.count('/cancel') == 2 and sends[0] == sends[-1] == '/cancel'
+    assert len(sends) == (4 if known else 3)
     assert clicks == ['GATHER|done', 'FORM|TEACH']
     assert artifacts['portfolio-guru-form-variety-TEACH-transcript.json'][-1].received == 'Cancelled cleanup'
     assert not replies
@@ -240,6 +287,7 @@ async def test_form_variety_gap_allowlist_and_failure_cleanup(wider_journey_harn
 @pytest.mark.asyncio
 async def test_form_variety_pdf_uses_document_intent_and_non_cbd_form(wider_journey_harness, tmp_path):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     text = 'Synthetic teaching: I taught a simulation session on team briefing.'
     pdf = journeys._synthetic_pdf(tmp_path / 'teaching.pdf', text)
     replies.extend([message('Read this document?', ('Read text', 'DOCUSE|info')),
@@ -252,7 +300,7 @@ async def test_form_variety_pdf_uses_document_intent_and_non_cbd_form(wider_jour
     await journeys._form_variety_ready_draft_to_cancel(
         client, 'TEACH', text, prefer_recommendation=False, document=pdf)
     assert clicks == ['DOCUSE|info', 'GATHER|done', 'FORM|show_all', 'FORM|cat_TEACHING', 'FORM|TEACH']
-    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel', '/cancel']
     assert client.send_file.call_args.args[1] == str(pdf)
     assert client.send_file.call_args.kwargs['force_document'] is True
     reader = pytest.importorskip('pypdf').PdfReader(pdf)
@@ -284,6 +332,7 @@ async def test_form_variety_direct_call_refuses_non_test_envelope(wider_journey_
 async def test_form_variety_navigates_real_bot_keyboards(wider_journey_harness, monkeypatch, code, curriculum):
     import bot
     journeys, client, replies, clicks, _, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     actual = bot._form_type_for_curriculum(code, curriculum)
     monkeypatch.setattr(bot, '_get_allowed_forms', lambda _: [actual])
     monkeypatch.setattr(bot, '_effective_curriculum', lambda _: curriculum)
@@ -310,6 +359,7 @@ async def test_form_variety_navigates_real_bot_keyboards(wider_journey_harness, 
 @pytest.mark.parametrize('gap', [False, True])
 async def test_wider_clinical_edits_a_field_before_cleanup(wider_journey_harness, tmp_path, kind, gap):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     if kind in {'photo', 'document'}:
         replies.append(message('Read this note?', ('Read text', 'DOCUSE|info')))
     replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
@@ -323,11 +373,11 @@ async def test_wider_clinical_edits_a_field_before_cleanup(wider_journey_harness
     await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', kind)
     assert clicks == (['DOCUSE|info'] if kind in {'photo', 'document'} else []) + ['GATHER|done', 'FORM|CBD']
     sends = [call.args[1] for call in client.send_message.call_args_list]
-    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
+    assert sends.count('/cancel') == 2 and sends[0] == sends[-1] == '/cancel'
     assert sum(value.startswith('Change only the encounter date') for value in sends) == 1
     assert any(value.startswith('Level of supervision: indirect') for value in sends) == gap
     if kind == 'text':
-        assert sends[0] == journeys.SYNTHETIC_CASE
+        assert sends[1] == journeys.SYNTHETIC_CASE
         client.send_file.assert_not_awaited()
     else:
         assert client.send_file.call_args.kwargs['voice_note'] == (kind == 'voice')
@@ -361,7 +411,7 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
         return reply
 
     reset = observed('↩️ Cancelled. Send an anonymised case when you’re ready.')
-    histories.append([reset])
+    histories.extend([[reset], [reset]])
     current_id = 10 if edit_in_place else 20
     if kind != 'voice':
         intent = observed(
@@ -415,6 +465,7 @@ async def test_wider_media_real_reply_shapes_and_history_matching(
 @pytest.mark.parametrize('bad_reply', ['wrong-save', 'wrong-cancel', 'extra-control', 'unknown-gap', 'timeout'])
 async def test_wider_media_failure_retains_transcript_and_cleans_up(wider_journey_harness, tmp_path, bad_reply):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     controls = [('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'ACTION|cancel')]
     text = 'Ready draft'
     if bad_reply == 'wrong-save': controls[0] = ('Save to Kaizen', 'APPROVE|submit')
@@ -430,13 +481,14 @@ async def test_wider_media_failure_retains_transcript_and_cleans_up(wider_journe
     with pytest.raises((AssertionError, TimeoutError)):
         await journeys._media_ready_draft_to_cancel(client, tmp_path / 'synthetic-media', 'photo')
     assert clicks == ['GATHER|done', 'FORM|CBD']
-    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel', '/cancel']
     assert artifacts['portfolio-guru-photo-transcript.json'][-1].received == 'Cancelled cleanup'
 
 
 @pytest.mark.asyncio
 async def test_wider_settings_traverses_views_and_back_only(wider_journey_harness):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     def settings():
         return message('Settings', ('Portfolio defaults', 'ACTION|portfolio_defaults'),
                        ('Reminders', 'REMIND|menu'), ('Writing style', 'ACTION|voice'),
@@ -461,7 +513,7 @@ async def test_wider_settings_traverses_views_and_back_only(wider_journey_harnes
                       'ACTION|change_pathway', 'ACTION|portfolio_defaults', 'ACTION|change_curriculum',
                       'ACTION|portfolio_defaults', 'ACTION|settings', 'REMIND|menu', 'ACTION|settings',
                       'ACTION|voice', 'VOICE|path_manual', 'VOICE|back_to_choice', 'VOICE|back_to_settings']
-    assert [call.args[1] for call in client.send_message.call_args_list] == ['/settings', '/cancel']
+    assert [call.args[1] for call in client.send_message.call_args_list] == ['/cancel', '/settings', '/cancel']
     assert artifacts['portfolio-guru-settings-transcript.json'][-1].received == 'Cancelled cleanup'
     assert not replies
 
@@ -1122,6 +1174,7 @@ def test_gap_preview_classifier_rejects_incomplete_or_conflicting_controls(text,
 @pytest.mark.parametrize('refreshed', ['unchanged', 'wrong-date', 'missing-controls', 'timeout'])
 async def test_clinical_edit_must_land_in_refreshed_preview(wider_journey_harness, tmp_path, kind, refreshed):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     controls = (('Save to Kaizen', 'APPROVE|draft'), ('Cancel', 'CANCEL|draft'))
     bad = TimeoutError() if refreshed == 'timeout' else message(
         _ready_text('17 Mar 2026' if refreshed == 'unchanged' else '19 Mar 2026'),
@@ -1131,7 +1184,7 @@ async def test_clinical_edit_must_land_in_refreshed_preview(wider_journey_harnes
                     bad, message('Cancelled cleanup')])
     with pytest.raises((AssertionError, TimeoutError)):
         await journeys._media_ready_draft_to_cancel(client, tmp_path / 'media', kind)
-    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 1
+    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 2
     assert clicks == ['GATHER|done', 'FORM|CBD']
     assert artifacts[f'portfolio-guru-{kind}-transcript.json'][-1].received == 'Cancelled cleanup'
 
@@ -1140,11 +1193,12 @@ async def test_clinical_edit_must_land_in_refreshed_preview(wider_journey_harnes
 @pytest.mark.parametrize('cleanup_failure', [None, 'send', 'wait'])
 async def test_focused_journey_keeps_original_failure_and_cleanup_transcript(wider_journey_harness, cleanup_failure):
     journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    replies.append(message('Cancelled start'))
     replies.extend([message('Case captured', ('Choose form', 'GATHER|done')),
                     message('CBD', ('CBD', 'FORM|CBD')), message('Unexpected state', ('Retry', 'ACTION|retry'))])
     if cleanup_failure == 'send':
         async def send(target, text, **kwargs):
-            if text == '/cancel':
+            if text == '/cancel' and client.send_message.await_count > 1:
                 raise TimeoutError('cleanup send failed')
             from types import SimpleNamespace
             return SimpleNamespace(id=1)
@@ -1153,7 +1207,7 @@ async def test_focused_journey_keeps_original_failure_and_cleanup_transcript(wid
         replies.append(TimeoutError('cleanup response timed out') if cleanup_failure == 'wait' else message('Cancelled'))
     with pytest.raises(AssertionError, match='unexpected post-click state') as failure:
         await journeys.test_e2e_text_ready_draft_to_cancel_journey(client)
-    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 1
+    assert [call.args[1] for call in client.send_message.call_args_list].count('/cancel') == 2
     transcript = artifacts['portfolio-guru-text-transcript.json']
     if cleanup_failure:
         assert 'unconfirmed' in transcript[-1].received.lower()

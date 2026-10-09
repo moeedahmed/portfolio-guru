@@ -237,12 +237,22 @@ async def _wider_before_send(client):
     return message_fingerprint(messages[0]) if messages else None
 
 
+async def _wider_cancel(client, transcript, phase):
+    assert_live_telegram_guardrails(BOT_USERNAME)
+    transcript.append(TelegramExchange(step=phase, action="send:/cancel", received="Cancellation attempted"))
+    sent = await client.send_message(BOT_USERNAME, "/cancel")
+    return await _wider_wait(client, transcript, f"{phase}:/cancel", min_id=sent.id,
+                             expect_text_any=("cancelled",))
+
+
+async def _wider_clean_start(client, transcript):
+    await _wider_cancel(client, transcript, "start")
+
+
 async def _wider_cleanup(client, transcript, name):
     original_failure = sys.exception()
     try:
-        assert_live_telegram_guardrails(BOT_USERNAME)
-        sent = await client.send_message(BOT_USERNAME, "/cancel")
-        await _wider_wait(client, transcript, "cleanup:/cancel", min_id=sent.id, expect_text_any=("cancelled",))
+        await _wider_cancel(client, transcript, "cleanup")
     except Exception as exc:
         transcript.append(TelegramExchange(step="cleanup", action="send:/cancel",
                                            received=f"Cancellation unconfirmed: {type(exc).__name__}"))
@@ -273,6 +283,7 @@ async def _form_variety_ready_draft_to_cancel(client, form_code, case_text, *, p
     transcript = []
     name = f"form-variety-{form_code}" + ("-pdf" if document is not None else "")
     try:
+        await _wider_clean_start(client, transcript)
         category, label, _, _ = FORM_VARIETY_CASES[form_code]
         targets = {payload for payload in FORM_VARIETY_PAYLOADS
                    if payload in {f"FORM|{form_code}", f"FORM|{form_code}_2021"}}
@@ -504,6 +515,7 @@ async def _form_switching_to_cancel(client):
         return await tap(forms, payload, "draft", form=payload[5:])
 
     try:
+        await _wider_clean_start(client, transcript)
         recommendation = await capture()
         saved = (recommendation.raw_text.strip(), _screen_controls(recommendation))
         suggested = next(label for label, payload in saved[1] if payload == "FORM|best")
@@ -543,6 +555,7 @@ async def _media_ready_draft_to_cancel(client, path, kind):
     assert_live_telegram_guardrails(BOT_USERNAME)
     transcript = []
     try:
+        await _wider_clean_start(client, transcript)
         before = await _wider_before_send(client)
         transcript.append(TelegramExchange(step="capture", action=f"send:{kind}", received="Capture attempted"))
         if kind == "text":
@@ -617,6 +630,7 @@ async def test_e2e_settings_read_only_journey(telethon_client):
     assert_live_telegram_guardrails(BOT_USERNAME)
     transcript = []
     try:
+        await _wider_clean_start(telethon_client, transcript)
         sent = await telethon_client.send_message(BOT_USERNAME, "/settings")
         settings = await _wider_wait(telethon_client, transcript, "send:/settings", min_id=sent.id,
                                      expect_text_any=("Settings",), expect_buttons=True)

@@ -1094,7 +1094,7 @@ class TestFlowWalker:
         assert '943 476 5919' not in preview
         assert 'reflected on escalation' not in preview
 
-    def test_photo_source_does_not_force_a_warning_on_a_filled_draft(self, thin_draft):
+    def test_photo_without_doctor_words_blanks_reflection_without_a_source_warning(self, thin_draft):
         from bot import _format_draft_preview_for_context, _set_reflection_detail_gate
         from tests.bot_simulator import BotSimulator
 
@@ -1103,7 +1103,7 @@ class TestFlowWalker:
         context.user_data['case_input_source'] = 'photo'
         context.user_data['case_has_user_context'] = False
 
-        assert _set_reflection_detail_gate(context, thin_draft) is False
+        assert _set_reflection_detail_gate(context, thin_draft) is True
         preview = _format_draft_preview_for_context(thin_draft, context, 'CBD')
 
         assert 'Source:' not in preview

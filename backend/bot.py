@@ -1945,6 +1945,7 @@ def _store_draft(context, draft):
     filing, so the retry affordance is cleared here. The genuine retry path
     restores `draft_data` directly via `_restore_retryable_draft` and never
     routes through this helper, so its status is preserved."""
+    draft = _without_unsupported_reflection(context, draft)
     serialised = _serialise_draft(draft)
     if context.user_data.get("draft_data") != serialised:
         # Approval belongs to the preview the doctor saw, not a later edit.
@@ -5970,7 +5971,7 @@ def _format_draft_preview_for_context(
 ) -> str:
     resolved_form_type = form_type or _draft_form_type(draft)
     return _format_draft_preview(
-        draft,
+        _without_unsupported_reflection(context, draft),
         _chosen_form_reason(context, resolved_form_type),
         include_safety_layer=include_safety_layer,
         name_check_degraded=bool(context.user_data.get("name_check_unavailable", False)),
@@ -6316,6 +6317,10 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
     # one must not hold up a save the way a CBD's required reflection does.
     if not _form_requires_reflection(form_type, draft):
         return False
+    # OCR learning points belong to the image's author, not necessarily the
+    # doctor. Provenance beats cached/model judgements of that same OCR text.
+    if _case_lacks_user_context(context):
+        return True
 
     case_text = str(context.user_data.get("case_text") or "").strip()
     if case_text:
@@ -6336,6 +6341,15 @@ def _draft_needs_reflection_detail_before_save(context, draft) -> bool:
     if confirmed is False:
         return True
     return not bool(_draft_reflection_text(draft).strip())
+
+
+def _case_lacks_user_context(context) -> bool:
+    source = str(context.user_data.get("case_input_source") or "").strip().lower()
+    return source in {"photo", "image"} and not context.user_data.get("case_has_user_context")
+
+
+def _without_unsupported_reflection(context, draft):
+    return _without_reflection_text(draft) if _case_lacks_user_context(context) else draft
 
 
 def _remember_case_context_source(
@@ -6359,6 +6373,9 @@ def _without_reflection_text(draft):
     doctor's own reflection."""
     fields = _draft_fields_for_review(draft)
     keys = _find_reflection_keys(fields, _draft_form_type(draft))
+    if schema_form_type(_draft_form_type(draft)) == "REFLECT_LOG":
+        keys += [key for key in ("replay_differently", "focussing_on", "different_outcome", "why")
+                 if key in fields and key not in keys]
     if not keys:
         return draft
     if isinstance(draft, FormDraft):
@@ -6633,6 +6650,7 @@ async def _show_draft_review(
     *,
     edit: bool = True,
 ) -> int:
+    draft = _without_unsupported_reflection(context, draft)
     _store_draft(context, draft)
     needs_reflection_detail = _set_reflection_detail_gate(context, draft)
     missing_required, missing_optional, _ = _missing_template_fields(draft, form_type)
@@ -6744,27 +6762,27 @@ def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
     from the case), because a blank required field cannot be filed whatever
     its origin. Required dates are excluded: they are defaulted to today at
     both draft and filing time, so they are never actually lost. Optional
-    fields are never included, and reflection has its own gate above. Labels
+    fields are never included. Required reflection fields are checked
+    individually; the reflective log keeps its narrative and learning separate. Labels
     are shared with the pre-draft gate so the two never describe the same
     requirement differently.
     """
     gaps: list[dict] = []
+    draft = _without_unsupported_reflection(context, draft)
     fields = _draft_fields_for_review(draft)
-    schema_fields = {
-        field["key"]: field for field in FORM_SCHEMAS.get(schema_form_type(form_type or ""), {}).get("fields", [])
-    }
-    reflection_keys = _find_reflection_keys(schema_fields or fields, form_type)
-    if schema_form_type(form_type or "") == "REFLECT_LOG":
+    is_reflective_log = schema_form_type(form_type or "") == "REFLECT_LOG"
+    reflection_keys = set()
+    if is_reflective_log:
         # Description is the clinical narrative; reflective answers are separate.
-        reflection_keys = ["learned", "replay_differently", "focussing_on", "different_outcome", "why"]
-    if (_form_requires_reflection(form_type, draft)
-            and not any(not _is_missing_field_value(fields.get(key)) for key in reflection_keys)):
-        gaps.append({
-            "key": "reflection",
-            "label": "your reflection (what you learned or would do differently)",
-        })
+        personal_keys = ["learned", "replay_differently", "focussing_on", "different_outcome", "why"]
+        if (_form_requires_reflection(form_type, draft)
+                and not any(not _is_missing_field_value(fields.get(key)) for key in personal_keys)):
+            gaps.append({
+                "key": "reflection",
+                "label": "your reflection (what you learned or would do differently)",
+            })
+        reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
 
-    reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
     duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_form_type(form_type or ""), set())
     essential_labels = {
         item["key"]: item["label"] for item in _form_essential_requirements(form_type)
@@ -15731,6 +15749,7 @@ async def handle_approval_approve(update: Update, context: ContextTypes.DEFAULT_
     # be incomplete and the doctor finishes it there. RCEM's rule still holds:
     # a reflection the doctor has not supplied is left blank, never saved as
     # AI wording. The post-save report names the blank fields to complete.
+    draft = _without_unsupported_reflection(context, draft)
     if _set_reflection_detail_gate(context, draft):
         draft = _without_reflection_text(draft)
     filing_draft = _with_rcem_ai_declaration(draft)

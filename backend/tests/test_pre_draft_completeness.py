@@ -57,6 +57,21 @@ def _common_patches():
     )
 
 
+@pytest.mark.parametrize("missing", [
+    ("reflective_notes", "lessons_learned"), ("reflective_notes",),
+    ("lessons_learned",), ("resources_used",), (),
+])
+def test_formal_course_checks_each_required_reflection_field(missing):
+    fields = {"stage_of_training": "Higher/ST4-ST6", "project_description": "Synthetic ALS course",
+              "reflective_notes": "I learned to allocate roles earlier.",
+              "resources_used": "ALS manual", "lessons_learned": "I will brief the team earlier."}
+    fields.update({key: "" for key in missing})
+    draft = FormDraft(form_type="FORMAL_COURSE", fields=fields)
+    context = BotSimulator()._make_context()
+    bot._store_draft(context, draft)
+    assert {gap["key"] for gap in bot._draft_gaps(context)} == set(missing)
+
+
 @pytest.fixture(autouse=True)
 def sufficient_case_by_default():
     """These tests are about what happens *around* a draft, so the default is
@@ -609,4 +624,3 @@ async def test_save_with_other_blank_essentials_still_files_the_draft():
 
     route_filing.assert_awaited_once()
     assert route_filing.await_args.kwargs["fields"]["clinical_setting"] == ""
-

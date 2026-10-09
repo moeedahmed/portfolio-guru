@@ -447,7 +447,7 @@ async def test_stale_improve_callback_without_draft_cannot_extract():
     ("   ", True),
 ])
 def test_photo_reflection_hint_checks_the_draft_fields(learned, needs_prompt):
-    context = _context("Photo notes about a referral.", source="photo", has_user_context=False)
+    context = _context("Photo notes about a referral.", source="photo", has_user_context=True)
     context.user_data.update(chosen_form="REFLECT_LOG", needs_reflection_detail=True)
     draft = FormDraft(form_type="REFLECT_LOG", fields={
         "date_of_encounter": "2026-10-09",
@@ -464,9 +464,57 @@ def test_photo_reflection_hint_checks_the_draft_fields(learned, needs_prompt):
 
 def test_photo_source_with_supplied_learning_does_not_force_save_gate():
     reflection = "I learned to check understanding before ending a referral."
-    context = _context(reflection, source="photo", has_user_context=False)
+    context = _context(reflection, source="photo", has_user_context=True)
     draft = FormDraft(form_type="REFLECT_LOG", fields={"reflection": reflection, "learned": reflection})
     assert bot._set_reflection_detail_gate(context, draft) is False
+
+
+@pytest.mark.parametrize("source", ["text", "voice", "photo"])
+def test_doctor_supplied_reflection_survives_preview_without_a_missing_reflection_prompt(source):
+    reflection = "I learned to check understanding before ending a referral."
+    context = _context(reflection, source=source, has_user_context=True)
+    draft = CBDData(reflection=reflection)
+    bot._store_draft(context, draft)
+    assert bot._load_draft(context).reflection == reflection
+    assert reflection in bot._format_draft_preview_for_context(draft, context)
+    assert "your reflection" not in bot._draft_reply_hint(context)
+    assert bot._set_reflection_detail_gate(context, draft) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "DOPS", "REFLECT_LOG"])
+async def test_captionless_photo_learning_is_blank_in_preview_and_filing(form_type):
+    reflection = "Learning points: check understanding before ending a referral."
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(_context(reflection, source="photo", has_user_context=False).user_data)
+    context.user_data.update(chosen_form=form_type, rcem_personal_reflection_confirmed=True)
+    draft = FormDraft(form_type=form_type, fields={
+        "reflection": reflection, "learned": reflection,
+        "replay_differently": reflection, "why": reflection,
+        "different_outcome": reflection, "focussing_on": reflection,
+    })
+    await bot._show_draft_review(sim._make_text_update("Synthetic photo").message,
+                                 context, draft, form_type, edit=False)
+    assert reflection not in sim.get_last_text()
+    stored = bot._load_draft(context)
+    assert stored.fields["reflection"] == ""
+    if form_type == "REFLECT_LOG":
+        assert all(not value for value in stored.fields.values())
+    if form_type != "DOPS":
+        assert "Still needed:" in sim.get_last_text()
+        assert "your reflection" in sim.get_last_text()
+    # Older persisted payloads also need the guard at the filing boundary.
+    context.user_data["draft_data"] = bot._serialise_draft(draft)
+    route = AsyncMock(return_value={"status": "failed", "filled": [], "skipped": [],
+                                   "error": "offline payload capture", "method": "deterministic"})
+    with patch("bot.get_credentials", return_value=("synthetic", "synthetic")), \
+         patch("bot.route_filing", new=route), \
+         patch("bot.compose_filing_recovery_copy", new=AsyncMock(return_value="")), \
+         patch("bot._alert_filing_failure", new=AsyncMock()):
+        await bot.handle_approval_approve(sim._make_callback_update("APPROVE|draft"), context)
+    route.assert_awaited_once()
+    assert route.await_args.kwargs["fields"]["reflection"] == ""
 
 
 @pytest.mark.parametrize("form_type", ["CBD", "REFLECT_LOG"])

@@ -75,7 +75,9 @@ def producer_digest():
 # 9 Oct 2026: KC Remove button dropped; one label per button action.
 # 9 Oct 2026: photo reflection hints use filled draft fields; source warning
 # removed, text-as-case and all Save labels aligned, descriptive KC edits validated.
-PRODUCER_DIGEST = '4a4025e27ab07c57d4d2ca20862ea51515318446f0d175d8957a2b855b5d86a9'
+# 2026-10-09: restored photo reflection provenance at preview/storage/filing;
+# required reflection fields checked individually. Existing controls unchanged.
+PRODUCER_DIGEST = '610bcf314adfca0916a7ab9d603a683e3f20e583f0ffeb58d017284dcde5ca01'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
