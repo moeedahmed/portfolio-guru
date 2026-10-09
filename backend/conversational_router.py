@@ -393,10 +393,14 @@ _QUESTION_START = re.compile(
 
 
 def _sentences(text: str) -> tuple[str, ...]:
-    # Keep narrated clauses intact; split a conjunction only before a direct
-    # question ("I taught handover and how do I reconnect my account?").
+    # Keep narrated clauses intact; split a conjunction, comma or colon only
+    # before a direct question ("I taught handover, why is my account blocked?").
     return tuple(part.strip() for part in re.split(
-        r"[?!.;]|\b(?:and|but)\s+(?=(?:how|why|what|when|where|can|could)\b)", text,
+        r"[?!.;]|\b(?:and|but)\s+(?=(?:how|why|what|when|where|can|could)\b)"
+        # A comma or colon is narrative punctuation unless a question with an
+        # auxiliary follows ("..., what went well was" stays one clause).
+        r"|[,:]\s+(?=(?:how|why|what|when|where)\s+(?:do|does|did|can|could|should|will|is|are|was|were|has|have)\b"
+        r"|(?:can|could|would)\s+(?:i|you)\b)", text,
     ) if part.strip())
 
 
@@ -416,7 +420,7 @@ def _evidence_writing_request(sentence: str) -> bool:
         return True
     # Descriptive adjectives are unrestricted. Stop at the object's topic or
     # purpose so "help with my account to save a reflection" stays account help.
-    subject = re.split(r"\b(?:about|on|to|because|for)\b", sentence[action.end():], maxsplit=1)[0]
+    subject = re.split(r"\b(?:about|on|to|because|for|so)\b", sentence[action.end():], maxsplit=1)[0]
     return _contains_any(subject, (
         "case", "activity", "experience", "draft", "reflection",
         *(alias for aliases in FORM_ALIASES.values() for alias in aliases),
