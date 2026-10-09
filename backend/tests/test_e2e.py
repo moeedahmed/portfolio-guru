@@ -219,7 +219,7 @@ async def _media_ready_draft_to_cancel(client, path, kind):
         if classify_post_click_draft_state(reply) == "draft_with_gaps":
             # The recommended form decides the gap (supervision for CBD, the
             # learning point for a reflection); the bot must name it and ask.
-            assert re.search(r"still needed:.+?reply", reply.raw_text or "", re.I | re.S), "Unreviewed draft gap"
+            assert re.search(r"still needed:\s*(level of supervision|your reflection)\b.*?reply", reply.raw_text or "", re.I | re.S), "Unreviewed draft gap"
             detail = ("Level of supervision: indirect. I discussed the case with my senior registrar. "
                       "What I learned: I will repeat the ECG at 15 minutes for ongoing chest pain.")
             fingerprint = message_fingerprint(reply)
