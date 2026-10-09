@@ -66,7 +66,7 @@ PLATFORM_REGISTRY = {
             # 2025 Update forms
             "CBD", "DOPS", "LAT", "ACAT", "ACAF", "STAT", "MSF",
             "MINI_CEX", "JCF", "QIAT", "TEACH", "PROC_LOG", "SDL",
-            "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2", "COMPLAINT", "SERIOUS_INC",
+            "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2", "ESLE_REFLECTION", "COMPLAINT", "SERIOUS_INC",
             "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG", "TEACH_OBS",
             # 2021 versions
             "CBD_2021", "DOPS_2021", "ACAT_2021", "ACAF_2021", "STAT_2021",

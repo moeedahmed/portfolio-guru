@@ -33,9 +33,19 @@ removed for these synchronous pages; real locator actions and navigations run.
 
 Run `python -m pytest tests/test_kaizen_fake_browser.py -m kaizen_browser -q`
 from `backend`. Install with `python -m playwright install chromium`.
-A missing browser may skip locally; `PG_REQUIRE_BROWSER=1` makes it fail and is
-set by CI and `verify_release.sh`. A present browser that cannot start always
-fails. The lane also runs in `verify_changed.sh` and the full offline suite.
+A missing browser or a Chromium launch refusal may skip locally when
+`PG_REQUIRE_BROWSER` is unset; each affected browser test is reported as skipped.
+`PG_REQUIRE_BROWSER=1` makes launch failures fail and is set by CI and
+`verify_release.sh`. Filing failures after launch still fail in either mode.
+The lane also runs in `verify_changed.sh` and the full offline suite.
+
+The per-form bot matrix covers all 74 `FORM_FIELD_MAP` entries: real text capture,
+form choice and draft-review handlers, then the real approval/router/filer against
+the generated fake pages. Only model and profile boundaries are stubbed. Separate
+review tests run without Chromium; Save/persisted-field tests need Chromium.
+Case IDs name the form and its management, leadership, teaching, reflection or
+clinical group. There are currently no mapped file-upload fields; the utility
+`FILE_UPLOAD` forms have no deterministic field map, so no upload proof is claimed.
 
 ## On-demand operator Kaizen filing check
 
@@ -54,8 +64,16 @@ KAIZEN_LIVE_CHECK_APPROVED=operator-own-account \
   "$HOME/.local/share/portfolio-guru/venv/bin/python3" scripts/kaizen_live_check.py
 ```
 
-Add `--forms CBD MINI_CEX` to select a subset. Defaults are CBD, DOPS_2021,
-REFLECT_LOG and MINI_CEX (the 2021 Reflection form is not on the operator account; Kaizen redirects it and the bot reports that cleanly). Reflection links capabilities as tags, and a saved draft shows only how many tags it holds, so that row is reported as `count-only`, never `landed`. Approval must already be in the foreground
+Add `--forms CBD MINI_CEX` to select forms, or `--all-mapped` to select every
+deterministic form visible in a bot profile/category, including its catalogue
+2021 variants (currently 71 codes). Defaults remain CBD, DOPS_2021, REFLECT_LOG
+and MINI_CEX. Hidden, unmapped and utility forms are refused before credential
+retrieval. A form that Kaizen redirects away from on this operator account is
+reported as `unavailable`, not `failed`; it leaves the overall check incomplete
+(exit 2), even if every available form passed. No draft is written for that form.
+Reflection links capabilities as tags, and a saved draft shows only how many
+tags it holds, so that row is reported as `count-only`, never `landed`.
+Approval must already be in the foreground
 environment before dotenv is loaded. Staging/offline flags are checked again
 after dotenv. A missing stored password connection refuses the run; this lane
 does not borrow shared Chrome's login or provide a password-free login flow.
@@ -79,11 +97,15 @@ POSTs (`/token`, `/elastic/<index>`, `/<collection>/changes`), which real Kaizen
 needs to render a draft (found on the first real run, 8 Oct 2026). Each field reports
 landed, empty, mismatch or not-mapped, with the filer's skipped fields and
 `safe_skip` reasons. Dates compare as UK dates, dropdowns by value/selected
-label, and narrative text includes the normal AI declaration. Curriculum proof
+label, multi-select widgets by their exact selected option labels, and narrative
+text includes the normal AI declaration. Payloads use schema options and UK dates,
+including the distinct QIAT stage dropdown. Current mapped evidence forms have no
+file-upload fields; reports mark uploads `not-applicable`, without creating or
+uploading a synthetic file. Curriculum proof
 requires the exact checked capability (tag-style elements are ignored, since an
-unselected suggestion looks the same as a saved tag); a tag
-count alone cannot pass. A tree/tag identity hidden by Kaizen's read-only view
-stays a reported gap, rather than being inferred or opened through a write flow.
+unselected suggestion looks the same as a saved tag). A saved tag count is
+reported as `count-only` and can complete the check, but never proves tag identity.
+Missing or mismatched counts remain reported gaps; read-back never opens a picker.
 Raw DOM values, decrypted credentials, cookies and provider errors are omitted.
 
 JSON and Markdown go under gitignored

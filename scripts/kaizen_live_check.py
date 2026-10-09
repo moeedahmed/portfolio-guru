@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-from kaizen_live_check import FAILED, REFUSED, GuardRefusal, parser, require_approval, run_check, write_report
+from kaizen_live_check import FAILED, REFUSED, GuardRefusal, parser, require_approval, mapped_forms, run_check, write_report
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
         require_approval()  # Staging/offline settings in dotenv also fail closed.
         os.environ["PYTHON_DOTENV_DISABLED"] = "1"
         directory = ROOT / ".artifacts" / "kaizen-live-check" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-        report, code = asyncio.run(run_check(args.forms))
+        report, code = asyncio.run(run_check(mapped_forms() if args.all_mapped else args.forms))
         write_report(report, directory)
         print(f"Kaizen check {report['status']}. Reports: {directory}")
         return code

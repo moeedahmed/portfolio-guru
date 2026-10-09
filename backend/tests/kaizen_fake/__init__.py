@@ -6,9 +6,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from kaizen_form_filer import (
     COMMON_HEADER_FIELD_MAP, FORM_FIELD_MAP, FORM_UUIDS, FORM_SCHEMAS,
-    KAIZEN_URL_PATTERNS, STAGE_SELECT_VALUES, QIAT_STAGE_VALUES, filing_form_base,
+    KAIZEN_URL_PATTERNS, STAGE_SELECT_VALUES, QIAT_STAGE_VALUES,
+    CURRICULUM_SCHEMA_ALIASES,
 )
 from esle_domains import ESLE_DOMAIN_OPTIONS
+from extractor import schema_form_type
 
 USERNAME = "synthetic-doctor@example.invalid"
 PASSWORD = "dummy-fake-password"
@@ -17,7 +19,8 @@ HOSTS = {"eportfolio.rcem.ac.uk", "auth.kaizenep.com", "kaizenep.com"}
 
 def controls(form_type):
     """One control per DOM id; aliases deliberately share that control."""
-    schema = FORM_SCHEMAS.get(form_type, FORM_SCHEMAS.get(filing_form_base(form_type), {}))
+    schema_key = CURRICULUM_SCHEMA_ALIASES.get(form_type, schema_form_type(form_type))
+    schema = FORM_SCHEMAS.get(schema_key, {})
     specs = {f["key"]: f for f in schema.get("fields", [])}
     result = {}
     for key, target in {**COMMON_HEADER_FIELD_MAP, **FORM_FIELD_MAP.get(form_type, {})}.items():
@@ -82,6 +85,8 @@ def form_page(form_type, values=None, *, curriculum=False):
 <form method="post" action="/save/{FORM_UUIDS[form_type]}">
 {''.join(elements)}
 <button type="submit" formaction="/send">Submit / Send to assessor</button>
+<button type="submit" formaction="/sign">Sign</button>
+<button type="submit" formaction="/delete">Delete draft</button>
 <button type="submit">Save as draft</button>
 </form></body></html>'''
 
@@ -90,6 +95,7 @@ class FakeKaizen:
     def __init__(self):
         self.login_attempts = 0
         self.submit_clicks = 0
+        self.forbidden_clicks = []
         self.drafts = []
         self.requests = []
         self.include_curriculum = False
@@ -153,8 +159,9 @@ class FakeKaizen:
                     return self.respond('<p id="error-message">Authentication failed: invalid credentials.</p>')
                 if host != "kaizenep.com" or "fake_session=synthetic" not in self.headers.get("Cookie", ""):
                     return self.respond(status=403)
-                if self.path == "/send":
+                if self.path in {"/send", "/sign", "/delete"}:
                     owner.submit_clicks += 1
+                    owner.forbidden_clicks.append(self.path)
                     return self.respond("Sent to assessor")
                 if self.path.startswith("/save/"):
                     uuid = self.path.rsplit("/", 1)[1]

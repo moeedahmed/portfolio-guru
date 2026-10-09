@@ -36,17 +36,32 @@ def require_approval():
         raise GuardRefusal("Offline Kaizen mode is refused.")
 
 
+def mapped_forms():
+    """Mapped evidence forms visible in at least one profile/curriculum."""
+    import bot
+    import kaizen_form_filer as filer
+    visible = {form for groups in (bot.TRAINING_LEVEL_FORMS, bot.FORM_CATEGORIES)
+               for forms in groups.values() for form in forms}
+    visible.update(bot._filter_forms_by_curriculum(sorted(visible), "2021"))
+    return tuple(sorted(visible.intersection(filer.FORM_FIELD_MAP)))
+
+
 def parser():
     p = argparse.ArgumentParser(description="Save and read back synthetic drafts on the operator's own Kaizen account only.")
-    p.add_argument("--forms", nargs="+", choices=DEFAULT_FORMS, default=DEFAULT_FORMS)
+    group = p.add_mutually_exclusive_group()
+    # Catalogue imports belong after approval; bot imports credential modules.
+    group.add_argument("--forms", nargs="+", help="Mapped, catalogue-visible form codes (validated after approval)")
+    group.add_argument("--all-mapped", action="store_true", help="Check every mapped, catalogue-visible form")
+    p.set_defaults(forms=DEFAULT_FORMS)
     return p
 
 
 def synthetic_fields(form_type):
     """Schema options and explicit fake prose; no case extraction or AI call."""
     import kaizen_form_filer as filer
+    from extractor import schema_form_type
     mapping = {**filer.COMMON_HEADER_FIELD_MAP, **filer.FORM_FIELD_MAP[form_type]}
-    schema = filer.FORM_SCHEMAS.get(form_type, filer.FORM_SCHEMAS.get(filer.filing_form_base(form_type), {}))
+    schema = filer.FORM_SCHEMAS.get(schema_form_type(form_type), {})
     specs = {s["key"]: s for s in schema.get("fields", [])}
     fields, by_target = {}, {}
     for key, target in mapping.items():
@@ -54,17 +69,27 @@ def synthetic_fields(form_type):
         if dom_id in by_target:
             fields[key] = by_target[dom_id]
             continue
-        options = specs.get(key, {}).get("options", [])
+        spec = specs.get(key, {})
+        options = spec.get("options", [])
         if "date" in key or dom_id in {"startDate", "endDate"}:
-            value = date.today().isoformat()
+            today = date.today()
+            value = f"{today.day}/{today.month}/{today.year}"
         elif key == "stage_of_training":
-            value = "Higher"
+            value = "ST5" if dom_id == "415a72f2-7cf3-420a-bee4-9a7aed746612" else "Higher"
         elif key == "event_description":
             value = MARKER
         elif key == "placement":
             value = "Anaesthetics" if "Anaesthetics" in options else "Emergency Department"
+        elif spec.get("type") == "multi_select":
+            value = [options[0]]
         elif options:
-            value = options[0]
+            value = next((option for option in options if option != "- n/a -"), options[0])
+        elif spec.get("type") == "number":
+            value = "3"
+        elif key == "session_length":
+            value = "30 minutes"
+        elif key == "trainee_post":
+            value = "ST5 Higher EM, Synthetic Hospital"
         else:
             value = f"{MARKER}. Synthetic {key}; no patient or clinical event."
         fields[key] = by_target[dom_id] = value
@@ -170,6 +195,8 @@ def classify(state, expected):
     if value in (None, "", False, []):
         return "empty", "value_not_persisted"
     # Dropdown values can be UUIDs; compare the selected label as well.
+    if isinstance(value, list) and isinstance(expected, list):
+        return ("landed", "exact_value_match") if sorted(value) == sorted(expected) else ("mismatch", "saved_value_differs")
     if str(value).strip().replace("\r\n", "\n") == str(expected).strip().replace("\r\n", "\n") or state.get("label") == expected:
         return "landed", "exact_value_match"
     return "mismatch", "saved_value_differs"
@@ -184,7 +211,11 @@ async def read_back(form_type, fields, url, username):
     if not state:
         raise GuardRefusal("No isolated authenticated session is available for read-back.")
     mapping = {**filer.COMMON_HEADER_FIELD_MAP, **filer.FORM_FIELD_MAP[form_type]}
-    expected, _ = apply_ai_declaration(form_type, fields, mapping)
+    expected = filer.normalise_fields_for_deterministic_filing(form_type, fields)
+    normaliser = filer.FORM_FIELD_NORMALISERS.get(form_type) or filer.FORM_FIELD_NORMALISERS.get(filer.filing_form_base(form_type))
+    if normaliser:
+        expected = normaliser(expected)
+    expected, _ = apply_ai_declaration(form_type, expected, mapping)
     async with filer.async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         try:
@@ -227,11 +258,15 @@ async def read_back(form_type, fields, url, username):
                 dom_id = filer._field_dom_id(target)
                 wanted = expected[key]
                 if "date" in key or dom_id in {"startDate", "endDate"}:
-                    d = date.fromisoformat(wanted)
-                    wanted = f"{d.day}/{d.month}/{d.year}"
+                    wanted = filer._to_uk_date(wanted)
                 elif key == "stage_of_training":
-                    wanted = filer.STAGE_SELECT_VALUES[wanted]
-                observed = await page.evaluate(READ_FIELD_JS, dom_id)
+                    stages = filer.QIAT_STAGE_VALUES if dom_id == "415a72f2-7cf3-420a-bee4-9a7aed746612" else filer.STAGE_SELECT_VALUES
+                    wanted = stages[wanted]
+                if key in filer._MULTISELECT_WIDGET_FIELDS:
+                    widget = await filer._read_widget_state(page, dom_id)
+                    observed = {"missing": widget.get("missing", not widget), "value": filer._widget_selected_values(widget)}
+                else:
+                    observed = await page.evaluate(READ_FIELD_JS, dom_id)
                 if observed.get("label") and filer._is_dops_form(form_type):
                     # Kaizen's own label for the same choice, e.g. "Emergency
                     # Medicine" for Emergency Department; never a different one.
@@ -278,8 +313,6 @@ async def run_check(forms=DEFAULT_FORMS):
     """No selectable account or credentials. Entry point for a separate process."""
     require_approval()
     forms = tuple(dict.fromkeys(forms))
-    if not forms or any(form not in DEFAULT_FORMS for form in forms):
-        raise GuardRefusal("Choose a subset of the four supported check forms.")
     # Suppress third-party exception logs/prints before any credential retrieval.
     previous_logging = logging.root.manager.disable
     debug_env = {key: os.environ.get(key) for key in ("DEBUG", "PWDEBUG")}
@@ -288,6 +321,8 @@ async def run_check(forms=DEFAULT_FORMS):
     logging.disable(logging.CRITICAL)
     try:
         with open(os.devnull, "w") as silence, redirect_stdout(silence), redirect_stderr(silence):
+            if not forms or any(form not in mapped_forms() for form in forms):
+                raise GuardRefusal("Choose mapped, catalogue-visible evidence forms only.")
             import credentials
             import kaizen_form_filer as filer
             import filing_result_logger
@@ -309,12 +344,16 @@ async def run_check(forms=DEFAULT_FORMS):
                         mapping = {**filer.COMMON_HEADER_FIELD_MAP, **filer.FORM_FIELD_MAP[form]}
                         unread = [{"field": key, "dom_id": filer._field_dom_id(target), "classification": "empty", "reason": "not_read_back"} for key, target in mapping.items()]
                         unread.append({"field": "kc:SLO6 KC1", "classification": "empty", "reason": "not_read_back"})
-                        entry = {"form": form, "status": "failed", "draft_url": None, "fields": unread, "reason": "filing_or_readback_failed"}
+                        entry = {"form": form, "status": "failed", "draft_url": None, "fields": unread, "reason": "filing_or_readback_failed",
+                                 "uploads": {"classification": "not-applicable", "reason": "no_mapped_file_upload_fields"}}
                         try:
                             fields = synthetic_fields(form)
                             result = await filer.file_to_kaizen(form, fields, username, password, curriculum_links=["SLO6"], submit=False, telegram_user_id=OPERATOR_USER_ID)
                             # A saved URL is evidence of a save; draft_url alone can be an unconfirmed autosave.
                             candidate = result.get("saved_url") or result.get("draft_url")
+                            if (result.get("status") == "failed" and not candidate
+                                    and "is not available on your Kaizen profile or curriculum right now; Kaizen redirected to " in str(result.get("error", ""))):
+                                entry.update(status="unavailable", reason="form_not_available_on_operator_profile")
                             if candidate:
                                 entry["draft_url"] = draft_url(candidate)
                             if result.get("saved_url") and result.get("status") in {"success", "partial"}:
@@ -343,8 +382,9 @@ async def run_check(forms=DEFAULT_FORMS):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-    code = FAILED if any(e["status"] == "failed" for e in results) else PARTIAL if any(e["status"] == "partial" for e in results) else 0
-    report = {"status": "failed" if code == FAILED else "partial" if code else "passed", "browser_isolation": "separate-headless-browser-and-temporary-session-cache", "forms": results}
+    code = FAILED if any(e["status"] == "failed" for e in results) else PARTIAL if any(e["status"] in {"partial", "unavailable"} for e in results) else 0
+    status = "unavailable" if all(e["status"] == "unavailable" for e in results) else "failed" if code == FAILED else "partial" if code else "passed"
+    report = {"status": status, "browser_isolation": "separate-headless-browser-and-temporary-session-cache", "forms": results}
     return report, code
 
 
@@ -356,5 +396,6 @@ def write_report(report, directory):
     for form in report["forms"]:
         lines += [f"## {form['form']}", "", f"{form['status']}: landed {form['landed']}/{form['total']}", f"Draft: {form['draft_url'] or 'no confirmed draft URL'}", f"Reason: {form['reason']}", ""]
         lines += [f"- {r['field']}: {r['classification']} ({r['reason']})" for r in form["fields"] if r["classification"] != "landed"]
+        lines.append(f"- uploads: {form['uploads']['classification']} ({form['uploads']['reason']})")
         lines.append("")
     (directory / "summary.md").write_text("\n".join(lines))
