@@ -52,6 +52,132 @@ def wider_journey_harness(monkeypatch):
 KC_PREVIEW = "\n• SLO3 — Resuscitation\n  ↳ KC3: assessment\n  ↳ KC5: leadership\n• SLO7 — Complex situations\n  ↳ KC1: communication"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fault', [None, 'stale', 'stale-history', 'duplicate', 'dead-end', 'missing-back'])
+@pytest.mark.parametrize('draft_in_place', [False, True])
+async def test_form_switching_screen_checks_and_cleanup(
+    wider_journey_harness, monkeypatch, fault, draft_in_place,
+):
+    from copy import copy
+    import bot
+    from models import FormTypeRecommendation
+    journeys, client, replies, clicks, artifacts, message = wider_journey_harness
+    monkeypatch.setattr(bot, '_get_allowed_forms', lambda _: ['CBD', 'MINI_CEX', 'DOPS', 'LAT',
+                                                              'REFLECT_LOG', 'TEACH', 'QIAT'])
+    monkeypatch.setattr(bot, '_effective_curriculum', lambda _: '2025')
+    history, next_id = [], 10
+
+    def screen(text, markup=None, *, replace=False):
+        nonlocal next_id
+        if replace:
+            next_id += 1
+        reply = message(text, *((b.text, b.callback_data) for row in
+                                (markup.inline_keyboard if markup else []) for b in row))
+        reply.id = next_id
+        return reply
+
+    def recommendation():
+        return screen('Best fit: Case-Based Discussion. Pick a form.',
+                      bot._build_form_choice_keyboard([
+                          FormTypeRecommendation(form_type='CBD', rationale='Discussion', uuid='cbd')]))
+
+    def capture():
+        replies.extend([screen('Case captured', bot._gathering_done_keyboard(), replace=True), recommendation()])
+
+    def categories():
+        return screen('Browse supported forms (2025 curriculum):', bot._build_category_picker_keyboard(123))
+
+    def category(slug):
+        return screen(f'{bot._SLUG_TO_CAT[slug]} — pick a form:', bot._build_category_forms_keyboard(123, slug))
+
+    def draft(code):
+        return screen(f'📋 {bot._form_display_name(code)} — Draft\n' + _ready_text(),
+                      bot._build_approval_keyboard(), replace=not draft_in_place)
+
+    def cancelled():
+        return screen("↩️ Cancelled. Send an anonymised case when you're ready.", replace=True)
+
+    capture()
+    replies.append(categories())
+    offered = [b.callback_data.split('cat_')[1] for row in bot._build_category_picker_keyboard(123).inline_keyboard
+               for b in row if 'cat_' in b.callback_data]
+    for slug in offered:
+        replies.extend([category(slug), categories()])
+    replies.extend([recommendation(), categories(), category('CLINICAL'), draft('MINI_CEX'), cancelled()])
+    capture()
+    replies.extend([categories(), category('CLINICAL'), draft('CBD'), cancelled()])
+    capture()
+    replies.extend([cancelled(), screen('Cancelled cleanup', replace=True)])
+    fake_wait = journeys.wait_for_matching_message
+
+    async def wait(*args, **kwargs):
+        reply = await fake_wait(*args, **kwargs)
+        old = [m for m in history if m.id != reply.id]
+        if '— Draft' in reply.raw_text and not draft_in_place:
+            old = old[1:]  # _show_draft_review deletes its progress/menu bubble
+        for m in old:
+            m.buttons = []  # real replacement retires the previous keyboard
+        history[:] = [reply, *old]
+        if reply.raw_text.startswith('Browse supported') and fault:
+            if fault == 'stale':
+                reply.buttons[0].append(message('', ('Restart', 'CANCEL|form')).buttons[0][0])
+            elif fault == 'stale-history':
+                stale = message('Previous recommendation', ('Restart', 'CANCEL|form'))
+                stale.id = reply.id - 1
+                history.append(stale)
+            elif fault == 'duplicate':
+                duplicate = copy(reply)
+                duplicate.id = reply.id + 100
+                history.append(duplicate)
+            elif fault == 'dead-end':
+                reply.buttons = []
+            else:
+                reply.buttons[0] = [b for b in reply.buttons[0] if journeys._payload(b) != 'FORM|back']
+            replies.clear()
+            replies.append(screen('Cancelled cleanup', replace=True))
+        client.get_messages.return_value = list(history)
+        return reply
+
+    monkeypatch.setattr(journeys, 'wait_for_matching_message', wait)
+    if fault:
+        reason = {'stale': 'Stale', 'stale-history': 'Stale', 'duplicate': 'Duplicate',
+                  'dead-end': 'Dead end', 'missing-back': 'Dead end'}[fault]
+        with pytest.raises(AssertionError, match=reason):
+            await journeys._form_switching_to_cancel(client)
+    else:
+        await journeys._form_switching_to_cancel(client)
+        assert clicks.count('CANCEL|draft') == 2
+        assert clicks[-1] == 'CANCEL|form'
+        assert {'FORM|CBD', 'FORM|MINI_CEX', 'FORM|back'} <= set(clicks)
+        assert {f'FORM|cat_{slug}' for slug in offered} <= set(clicks)
+        transitions = [e.step for e in artifacts['portfolio-guru-form-switching-transcript.json']
+                       if e.step.startswith('screen:')]
+        assert 'screen:edited-in-place' in transitions
+        assert ('screen:edited-in-place' if draft_in_place else 'screen:replaced') in transitions
+        assert not replies
+    sends = [call.args[1] for call in client.send_message.call_args_list]
+    assert sends.count('/cancel') == 1 and sends[-1] == '/cancel'
+    if not fault:
+        assert sends.count(sends[0]) == 3  # same single invented case throughout
+    assert artifacts['portfolio-guru-form-switching-transcript.json'][-1].received == 'Cancelled cleanup'
+    assert not any(value.startswith(('APPROVE|', 'ACTION|setup', 'ACTION|reset', 'REMIND|')) for value in clicks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target,allowed', [
+    ('portfolio_guru_bot', {'portfolio_guru_bot'}),
+    ('portfolio_guru_test_bot', {'portfolio_guru_test_bot', 'portfolio_guru_bot'}),
+])
+async def test_form_switching_refuses_non_test_envelope(wider_journey_harness, monkeypatch, target, allowed):
+    journeys, client, _, clicks, _, _ = wider_journey_harness
+    monkeypatch.setattr(journeys, 'BOT_USERNAME', target)
+    monkeypatch.setattr(journeys, 'allowed_bot_usernames', lambda: allowed)
+    with pytest.raises(AssertionError, match='test-bot-only'):
+        await journeys._form_switching_to_cancel(client)
+    client.send_message.assert_not_awaited()
+    assert not clicks
+
+
 def _ready_text(date='17 Mar 2026'):
     return f'Here is your draft.\n📅 Date: {date}\nReply to change any field.' + KC_PREVIEW
 
@@ -451,6 +577,7 @@ def _fake_backend(tmp_path, env_lines):
     (backend / "venv" / "bin" / "python3").symlink_to(sys.executable)
     (backend / ".env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     return backend
+
 
 
 def _run_bot_qa(tmp_path, env_lines, **env):

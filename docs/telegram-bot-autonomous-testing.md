@@ -223,8 +223,24 @@ Curriculum-specific 2021 variants are accepted where registered. Known supervisi
 or reflection gaps get one generic synthetic reply; any unknown gap fails.
 Each journey observes ready Save/Cancel controls, never clicks Save, and sends
 one `/cancel` in `finally`, retaining a transcript on success or failure.
-`--wider-journeys` includes all ten, so `stage.sh smoke --wider` runs fifteen
+`--wider-journeys` includes all ten plus form switching, so `stage.sh smoke --wider` runs sixteen
 journeys in total. Missing, skipped or failed journeys fail completeness.
+
+`--form-switching` selects the form-menu journey alone on the same singleton
+test-bot allowlist. One short synthetic case goes through Choose form →
+recommendation → Forms → every offered category and Back → recommendation →
+a different form's draft. The draft has only Save/Cancel, so switching uses
+the real Cancel control, resends the same invented case, and selects another
+form. It then cancels that draft, recaptures the case and presses the
+recommendation's Restart. Every tap checks screen text and exact labels/payloads,
+records edited-in-place versus replaced message IDs, checks history for duplicate
+screens and retired keyboards, and requires a forward/back/Cancel route (the
+cancelled screen explicitly invites a new case). Draft replacement and its
+in-place fallback are accepted; category/Back navigation must edit in place.
+Save, Submit, login, Reset and On/Off are never pressed. Exactly one `/cancel`
+in `finally` retains the transcript even on failure. Offline fake-client checks
+cover both draft display paths, stale controls, duplicate screens and dead ends.
+This mode remains opt-in and does not change existing default/focused proof.
 
 ## Whole-bot completion
 

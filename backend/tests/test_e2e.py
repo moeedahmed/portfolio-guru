@@ -115,6 +115,15 @@ FORM_VARIETY_PAYLOADS = frozenset(
     | {"FORM|show_all"}
 )
 
+# Reviewed in handle_form_choice/handle_callback: menu edits, draft Cancel,
+# recommendation Restart. No saving, setup, reset or preference changes.
+FORM_SWITCHING_PAYLOADS = frozenset({
+    "FORM|show_all", "FORM|back", "FORM|cat_CLINICAL", "FORM|cat_REFLECTIVE",
+    "FORM|cat_TEACHING", "FORM|cat_PROCEDURAL", "FORM|cat_QUALITY", "FORM|cat_MANAGEMENT",
+    "FORM|CBD", "FORM|CBD_2021", "FORM|MINI_CEX", "FORM|MINI_CEX_2021",
+    "CANCEL|draft", "CANCEL|form",
+})
+
 
 def _synthetic_photo(path):
     from PIL import Image, ImageDraw, ImageFont
@@ -205,7 +214,7 @@ async def _wider_wait(client, transcript, action, *, before=None, min_id=None, *
 
 async def _wider_click(client, transcript, message, payload, **expect):
     # Explicit safe navigation/read controls only. Save is observed, never clicked.
-    assert payload in FORM_VARIETY_PAYLOADS | {
+    assert payload in FORM_VARIETY_PAYLOADS | FORM_SWITCHING_PAYLOADS | {
         "DOCUSE|info", "GATHER|done", "FORM|CBD", "FORM|CBD_2021", "FORM|best",
         "ACTION|cancel", "CANCEL|draft", "ACTION|portfolio_defaults",
         "REMIND|menu", "ACTION|voice", "ACTION|settings", "VOICE|back_to_settings",
@@ -333,6 +342,201 @@ async def test_e2e_form_variety_pdf_ready_draft_to_cancel_journey(telethon_clien
     document = _synthetic_pdf(tmp_path / "synthetic-teaching.pdf", FORM_VARIETY_PDF_CASE)
     await _form_variety_ready_draft_to_cancel(
         telethon_client, "TEACH", FORM_VARIETY_PDF_CASE, prefer_recommendation=False, document=document)
+
+
+def _screen_controls(message):
+    return [(b.text, _payload(b)) for row in (message.buttons or []) for b in row]
+
+
+def _assert_form_switching_screen(reply, history, previous, state, *, snapshot=None, form=None):
+    """Screen contract from bot.py, checking payloads as well as visible labels.
+
+    Shared navigation (e.g. Forms) may legitimately recur; the complete new
+    keyboard must match its screen, and every older keyboard must be retired.
+    """
+    import bot
+
+    text = (reply.raw_text or "").strip()
+    controls = _screen_controls(reply)
+    payloads = [p for _, p in controls]
+    assert text, "Empty form-switching screen"
+    assert len(payloads) == len(set(payloads)), "Duplicate screen controls"
+    if state == "idle":
+        assert not controls, "Stale buttons after cancellation"
+        assert "cancelled" in text.lower() and "send an anonymised case" in text.lower(), "Dead end after cancellation"
+    else:
+        assert controls, f"Dead end on {state}"
+        if state == "capture":
+            expected = [("📋 Choose form", "GATHER|done"), ("❌ Discard case", "ACTION|cancel")]
+            assert "captured" in text.lower(), "Wrong capture screen"
+        elif state == "recommendation":
+            assert re.search(r"best fit|which form|form.*(?:entry|draft|create)|pick a form", text, re.I), "Wrong recommendation text"
+            assert {"FORM|show_all", "CANCEL|form"} <= set(payloads), "Dead end on recommendation"
+            assert all(p in {"FORM|show_all", "CANCEL|form", "FORM|best", "FORM|disabled"}
+                       or (p.startswith("FORM|") and p[5:] in bot.FORM_UUIDS) for p in payloads), "Stale recommendation button"
+            assert any(p == "FORM|best" or p[5:] in bot.FORM_UUIDS for p in payloads), "No suggested form"
+            navigation = {"FORM|show_all": "📋 Forms", "CANCEL|form": "🔄 Restart"}
+            for label, payload in controls:
+                if payload in navigation:
+                    assert label == navigation[payload], "Stale recommendation navigation label"
+                    continue
+                codes = bot.FORM_UUIDS if payload in {"FORM|best", "FORM|disabled"} else [payload[5:]]
+                valid_labels = set()
+                for code in codes:
+                    base = code.removesuffix("_2021")
+                    name = bot.FORM_BUTTON_LABELS.get(code) or bot.FORM_BUTTON_LABELS.get(base) or bot._recommendation_form_display_name(base)[:24]
+                    emoji = bot.FORM_EMOJIS.get(code) or bot.FORM_EMOJIS.get(base, "📋")
+                    if payload != "FORM|best" or bot._form_display_name(code).lower() in text.splitlines()[0].lower():
+                        valid_labels.add(f"{emoji} {name}" + (" (soon)" if payload == "FORM|disabled" else ""))
+                assert label in valid_labels, "Recommendation label does not match form"
+            expected = controls if snapshot is None else snapshot[1]
+            if snapshot is not None:
+                assert text == snapshot[0], "Recommendation text was not restored"
+        elif state == "categories":
+            assert re.fullmatch(r"Browse supported forms \(202[15] curriculum\):", text), "Wrong category picker text"
+            assert "FORM|back" in payloads, "Dead end: category Back missing"
+            labels = {f"FORM|cat_{slug}": label for label, slug in bot._CAT_SLUGS.items()}
+            assert all(p in labels or p == "FORM|back" for p in payloads), "Stale category button"
+            assert any(p in labels for p in payloads), "Dead end: no offered categories"
+            expected = [(labels.get(p, "🔙 Back"), p) for p in payloads] if snapshot is None else snapshot[1]
+            if snapshot is not None:
+                assert text == snapshot[0], "Category picker text changed"
+        elif state.startswith("category:"):
+            slug = state.split(":", 1)[1]
+            label = bot._SLUG_TO_CAT[slug]
+            assert text == f"{label} — pick a form:", "Wrong category text"
+            assert "FORM|show_all" in payloads, "Dead end: category Back missing"
+            expected = []
+            for _, payload in controls:
+                if payload == "FORM|show_all":
+                    expected.append(("🔙 Back", payload))
+                    continue
+                code = payload.removeprefix("FORM|")
+                base = code.removesuffix("_2021")
+                assert payload.startswith("FORM|") and base in bot.FORM_CATEGORIES[label] and code in bot.FORM_UUIDS, "Stale form button in category"
+                name = bot.FORM_BUTTON_LABELS.get(code) or bot.FORM_BUTTON_LABELS.get(base) or bot._form_display_name(base)[:24]
+                emoji = bot.FORM_EMOJIS.get(code) or bot.FORM_EMOJIS.get(base, "📋")
+                expected.append((f"{emoji} {name}", payload))
+            assert len(expected) > 1, "Dead end: empty offered category"
+        elif state == "draft":
+            assert form and bot._form_display_name(form).lower() in text.lower() and "draft" in text.lower(), "Wrong form draft"
+            classification = classify_post_click_draft_state(reply)
+            save_label = "💾 Save to Kaizen" if classification == "ready" else "💾 Save draft to Kaizen"
+            expected = [(save_label, "APPROVE|draft"), ("❌ Cancel", "CANCEL|draft")]
+            assert "CANCEL|draft" in payloads, "Dead end: draft Cancel missing"
+        else:
+            raise AssertionError(f"Unknown screen {state}")
+        assert controls == expected, f"Stale or incorrect buttons on {state}: {controls!r}"
+
+    inbound = [m for m in history if not getattr(m, "out", False)]
+    observed = next((m for m in inbound if m.id == reply.id), None)
+    assert observed is not None and (observed.raw_text, _screen_controls(observed)) == (reply.raw_text, controls), "Screen changed during observation"
+    # Identical passive cancellation receipts from earlier recaptures are
+    # legitimate. Menus/drafts must have only one copy, even if disarmed.
+    if state != "idle":
+        copies = [m for m in inbound if (m.raw_text or "").strip() == text]
+        assert len(copies) == 1, f"Duplicate screen on {state}"
+    assert all(not _screen_controls(m) for m in inbound if m.id != reply.id), "Stale buttons on previous screen"
+    if previous is not None:
+        same_id = reply.id == previous.id
+        if state == "categories" or state.startswith("category:") or (state == "recommendation" and snapshot is not None):
+            assert same_id, f"Expected menu edited in place on {state}"
+        elif state == "idle":
+            assert not same_id and reply.id > previous.id, "Expected replacement cancellation receipt"
+        else:
+            assert same_id or reply.id > previous.id, "Replacement went backwards"
+        return "edited-in-place" if same_id else "replaced"
+    return "captured"
+
+
+async def _form_switching_to_cancel(client):
+    assert_live_telegram_guardrails(BOT_USERNAME)
+    assert BOT_USERNAME == "portfolio_guru_test_bot" and allowed_bot_usernames() == {BOT_USERNAME}, "Form switching is test-bot-only"
+    transcript, floor = [], 0
+    # Short, invented evidence reusable for CBD and Mini-CEX, including the
+    # directly observed encounter needed by Mini-CEX. No real patient details.
+    case = ("Synthetic training case. On 17 March 2026 in ED my senior directly observed my "
+            "history, examination and management of a simulated adult with chest pain. "
+            "I discussed ECG, troponins and diagnostic uncertainty. Supervision: direct. "
+            "Reflection: early escalation helped; I will brief the team earlier next time.")
+
+    async def check(reply, previous, state, **spec):
+        history = await client.get_messages(BOT_USERNAME, limit=50)
+        assert len(history) < 50 or history[-1].id <= floor, "Screen history ceiling: stale-button proof incomplete"
+        transition = "captured" if previous is None else (
+            "edited-in-place" if reply.id == previous.id else "replaced")
+        transcript.append(TelegramExchange(step=f"screen:{transition}", action=state,
+                                           received=reply.raw_text, buttons=button_texts(reply),
+                                           message_id=reply.id,
+                                           controls=[{"text": label, "payload": payload} for label, payload in _screen_controls(reply)]))
+        _assert_form_switching_screen(reply, [m for m in history if m.id >= floor], previous, state, **spec)
+        return reply
+
+    async def tap(reply, payload, state, **spec):
+        import bot
+        assert payload in FORM_SWITCHING_PAYLOADS | {"GATHER|done"}, "Unreviewed switching control"
+        text_tokens = {
+            "recommendation": ("Best fit", "Which form", "for this entry"),
+            "categories": ("Browse supported forms",),
+            "draft": ("draft",), "idle": ("cancelled",),
+        }
+        if state.startswith("category:"):
+            text_tokens[state] = (f'{bot._SLUG_TO_CAT[state.split(":", 1)[1]]} — pick a form:',)
+        response = await _wider_click(client, transcript, reply, payload,
+                                      expect_text_any=text_tokens[state])
+        return await check(response, reply, state, **spec)
+
+    async def capture():
+        nonlocal floor
+        before = await _wider_before_send(client)
+        sent = await client.send_message(BOT_USERNAME, case)
+        reply = await _wider_wait(client, transcript, "send:synthetic-case", before=before,
+                                  min_id=sent.id, expect_button_any=("Choose form",))
+        # Include an older bubble edited during capture, as well as every
+        # subsequent recapture. Messages from before this journey are excluded.
+        floor = min(floor or sent.id, reply.id)
+        await check(reply, None, "capture")
+        return await tap(reply, "GATHER|done", "recommendation")
+
+    async def select(reply, payload):
+        picker = await tap(reply, "FORM|show_all", "categories")
+        forms = await tap(picker, "FORM|cat_CLINICAL", "category:CLINICAL")
+        return await tap(forms, payload, "draft", form=payload[5:])
+
+    try:
+        recommendation = await capture()
+        saved = (recommendation.raw_text.strip(), _screen_controls(recommendation))
+        suggested = next(label for label, payload in saved[1] if payload == "FORM|best")
+        picker = await tap(recommendation, "FORM|show_all", "categories")
+        picker_snapshot = (picker.raw_text.strip(), _screen_controls(picker))
+        offered = [p for _, p in picker_snapshot[1] if p.startswith("FORM|cat_")]
+        candidates = []
+        for payload in offered:
+            forms = await tap(picker, payload, "category:" + payload.split("cat_", 1)[1])
+            if payload == "FORM|cat_CLINICAL":
+                candidates = [(label, p) for label, p in _screen_controls(forms)
+                              if p in {"FORM|CBD", "FORM|CBD_2021", "FORM|MINI_CEX", "FORM|MINI_CEX_2021"}]
+            picker = await tap(forms, "FORM|show_all", "categories", snapshot=picker_snapshot)
+        recommendation = await tap(picker, "FORM|back", "recommendation", snapshot=saved)
+        first = next((p for label, p in candidates if label != suggested), None)
+        second = next((p for _, p in candidates if p != first), None)
+        assert first and second, "Two distinct supported clinical forms required"
+        draft = await select(recommendation, first)
+        # _build_approval_keyboard has no switch-form/Restart control. The
+        # supported route cancels this draft, then recaptures the same case.
+        await tap(draft, "CANCEL|draft", "idle")
+        recommendation = await capture()
+        draft = await select(recommendation, second)
+        await tap(draft, "CANCEL|draft", "idle")
+        recommendation = await capture()
+        await tap(recommendation, "CANCEL|form", "idle")
+    finally:
+        await _wider_cleanup(client, transcript, "form-switching")
+
+
+@pytest.mark.asyncio
+async def test_e2e_form_switching_to_cancel_journey(telethon_client):
+    await _form_switching_to_cancel(telethon_client)
 
 
 async def _media_ready_draft_to_cancel(client, path, kind):
