@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import fcntl
 import hashlib
 import io
@@ -32,66 +31,60 @@ JOURNEYS.update({'settings': PREFIX + 'test_e2e_settings_read_only_journey',
 def snapshot(root, sha=None):
     """Read source only; never load dotenv, credentials, providers or transport."""
     def source(name):
-        return (name.startswith('backend/') and name.endswith(('.py', '.json', '.yaml', '.yml', '.txt', '.ini'))
-                or name in ('scripts/telegram_bot_qa.sh', 'scripts/telegram_journey_proof.py',
-                            'scripts/stage.sh', 'scripts/run_staging.sh', 'scripts/verify_live_runtime.py', 'start-bot.sh'))
+        path = Path(name)
+        # Only published dotenv templates are source. Private dotenv/state and
+        # credential material must never be opened, even if accidentally tracked.
+        if any(part == '.env' or part.startswith('.env.') for part in path.parts):
+            return path.name in ('.env.example', '.env.template', '.env.sample')
+        if path.suffix.lower() in ('.db', '.sqlite', '.sqlite3', '.pem', '.key', '.p12', '.pfx'):
+            return False
+        # Agent instructions are not bot inputs (CLAUDE.md is a shared symlink).
+        # Otherwise include even unfamiliar extensions, prompt documents and
+        # test media: guessing whether a dependency matters risks stale proof.
+        return name not in ('AGENTS.md', 'CLAUDE.md')
     if sha:
         archive = subprocess.run([os.environ.get('RELEASE_LOOP_GIT', 'git'), '-C', str(root), 'archive', sha], check=True, capture_output=True).stdout
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-            return {item.name: tar.extractfile(item).read() for item in tar.getmembers()
-                    if item.isfile() and source(item.name)}
+            files = {}
+            for item in tar.getmembers():
+                if item.isdir() or not source(item.name):
+                    continue
+                if not item.isfile():
+                    raise ValueError('Journey dependency is not regular source: ' + item.name)
+                files[item.name] = tar.extractfile(item).read()
+            return files
     names = subprocess.run([os.environ.get('RELEASE_LOOP_GIT', 'git'), '-C', str(root), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
                            check=True, capture_output=True).stdout.decode().split('\0')
-    return {name: (root / name).read_bytes() for name in names if source(name) and (root / name).is_file()}
+    files = {}
+    for name in names:
+        if not name or not source(name):
+            continue
+        path = root / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('Journey dependency source missing or not regular: ' + name)
+        files[name] = path.read_bytes()
+    return files
 
 
 def fingerprints(root, sha=None):
     files = snapshot(Path(root), sha)
-    # The shared bot module is deliberately conservative: every local import,
-    # including lazy imports, is watched. A bot.py change invalidates all paths.
+    # The actual staging launch chain is required, not optional. All source and
+    # config is watched for every journey: static import guesses miss shell
+    # sources, dotenv templates, dynamic imports and unfamiliar config files.
     seeds = {'backend/bot.py', 'backend/tests/test_e2e.py', 'backend/tests/conftest.py',
-             'scripts/telegram_bot_qa.sh', 'scripts/telegram_journey_proof.py', 'scripts/verify_live_runtime.py'}
+             'scripts/telegram_bot_qa.sh', 'scripts/telegram_journey_proof.py', 'scripts/verify_live_runtime.py',
+             'start-bot.sh', 'backend/run_local.sh', 'backend/staging_env.sh',
+             'scripts/install_staging.sh', 'scripts/deploy_staging.sh',
+             'scripts/com.portfolioguru.staging-bot.plist', 'backend/.env.example',
+             'backend/model_config.py', 'backend/gemini_client.py',
+             'backend/requirements.txt', 'backend/requirements-dev.txt'}
     if not seeds <= files.keys():
         raise ValueError('Journey dependency source missing')
-    seeds |= {name for name in files if name.startswith('backend/') and '/tests/' not in name
-              and '/_archived/' not in name and not name.endswith('.py')}
-    seeds |= {name for name in ('scripts/stage.sh', 'scripts/run_staging.sh', 'start-bot.sh', 'backend/pytest.ini') if name in files}
-    pending, watched = list(seeds), set()
-    while pending:
-        name = pending.pop()
-        if name in watched:
-            continue
-        watched.add(name)
-        if not name.endswith('.py'):
-            continue
-        tree = ast.parse(files[name], filename=name)
-        package = name.removeprefix('backend/').rsplit('/', 1)[0].replace('/', '.') if '/' in name.removeprefix('backend/') else ''
-        modules = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                modules.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                base = node.module or ''
-                if node.level:
-                    parts = package.split('.')
-                    base = '.'.join(parts[:len(parts) - node.level + 1] + ([base] if base else []))
-                modules.append(base)
-                modules.extend(base + '.' + alias.name for alias in node.names)
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'import_module':
-                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-                    modules.append(node.args[0].value)
-        for module in modules:
-            parts = module.split('.')
-            for size in range(1, len(parts) + 1):
-                base = 'backend/' + '/'.join(parts[:size])
-                for candidate in (base + '.py', base + '/__init__.py'):
-                    if candidate in files and candidate not in watched:
-                        pending.append(candidate)
     digest = hashlib.sha256()
-    for name in sorted(watched):
+    for name in sorted(files):
         digest.update(name.encode() + b'\0' + hashlib.sha256(files[name]).digest())
     # The node id binds the parametrised synthetic input and exact test code;
-    # test_e2e.py and its local harness/fixture dependencies are watched above.
+    # test_e2e.py and every local harness/fixture are watched above.
     return {key: hashlib.sha256(digest.digest() + node.encode()).hexdigest() for key, node in JOURNEYS.items()}
 
 

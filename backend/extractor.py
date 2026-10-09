@@ -1141,6 +1141,37 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
     return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
 
 
+# These surfaces may explain form choice or case evidence, never product policy.
+# Reject the entire model answer rather than trying to remove unsafe clauses.
+_CASE_PRODUCT_TOPICS = (
+    r"\b(?:log[ -]?ins?|log(?:ged|ging)?\s+(?:in|into|on)|"
+    r"sign[ -]?ins?|sign(?:ed|ing)?\s+(?:in|into|on)|password\w*|credential\w*|encrypt\w*|"
+    r"accounts?|upload\w*|filing|files?|filed|sav(?:e|es|ed|ing)|submi(?:t|ss)\w*|"
+    r"kaizen|supervisor\w*|portfolio\s*guru|bot|app|product|automat\w*|"
+    r"support(?:s|ed)?|capabilit(?:y|ies)|application|platform|assistant|"
+    r"secure|security|privacy|protect\w*|stor(?:e|es|ed|ing|age)|guarantee\w*)\b"
+)
+_CASE_ADVICE_FORBIDDEN = re.compile(
+    _CASE_PRODUCT_TOPICS + r"|\b(?:i|we|our)\b|\b(?:it|this|you)\s+(?:can|will|shall|could)\b",
+    re.IGNORECASE,
+)
+
+
+def _safe_case_advice(text):
+    return isinstance(text, str) and bool(text.strip()) and not _CASE_ADVICE_FORBIDDEN.search(text)
+
+
+def _is_case_form_choice_question(text):
+    lower = text.casefold()
+    # Product/setup words never make a form-selection question, even with a case.
+    if re.search(_CASE_PRODUCT_TOPICS, lower):
+        return False
+    question = "?" in lower or bool(re.match(r"^(?:what|which|should|could|would|can)\b", lower))
+    form = bool(re.search(r"\b(?:forms?|wpbas?|cbd|dops|mini[ -]?cex|acat|lat|acaf|stat|msf|qiat|jcf|esle)\b", lower))
+    choice = bool(re.search(r"\b(?:what|which|best|better|right|instead|choose|use|suggest|recommend)\b", lower))
+    return question and form and choice
+
+
 async def answer_question(text: str, case_context: str = "", document_name: str = "") -> str:
     """Answer product questions with reviewed copy and form questions with case-grounded advice.
 
@@ -1163,15 +1194,8 @@ async def answer_question(text: str, case_context: str = "", document_name: str 
 
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
-    if case_context:
-        text_lower = text.lower()
-        case_question_signals = [
-            "suggest", "recommend", "right", "better", "instead",
-            "which", "what form", "what type", "should i", "best",
-            "wrong", "not sure", "doubt",
-        ]
-        if any(sig in text_lower for sig in case_question_signals):
-            prompt = f"""You are Portfolio Guru. The user has an active clinical case and is asking what form type would be best for it.
+    if case_context and _is_case_form_choice_question(text):
+        prompt = f"""You are Portfolio Guru. The user has an active clinical case and is asking what form type would be best for it.
 
 Active case:
 \"\"\"
@@ -1193,8 +1217,11 @@ Hard limits:
 - Never describe how Portfolio Guru stores, uses or protects logins or credentials, and never promise uploads, filing or saving.
 
 {FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
-            text = await _generate(prompt, purpose="grounded_answer")
-            return sanitize_internal_form_codes(text.replace("**", "").strip())
+        generated = await _generate(prompt, purpose="grounded_answer")
+        if _safe_case_advice(generated):
+            return sanitize_internal_form_codes(generated.replace("**", "").strip())
+        reply = select_deterministic_reply(text, include_first_contact=False)
+        return reply.full_text() if reply is not None else render_message("scope_redirect")
 
     # Check deterministic standalone product/help questions before broad form support.
     text_lower = text.lower()
@@ -3252,7 +3279,7 @@ def _validated_possible_key_capability(candidate, selected, source_text=None, *,
             _kc_identity(canonical) in selected_ids or _kc_identity(canonical) in excluded):
         return None
     reason = candidate.get("reason")
-    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 140 or "\n" in reason or "\r" in reason:
+    if not _safe_case_advice(reason) or len(reason.strip()) > 140 or "\n" in reason or "\r" in reason:
         return None
     if source_text is not None:
         evidence = candidate.get("evidence")
@@ -3262,6 +3289,32 @@ def _validated_possible_key_capability(candidate, selected, source_text=None, *,
             return None
     safe, _ = deidentify_draft_fields({"reason": reason.strip()})
     return {"capability": canonical, "reason": safe["reason"]}
+
+
+def preserve_unconfirmed_possible_kc(previous, regenerated):
+    """Regeneration cannot perform the doctor's Add action.
+
+    Keep the pending candidate on the draft even while three other KCs hide
+    the offer. This preserves its identity for later edits; only Add consumes it.
+    """
+    candidate = getattr(previous, "possible_key_capability", None)
+    if not isinstance(candidate, dict):
+        return regenerated
+    capability = _canonical_kc(candidate.get("capability"))
+    if not capability:
+        return regenerated
+    fields = dict(regenerated.fields) if isinstance(regenerated, FormDraft) else None
+    selected = fields.get("key_capabilities", []) if fields is not None else regenerated.key_capabilities
+    selected = [kc for kc in selected if _kc_identity(kc) != _kc_identity(capability)]
+    # An old reason may now fail the text guard. Retain only its identity,
+    # with an empty reason so preview/Add validation cannot display it.
+    possible = _validated_possible_key_capability(candidate, []) or {"capability": capability, "reason": ""}
+    links = _derive_curriculum_links_from_kcs(selected)
+    if fields is not None:
+        fields.update(key_capabilities=selected, curriculum_links=links)
+        return regenerated.model_copy(update={"fields": fields, "possible_key_capability": possible})
+    return regenerated.model_copy(update={"key_capabilities": selected, "curriculum_links": links,
+                                          "possible_key_capability": possible})
 
 
 def _validated_kc_drop_claims(claims):

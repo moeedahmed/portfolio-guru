@@ -817,7 +817,7 @@ POSSIBLE_CASE = "I assessed an ankle injury and discussed imaging with my superv
 
 
 def _possible_kc():
-    return {"capability": "SLO2 KC1", "reason": "You discussed the imaging decision with your supervisor.",
+    return {"capability": "SLO2 KC1", "reason": "You discussed the imaging decision with a senior.",
             "evidence": "discussed imaging with my supervisor"}
 
 
@@ -977,3 +977,67 @@ async def test_approval_filer_receives_possible_kc_only_after_add_tap(form_type,
     assert "possible_key_capability" not in fields
     assert "evidence" not in fields
     assert route.await_args.kwargs["curriculum_links"] == (["SLO4", "SLO2"] if add_extra else ["SLO4"])
+
+
+@pytest.mark.parametrize('reason', [
+    'Your login passwords are encrypted.', 'I will upload the imaging to Kaizen.',
+    'Your account credentials are secure.', 'I can file and save this automatically.',
+    'The supervisor can submit it.', 'Portfolio Guru fully supports this.',
+    'Log in to continue.', 'Submission is handled.',
+])
+def test_possible_kc_rejects_product_claims_despite_valid_source_quote(reason):
+    from extractor import _validated_possible_key_capability
+    assert _validated_possible_key_capability({**_possible_kc(), 'reason': reason}, ['SLO4 KC1'], POSSIBLE_CASE) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
+async def test_date_only_regeneration_cannot_select_unconfirmed_possible_kc(form_type):
+    import bot
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    from extractor import KC_FULL_TEXT
+    selected = [KC_FULL_TEXT['SLO4 KC1']]
+    offered = {**_possible_kc(), 'capability': KC_FULL_TEXT['SLO2 KC1']}
+    draft = (CBDData(key_capabilities=selected, curriculum_links=['SLO4'], possible_key_capability=offered)
+             if form_type == 'CBD' else FormDraft(form_type=form_type, fields={'key_capabilities': selected, 'curriculum_links': ['SLO4']}, possible_key_capability=offered))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_draft(context, draft)
+    payload = {'date_of_encounter': '2026-10-08', 'key_capabilities': [*selected, offered['capability']], 'curriculum_links': ['SLO4', 'SLO2']}
+    with patch('extractor._generate', AsyncMock(return_value=json.dumps(payload))), patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)), patch('bot.get_voice_profile', return_value=''), patch('bot._safe_edit_text', AsyncMock()):
+        for _ in range(2):
+            assert await bot._regenerate_active_draft_with_feedback(sim._make_text_update('Change only the date to 8 October 2026'), context, 'Change only the date to 8 October 2026') == bot.AWAIT_APPROVAL
+            updated = bot._load_draft(context)
+            fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
+            assert offered['capability'] not in fields['key_capabilities']
+            assert set(selected) <= set(fields['key_capabilities'])
+            assert 'SLO2' not in fields['curriculum_links']
+            assert updated.possible_key_capability == {'capability': offered['capability'], 'reason': offered['reason']}
+            assert 'Possible extra: SLO2 KC1' in bot._format_draft_preview(updated)
+
+
+def test_unconfirmed_kc_remains_pending_while_three_other_links_hide_the_offer():
+    from extractor import KC_FULL_TEXT, preserve_unconfirmed_possible_kc
+    from models import CBDData
+    offered = {**_possible_kc(), 'capability': KC_FULL_TEXT['SLO2 KC1']}
+    previous = CBDData(key_capabilities=[KC_FULL_TEXT['SLO4 KC1']], possible_key_capability=offered)
+    three = [KC_FULL_TEXT[k] for k in ('SLO4 KC1', 'SLO1 KC1', 'SLO7 KC1')]
+    regenerated = preserve_unconfirmed_possible_kc(previous, CBDData(key_capabilities=three))
+    assert regenerated.possible_key_capability is not None
+    later = preserve_unconfirmed_possible_kc(regenerated, CBDData(key_capabilities=[three[0], offered['capability']]))
+    assert later.key_capabilities == [three[0]]
+    assert later.possible_key_capability['capability'] == offered['capability']
+
+
+
+def test_rejected_legacy_possible_reason_does_not_forget_unconfirmed_identity():
+    from extractor import KC_FULL_TEXT, preserve_unconfirmed_possible_kc
+    from models import CBDData
+    offered = {**_possible_kc(), 'reason': 'You discussed imaging with your supervisor.'}
+    previous = CBDData(key_capabilities=[KC_FULL_TEXT['SLO4 KC1']], possible_key_capability=offered)
+    changed = preserve_unconfirmed_possible_kc(previous, CBDData(key_capabilities=previous.key_capabilities))
+    later = preserve_unconfirmed_possible_kc(changed, CBDData(key_capabilities=[*previous.key_capabilities, KC_FULL_TEXT['SLO2 KC1']]))
+    assert later.key_capabilities == previous.key_capabilities
+    assert 'supervisor' not in str(changed.possible_key_capability)

@@ -73,6 +73,7 @@ def test_setup_or_credentials_routes_separately_from_billing():
     "I assessed a patient with chest pain and documented the handover plan.",
     "Reflection: handover was delayed by login and account access; clarify ownership next time.",
     "42M chest pain; login unavailable.",
+    "I taught handover communication; login access delayed the session",
 ])
 def test_case_narratives_take_priority_over_account_and_login_words(text):
     assert route_message(text).intent == ConversationalIntent.NEW_CASE
@@ -82,6 +83,7 @@ def test_case_narratives_take_priority_over_account_and_login_words(text):
     "Can you help with a handover reflection?",
     "How do I connect my Kaizen login?",
     "Tell me about my account plan",
+    "I had a problem saving my reflection. How do I reconnect my account?",
 ])
 def test_narrative_guard_preserves_standalone_product_questions(question):
     from conversational_router import has_case_narrative
@@ -154,3 +156,46 @@ def test_unknown_has_useful_clarification_and_no_side_effect_signals():
 def test_result_rejects_invalid_confidence():
     with pytest.raises(ValueError, match="confidence"):
         RouterResult(intent=ConversationalIntent.UNKNOWN, confidence=1.2)
+
+
+def test_product_problem_question_after_reflection_word_routes_to_setup():
+    assert route_message("I had a problem saving my reflection. How do I reconnect my account?").intent == ConversationalIntent.SETUP_OR_CREDENTIALS
+
+
+@pytest.mark.asyncio
+async def test_active_case_upload_method_question_never_uses_case_advice_model():
+    from unittest.mock import AsyncMock, patch
+    from extractor import answer_question
+    with patch('extractor._generate', AsyncMock(return_value='I will upload it using your encrypted credentials.')) as generate:
+        answer = await answer_question('Which upload method is best?', case_context='I assessed an ankle injury in ED.')
+    generate.assert_not_awaited()
+    assert 'using your encrypted credentials' not in answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('claim', [
+    'Your logins and passwords are encrypted.', 'I will upload this to Kaizen.',
+    'Your account credentials are secure.', 'I can file and save it automatically.',
+    'Nothing is submitted to supervisors.', 'Portfolio Guru fully supports every form.',
+    'We can handle any attachment.', 'Log in to continue.', 'Submission is handled.',
+])
+async def test_genuine_form_question_rejects_model_product_claims(claim):
+    from unittest.mock import AsyncMock, patch
+    from extractor import answer_question
+    with patch('extractor._generate', AsyncMock(return_value='CBD fits the imaging decision. ' + claim)) as generate:
+        answer = await answer_question('Which form is best for this case?', case_context='I assessed an ankle injury in ED.')
+    generate.assert_awaited_once()
+    assert claim not in answer
+    assert answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('question', ['Which form should I use?', 'Should I use CBD or DOPS?', 'What form is best for this case?'])
+async def test_case_form_choice_accepts_safe_case_grounded_model_advice(question):
+    from unittest.mock import AsyncMock, patch
+    from extractor import answer_question
+    with patch('extractor._generate', AsyncMock(return_value='CBD fits the imaging decision; DOPS fits an observed procedure.')) as generate:
+        answer = await answer_question(question, case_context='I assessed an ankle injury in ED.')
+    generate.assert_awaited_once()
+    assert 'fits the imaging decision' in answer
+    assert 'fits an observed procedure' in answer

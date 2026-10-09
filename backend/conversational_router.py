@@ -420,8 +420,18 @@ def has_case_narrative(message: str) -> bool:
     'Can you help with a reflection?' remain questions.
     """
     text = _normalise(message)
+    # A direct product-help question wins even after narrated problem wording.
+    # Match the question clause, not incidental login words in activity prose.
+    product_question = re.search(
+        r"\b(?:how\s+(?:do|can|could|should)\s+i|can\s+you|could\s+you)\b([^?!.;]*)",
+        text,
+    )
+    if product_question and _contains_any(product_question[0], SETUP_TERMS + ACCOUNT_TERMS + (
+        "upload", "save", "saving", "file", "filing", "submit", "bot", "app",
+    )):
+        return False
     narrated_activity = bool(re.search(
-        r"\b(?:i|we)\s+(?:had|saw|assessed|managed|treated|reviewed|reflected|"
+        r"\b(?:i|we)\s+(?:had|saw|assessed|managed|treated|reviewed|reflected|taught|"
         r"learnt|learned|clarified|delivered|attended|performed|led|observed)\b",
         text,
     ))

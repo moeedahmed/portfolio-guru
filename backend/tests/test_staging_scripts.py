@@ -148,8 +148,15 @@ COVERAGE
 fi
 exit "${FAKE_QA_EXIT:-0}"
 ''')
-    for name in ('telegram_journey_proof.py', 'verify_live_runtime.py'):
+    for name in ('telegram_journey_proof.py', 'verify_live_runtime.py',
+                 'install_staging.sh', 'deploy_staging.sh', 'com.portfolioguru.staging-bot.plist'):
         shutil.copy(scripts / name, staging / 'scripts' / name)
+    # Cached journey proof binds the actual launch chain and configuration,
+    # even though this harness stubs every external command and bot process.
+    shutil.copy(ROOT / 'start-bot.sh', staging / 'start-bot.sh')
+    for name in ('run_local.sh', 'staging_env.sh', '.env.example', 'model_config.py',
+                 'gemini_client.py', 'requirements.txt', 'requirements-dev.txt'):
+        shutil.copy(ROOT / 'backend' / name, staging / 'backend' / name)
     (staging / 'backend/tests').mkdir()
     (staging / 'backend/bot.py').write_text('VALUE = 1\n')
     (staging / 'backend/tests/test_e2e.py').write_text('CASE = "synthetic"\n')

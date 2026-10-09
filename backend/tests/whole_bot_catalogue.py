@@ -59,7 +59,9 @@ def producer_digest():
 # 9 Oct 2026: non-string input is never treated as case evidence; no branch change.
 # 9 Oct 2026: reviewed schema-only reflection footer and draft-stamped possible-KC Add.
 # Add updates KCs only after the tap; stale/save-in-progress taps are inert.
-PRODUCER_DIGEST = '9922a6bc54f977ea41e85cf8151f365323a1916c66b914a5d957b9351e7a6339'
+# 9 Oct 2026: reviewed regeneration guard retains unconfirmed possible KCs;
+# only the existing Add tap selects them. No keyboard or callback changes.
+PRODUCER_DIGEST = '930fb8b23920f561a8e53a619734fe42f4a9c14be7c8c06b0a82f4a20b7920e8'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|add_possible_kc|*

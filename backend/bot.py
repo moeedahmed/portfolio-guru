@@ -13595,6 +13595,8 @@ async def _regenerate_active_draft_with_feedback(
                 ),
                 timeout=45,
         )
+        from extractor import preserve_unconfirmed_possible_kc
+        updated = preserve_unconfirmed_possible_kc(draft, updated)
         updated = _blank_judged_missing_essentials(context, updated, case_text, form_type)
         # A regenerated draft must keep the same profile defaults as the first
         # draft, or a doctor who supplies one missing detail is asked for a

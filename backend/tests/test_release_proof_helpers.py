@@ -64,8 +64,15 @@ else:
     python.chmod(0o755)
     scripts = root / 'scripts'
     scripts.mkdir()
-    for name in ('telegram_journey_proof.py', 'telegram_bot_qa.sh'):
+    for name in ('telegram_journey_proof.py', 'telegram_bot_qa.sh', 'install_staging.sh',
+                 'deploy_staging.sh', 'com.portfolioguru.staging-bot.plist'):
         shutil.copy(ROOT / 'scripts' / name, scripts / name)
+    # The proof snapshot requires the real launch source/config, although
+    # pytest and runtime checks below remain entirely offline stubs.
+    shutil.copy(ROOT / 'start-bot.sh', root / 'start-bot.sh')
+    for name in ('run_local.sh', 'staging_env.sh', '.env.example', 'model_config.py',
+                 'gemini_client.py', 'requirements.txt', 'requirements-dev.txt'):
+        shutil.copy(ROOT / 'backend' / name, root / 'backend' / name)
     (scripts / 'verify_live_runtime.py').write_text('print("synthetic runtime verified")\n')
     (root / 'backend/tests').mkdir()
     (root / 'backend/bot.py').write_text('import extraction\n')
@@ -344,18 +351,26 @@ def test_journey_ledger_reuses_without_claiming_fresh_pass(wider_qa_harness):
     assert '16/16 covered; 0 fresh' in result.stdout
 
 
-def test_journey_changed_reruns_dependency_but_not_unrelated_file(wider_qa_harness):
+def test_journey_changed_reruns_unknown_dependency_but_not_agent_instructions(wider_qa_harness):
     root = wider_qa_harness[0]
     assert _run_wider_qa(wider_qa_harness).returncode == 0
-    (root / 'backend/unrelated.py').write_text('IGNORED = 2\n')
+    (root / 'AGENTS.md').write_text('Agent instructions are not bot runtime input.\n')
     _fixture_commit(root)
     assert _run_wider_qa(wider_qa_harness, flags=('--changed',)).returncode == 0
     assert len(_live_calls(wider_qa_harness)) == 1
-    (root / 'backend/extraction.py').write_text('VALUE = 2\n')
+    # A new backend module can be loaded dynamically: lack of a static import
+    # is not evidence that it cannot affect the launched bot.
+    (root / 'backend/unrelated.py').write_text('UNKNOWN_DEPENDENCY = 2\n')
     _fixture_commit(root)
     result = _run_wider_qa(wider_qa_harness, flags=('--changed',))
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(_live_calls(wider_qa_harness)) == 2
+    assert result.stdout.count('fresh PASS') == 16
+    (root / 'backend/extraction.py').write_text('VALUE = 2\n')
+    _fixture_commit(root)
+    result = _run_wider_qa(wider_qa_harness, flags=('--changed',))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(_live_calls(wider_qa_harness)) == 3
     assert result.stdout.count('fresh PASS') == 16
 
 
@@ -411,7 +426,9 @@ def test_journey_selection_refuses_ambiguous_or_release_mode(wider_qa_harness, f
     assert not wider_qa_harness[1].exists()
 
 
-def test_release_coverage_is_checked_against_exact_git_files(wider_qa_harness):
+@pytest.mark.parametrize('dependency', ['backend/unrelated.py', 'backend/extraction.py',
+                                      'backend/run_local.sh'])
+def test_release_coverage_is_checked_against_exact_git_files(wider_qa_harness, dependency):
     import importlib.util
     import json
     spec = importlib.util.spec_from_file_location('coverage_check', ROOT / 'scripts/telegram_journey_proof.py')
@@ -423,14 +440,15 @@ def test_release_coverage_is_checked_against_exact_git_files(wider_qa_harness):
     reports = list((root / '.artifacts/telegram-bot-qa').glob('*/journey-coverage.json'))
     report = json.loads(reports[0].read_text())
     checker.validate_coverage(report, root, sha, committed=True)
-    # A new SHA containing an unrelated file may reuse complete content proof.
-    (root / 'backend/unrelated.py').write_text('VALUE = 42\n')
+    # Agent instructions are explicitly excluded from runtime dependencies.
+    (root / 'AGENTS.md').write_text('Agent instructions are not bot runtime input.\n')
     _fixture_commit(root)
     later = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
     report['sha'] = later
     checker.validate_coverage(report, root, later, committed=True)
-    # Matching the SHA label alone cannot hide changed journey dependencies.
-    (root / 'backend/extraction.py').write_text('VALUE = 3\n')
+    # Unknown modules, known dependencies and the launcher must all invalidate
+    # committed coverage; updating only its SHA label cannot hide a change.
+    (root / dependency).write_text('VALUE = 3\n')
     _fixture_commit(root)
     changed = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
     report['sha'] = changed
