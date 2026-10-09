@@ -65,6 +65,8 @@ def synthetic_fields(form_type):
     specs = {s["key"]: s for s in schema.get("fields", [])}
     fields, by_target = {}, {}
     for key, target in mapping.items():
+        if not_applicable_reason(form_type, key, fields):
+            continue
         dom_id = filer._field_dom_id(target)
         if dom_id in by_target:
             fields[key] = by_target[dom_id]
@@ -84,7 +86,11 @@ def synthetic_fields(form_type):
             value = [options[0]]
         elif options:
             value = next((option for option in options if option != "- n/a -"), options[0])
-        elif spec.get("type") == "number":
+        elif spec.get("type") == "number" or (
+            filer.filing_form_base(form_type) == "US_CASE" and key == "patient_age"
+        ):
+            # unified_dom_map.json records this as INPUT type=number, even
+            # though the extraction schema calls it text. Prose is rejected.
             value = "3"
         elif key == "session_length":
             value = "30 minutes"
@@ -97,6 +103,25 @@ def synthetic_fields(form_type):
     fields["stage"] = "Higher"
     fields["key_capabilities"] = ["SLO6 KC1"]
     return fields
+
+
+def not_applicable_reason(form_type, key, fields):
+    """Omissions in this synthetic Higher-stage scenario, not missing DOM proof.
+
+    Never exempt a field that was actually requested. A missing Higher select
+    or an Other-detail request must still fail read-back normally.
+    """
+    import kaizen_form_filer as filer
+    if filer.filing_form_base(form_type) != "PROC_LOG" or key in fields:
+        return None
+    if (fields.get("stage_of_training") == "Higher"
+            and key in {"intermediate_procedural_skill", "accs_procedural_skill"}):
+        return "outside_higher_stage_check_scenario"
+    if (key in {"higher_procedural_skill_other", "procedure_other"}
+            and fields.get("higher_procedural_skill")
+            and not filer._is_other_choice(fields["higher_procedural_skill"])):
+        return "other_option_not_selected"
+    return None
 
 
 def draft_url(value):
@@ -256,6 +281,11 @@ async def read_back(form_type, fields, url, username):
             rows = []
             for key, target in mapping.items():
                 dom_id = filer._field_dom_id(target)
+                omitted = not_applicable_reason(form_type, key, fields)
+                if omitted:
+                    rows.append({"field": key, "dom_id": dom_id,
+                                 "classification": "not-applicable", "reason": omitted})
+                    continue
                 wanted = expected[key]
                 if "date" in key or dom_id in {"startDate", "endDate"}:
                     wanted = filer._to_uk_date(wanted)
@@ -365,7 +395,7 @@ async def run_check(forms=DEFAULT_FORMS):
                                     if matching:
                                         row["filer_skip_reason"] = matching["reason"]
                                 entry["fields"] = rows + [r for r in skips if r["field"] not in {v["field"] for v in rows}]
-                                entry["status"] = "passed" if all(r["classification"] in {"landed", "count-only"} for r in entry["fields"]) and not skips and result["status"] == "success" else "partial"
+                                entry["status"] = "passed" if all(r["classification"] in {"landed", "count-only", "not-applicable"} for r in entry["fields"]) and not skips and result["status"] == "success" else "partial"
                                 entry["reason"] = "readback_complete"
                         except Exception:
                             # Never retain provider exceptions or arbitrary result values.

@@ -2,7 +2,7 @@
 import asyncio
 import inspect
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -46,7 +46,7 @@ def test_builder_populates_every_mapped_field_and_alias():
     for form in check.mapped_forms():
         fields = check.synthetic_fields(form)
         mapping = {**filer.COMMON_HEADER_FIELD_MAP, **filer.FORM_FIELD_MAP[form]}
-        assert all(fields[key] for key in mapping), form
+        assert all(fields.get(key) or check.not_applicable_reason(form, key, fields) for key in mapping), form
         assert fields["event_description"] == check.MARKER
         assert fields["key_capabilities"] == ["SLO6 KC1"]
         specs = {s['key']: s for s in filer.FORM_SCHEMAS.get(schema_form_type(form), {}).get('fields', [])}
@@ -55,9 +55,68 @@ def test_builder_populates_every_mapped_field_and_alias():
             if 'date' in key or filer._field_dom_id(target) in {'startDate', 'endDate'}:
                 assert __import__('re').fullmatch(r'\d{1,2}/\d{1,2}/\d{4}', fields[key]), (form, key)
             elif spec.get('options') and key != 'stage_of_training':
+                if key not in fields:
+                    continue
                 values = fields[key] if isinstance(fields[key], list) else [fields[key]]
                 assert all(value in spec['options'] for value in values), (form, key)
     assert check.synthetic_fields("DOPS_2021")["procedure_name"] == check.synthetic_fields("DOPS_2021")["procedural_skill"]
+
+
+def test_ultrasound_age_payload_matches_independent_scraped_number_control():
+    from pathlib import Path
+    import kaizen_form_filer as filer
+    scrape = json.loads(Path(filer.__file__).with_name("unified_dom_map.json").read_text())
+    age_id = filer.FORM_FIELD_MAP["US_CASE"]["patient_age"]
+    assert scrape["US_CASE"]["fields"][age_id]["type"] == "number"
+    assert check.synthetic_fields("US_CASE")["patient_age"] == "3"
+
+
+@pytest.mark.parametrize("form", ["PROC_LOG", "PROC_LOG_2021"])
+def test_procedural_check_requests_one_stage_and_only_triggered_other_detail(form):
+    fields = check.synthetic_fields(form)
+    assert fields["stage_of_training"] == "Higher"
+    assert fields["higher_procedural_skill"] == "Paediatric sedation"
+    for key in ("intermediate_procedural_skill", "accs_procedural_skill",
+                "higher_procedural_skill_other", "procedure_other"):
+        assert key not in fields
+        assert check.not_applicable_reason(form, key, fields)
+    # A real request for Other must still be read back, including both aliases.
+    fields["higher_procedural_skill"] = "Other"
+    for key in ("higher_procedural_skill_other", "procedure_other"):
+        assert check.not_applicable_reason(form, key, fields) is None
+    assert check.not_applicable_reason(form, "higher_procedural_skill", fields) is None
+    assert check.not_applicable_reason("US_CASE", "patient_age", fields) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested_other", [False, True])
+async def test_procedural_readback_exempts_only_unrequested_scenario_fields(monkeypatch, requested_other):
+    import kaizen_form_filer as filer
+    fields = check.synthetic_fields("PROC_LOG")
+    if requested_other:
+        fields.update(higher_procedural_skill="Other", higher_procedural_skill_other="Synthetic detail",
+                      procedure_other="Synthetic detail")
+    page = AsyncMock()
+    page.url = "https://kaizenep.com/events/fillin/synthetic-document"
+    # Every control is missing: exemptions must never hide the tested Higher
+    # skill, or an explicitly requested Other detail.
+    page.evaluate = AsyncMock(return_value={"missing": True})
+    browser = AsyncMock()
+    browser.new_context.return_value.new_page.return_value = page
+    pw = AsyncMock()
+    pw.chromium.launch.return_value = browser
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=pw)
+    manager.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(filer, "async_playwright", lambda: manager)
+    monkeypatch.setattr(filer, "load_session_state", lambda uid, username: {"cookies": []})
+    rows = {r["field"]: r for r in await check.read_back("PROC_LOG", fields, page.url, "fake-login")}
+    assert rows["higher_procedural_skill"]["classification"] == "empty"
+    assert rows["accs_procedural_skill"]["classification"] == "not-applicable"
+    assert rows["intermediate_procedural_skill"]["classification"] == "not-applicable"
+    for key in ("higher_procedural_skill_other", "procedure_other"):
+        assert rows[key]["classification"] == ("empty" if requested_other else "not-applicable")
+    browser.close.assert_awaited_once()
 
 
 def test_form_selection_is_live_catalogue_intersection():
@@ -148,6 +207,7 @@ def test_readback_refuses_untrusted_draft_url(url):
 
 @pytest.mark.parametrize("field_classification, filer_status, code", [
     ("landed", "success", 0), ("empty", "success", check.PARTIAL),
+    ("not-applicable", "success", 0),
     ("mismatch", "success", check.PARTIAL), ("landed", "partial", check.PARTIAL),
 ])
 def test_readback_drives_exit_and_keeps_account_isolation(monkeypatch, field_classification, filer_status, code):
@@ -231,7 +291,8 @@ def test_every_visible_form_uses_operator_only_draft_payload(monkeypatch):
         assert kwargs['telegram_user_id'] == check.OPERATOR_USER_ID
         assert kwargs['submit'] is False
         assert fields['event_description'] == check.MARKER
-        assert all(fields[key] for key in filer.FORM_FIELD_MAP[form])
+        assert all(fields.get(key) or check.not_applicable_reason(form, key, fields)
+                   for key in filer.FORM_FIELD_MAP[form])
         calls.append(form)
         return {'status': 'success', 'saved_url': f"https://kaizenep.com/events/fillin/synthetic-{form.replace('_', '-')}", 'skipped': []}
     monkeypatch.setattr(filer, 'file_to_kaizen', save)
