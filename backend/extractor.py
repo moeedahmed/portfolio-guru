@@ -3184,24 +3184,19 @@ def _validated_possible_key_capability(candidate, selected, source_text=None, *,
 
 
 def preserve_possible_kc_selection(previous, regenerated):
-    """Retain the extra's identity and the doctor's removal across regeneration."""
+    """Carry exclusions forward without replacing a newly validated extra."""
+    excluded = list(dict.fromkeys([
+        *getattr(previous, "excluded_key_capabilities", []),
+        *regenerated.excluded_key_capabilities,
+    ]))
     candidate = getattr(previous, "possible_key_capability", None)
-    if not isinstance(candidate, dict):
-        return regenerated
-    capability = _canonical_kc(candidate.get("capability"))
-    if not capability:
-        return regenerated
-    fields = dict(regenerated.fields) if isinstance(regenerated, FormDraft) else None
-    selected = (fields.get("key_capabilities") or []) if fields is not None else regenerated.key_capabilities
-    possible = {"capability": capability}
-    if candidate.get("removed") is True:
-        possible["removed"] = True
-        selected = [kc for kc in selected if _kc_identity(kc) != _kc_identity(capability)]
-    links = _derive_curriculum_links_from_kcs(selected)
-    if fields is not None:
-        fields.update(key_capabilities=selected, curriculum_links=links)
-        return regenerated.model_copy(update={"fields": fields, "possible_key_capability": possible})
-    return regenerated.model_copy(update={"key_capabilities": selected, "curriculum_links": links,
+    # Keep compatibility with older drafts containing only a removed flag.
+    if isinstance(candidate, dict) and candidate.get("removed") is True:
+        capability = _canonical_kc(candidate.get("capability"))
+        if capability and capability not in excluded:
+            excluded.append(capability)
+    possible = regenerated.possible_key_capability or candidate
+    return regenerated.model_copy(update={"excluded_key_capabilities": excluded,
                                           "possible_key_capability": possible})
 
 

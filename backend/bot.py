@@ -5586,8 +5586,13 @@ def _draft_possible_kc(draft):
     return None
 
 
+def _draft_kc_removal_locked(context):
+    # The Kaizen amendment/retry filer cannot clear already-ticked KCs.
+    return bool(context.user_data.get("amend_mode") or context.user_data.get("kaizen_draft_url"))
+
+
 def _possible_kc_button_row(context):
-    if context is None:
+    if context is None or _draft_kc_removal_locked(context):
         return []
     possible = _draft_possible_kc(_load_draft(context))
     if not possible:
@@ -5600,7 +5605,7 @@ async def _remove_possible_key_capability(query, context):
     """Claim and update the current draft before awaiting, so repeated taps lose."""
     draft = _load_draft(context)
     possible = _draft_possible_kc(draft)
-    if (not possible or context.user_data.get("filing_in_progress") or
+    if (not possible or _draft_kc_removal_locked(context) or context.user_data.get("filing_in_progress") or
             query.data != f"ACTION|remove_possible_kc|{context.user_data.get('case_token')}"):
         await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
         return None
@@ -5616,6 +5621,8 @@ async def _remove_possible_key_capability(query, context):
         fields["curriculum_links"] = _derive_curriculum_links_from_kcs(kcs)
         updated = draft.model_copy(update={"fields": fields, "possible_key_capability": {**possible, "removed": True}})
     _store_draft(context, updated)
+    if context.user_data.get("pending_draft_data"):
+        _store_pending_draft(context, updated)
     await query.answer()
     await _safe_edit_text(query.message, _format_draft_preview_for_context(updated, context) + _draft_reply_hint(context),
                           parse_mode="Markdown", reply_markup=_active_draft_keyboard(context))

@@ -1,15 +1,39 @@
 from pydantic import BaseModel, model_validator
-from curriculum import validate_curriculum
+from curriculum import canonical_kc, canonical_kcs, validate_curriculum
 from typing import Optional, List, Literal
 
 
 class CurriculumDraft(BaseModel):
+    # Doctor-owned exclusions are independent of the current default extra.
+    excluded_key_capabilities: List[str] = []
+
     @model_validator(mode="before")
     @classmethod
     def validate_draft_curriculum(cls, data):
         if not isinstance(data, dict):
             return data
+        data = dict(data)
+        excluded = canonical_kcs(data.get("excluded_key_capabilities") or [])
+        possible = data.get("possible_key_capability")
+        capability = canonical_kc(possible.get("capability")) if isinstance(possible, dict) else None
+        # Migrate legacy removed metadata when reconstructing existing drafts.
+        if capability and possible.get("removed") is True and capability not in excluded:
+            excluded.append(capability)
+        data["excluded_key_capabilities"] = excluded
+        if capability in excluded:
+            data["possible_key_capability"] = {"capability": capability, "removed": True}
+        target = dict(data["fields"]) if isinstance(data.get("fields"), dict) else data
+        if excluded and "key_capabilities" in target:
+            values = target.get("key_capabilities") or []
+            if not isinstance(values, list):
+                values = [values]
+            # Filter before the three-KC cap, so excluded links cannot crowd out
+            # valid supported links or a new default extra.
+            target["key_capabilities"] = [kc for kc in values if canonical_kc(kc) not in excluded]
+            target["curriculum_links"] = list(dict.fromkeys(
+                kc.split()[0] for kc in canonical_kcs(target["key_capabilities"])))
         if isinstance(data.get("fields"), dict):
+            data["fields"] = target
             data = validate_curriculum(data)
             data["fields"] = validate_curriculum(
                 {**data["fields"], "possible_key_capability": data.get("possible_key_capability")},

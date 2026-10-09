@@ -70,7 +70,9 @@ def producer_digest():
 # 9 Oct 2026: reviewed account/billing topic routing; connection failures retain
 # the existing Connect Kaizen/Settings actions; pricing appears only for billing.
 # 9 Oct 2026: third KC selected by default with Remove instead of Add.
-PRODUCER_DIGEST = '45e2e92d39a87dd71e1bf617d503d7a3c657d3c998af81654b9aa3cf8a6948d3'
+# 9 Oct 2026: Remove syncs the pending snapshot and is hidden/rejected for
+# saved-draft amendments and reopens; existing callback payloads are unchanged.
+PRODUCER_DIGEST = 'bce426dba7626160ec087393ba59663e93d5ce19e509fd07a8ce018de4eb0597'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|remove_possible_kc|*
