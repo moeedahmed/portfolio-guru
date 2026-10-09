@@ -13,7 +13,15 @@ def test_gemini_fallback_models_default_order(monkeypatch):
 
     from model_config import gemini_fallback_models
 
-    assert gemini_fallback_models() == ["gemini-3-flash-preview", "gemini-3.5-flash"]
+    assert gemini_fallback_models() == ["gemini-3.5-flash"]
+
+
+def test_gemini_fallback_models_deduplicates_env_and_premium(monkeypatch):
+    for key in ("GEMINI_FAST_MODEL", "GEMINI_STABLE_MODEL", "GEMINI_PREMIUM_MODEL"):
+        monkeypatch.setenv(key, "gemini-same-model")
+    monkeypatch.setenv("GOOGLE_API_KEY_PREMIUM", "fake")
+    from model_config import gemini_fallback_models
+    assert gemini_fallback_models(include_premium=True) == ["gemini-same-model"]
 
 
 def test_gemini_fallback_models_honours_env(monkeypatch):

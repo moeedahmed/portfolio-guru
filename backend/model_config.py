@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 
 
-DEFAULT_GEMINI_FAST_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_STABLE_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_PREMIUM_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_GEMINI_3_5_FLASH_MODEL = "gemini-3.5-flash"
