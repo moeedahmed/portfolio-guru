@@ -25,6 +25,74 @@ SAMPLE_CASES = {
     "empty": "",
 }
 
+# Exact REFLECT_LOG form-variety input reported on the test bot, 9 Oct 2026.
+HANDOVER_REFLECTION = (
+    "Synthetic training evidence only. On 17 March 2026. "
+    "I reflected on a simulated ED handover where task ownership was unclear. "
+    "I clarified roles with the team and repeated the plan. "
+    "Reflection: closed-loop communication reduced confusion; I will confirm ownership at future handovers."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_text", [
+    HANDOVER_REFLECTION,
+    HANDOVER_REFLECTION + " The login to the shared account delayed handover.",
+    "I reflected on an ED handover delayed by login and account access.",
+    "I assessed a patient with chest pain and documented the handover plan.",
+    "Reflection: handover was delayed by login and account access; clarify ownership next time.",
+    "42M chest pain; login unavailable.",
+])
+async def test_handover_reflection_reaches_best_fit_not_account_reply(case_text, recommended_forms):
+    sim = BotSimulator()
+    context = sim._make_context()
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
+         patch('bot.classify_intent', new=AsyncMock(return_value='question_general')) as classify, \
+         patch('bot.classify_menu_intent', new=AsyncMock(return_value='manage_credentials')) as menu, \
+         patch('bot.answer_question', new=AsyncMock(return_value='**Your login credentials are encrypted**')) as answer, \
+         patch('bot.recommend_form_types', new=AsyncMock(return_value=recommended_forms)) as recommend, \
+         patch('bot.get_training_level', return_value='ST5'), \
+         patch('bot.get_curriculum', return_value='2025'):
+        result = await bot.handle_case_input(sim._make_text_update(case_text), context)
+
+    assert result == bot.AWAIT_FORM_CHOICE
+    assert context.user_data['case_text'] == case_text
+    assert 'best fit:' in sim.get_last_text().lower()
+    assert {'FORM|best', 'FORM|show_all'} <= {data for _, data in sim.get_last_buttons()}
+    recommend.assert_awaited_once()
+    classify.assert_not_awaited()
+    menu.assert_not_awaited()
+    answer.assert_not_awaited()
+    assert all('**' not in (text or '') for _, text, _ in sim.messages_sent)
+
+
+@pytest.mark.asyncio
+async def test_account_reply_uses_reviewed_copy_without_model_answer():
+    from channel_reply_policy import select_deterministic_reply
+
+    sim = BotSimulator()
+    context = sim._make_context()
+    question = "What is the pricing?"
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
+         patch('bot.answer_question', new=AsyncMock(return_value='**Once you approve I will upload it; your credentials are never shared**')) as answer:
+        result = await bot.handle_case_input(sim._make_text_update(question), context)
+    assert result == ConversationHandler.END
+    answer.assert_not_awaited()
+    assert sim.get_last_text() == select_deterministic_reply(question).full_text()
+
+
+@pytest.mark.asyncio
+async def test_plain_text_question_reply_does_not_send_raw_markdown():
+    sim = BotSimulator()
+    context = sim._make_context()
+    with patch('bot.has_credentials', return_value=True), \
+         patch('bot.check_can_file', new=AsyncMock(return_value=(True, 0, 5, 'free'))), \
+         patch('bot.answer_question', new=AsyncMock(return_value='**Use the form buttons**')):
+        await bot.handle_case_input(sim._make_text_update('Which forms do you support?'), context)
+    assert sim.get_last_text() == '🩺 Use the form buttons'
+
 
 def _last_button_rows(sim: BotSimulator):
     for _, _, markup in reversed(sim.messages_sent):

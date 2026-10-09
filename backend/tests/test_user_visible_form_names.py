@@ -1,5 +1,3 @@
-import inspect
-
 import pytest
 
 
@@ -193,68 +191,50 @@ async def test_answer_question_pricing_copy_is_not_free_hallucination(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_probabilistic_side_question_prompt_uses_style_envelope(monkeypatch):
+@pytest.mark.parametrize("question,case_context", [
+    ("How should I think about portfolio evidence after a messy shift?", ""),
+    ("Which form is best and is my login encrypted?", "Adult in ED with chest pain."),
+])
+async def test_side_question_answers_use_reviewed_copy_even_with_case_context(monkeypatch, question, case_context):
+    from unittest.mock import AsyncMock
     import extractor
+    from channel_reply_policy import select_deterministic_reply
 
-    prompts = []
+    generate = AsyncMock(return_value="**I will upload it. Your credentials are never shared.**")
+    monkeypatch.setattr(extractor, "_generate", generate)
+    answer = await extractor.answer_question(question, case_context=case_context)
 
-    async def fake_generate(prompt, **kwargs):
-        prompts.append(prompt)
-        return "Portfolio evidence should be specific and source-tied."
-
-    monkeypatch.setattr(extractor, "_generate", fake_generate)
-
-    answer = await extractor.answer_question(
-        "How should I think about portfolio evidence after a messy shift?"
-    )
-
-    assert answer == "Portfolio evidence should be specific and source-tied."
-    assert prompts
-    prompt = prompts[-1]
-    assert "Portfolio Guru flexible reply style:" in prompt
-    assert "calm Emergency Medicine portfolio coach" in prompt
-    assert "draft-only wording" in prompt
-    assert "do not write long essays" in prompt
+    assert answer == select_deterministic_reply(question, include_first_contact=False).full_text()
+    assert "**" not in answer
+    generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_case_specific_form_question_prompt_uses_style_envelope(monkeypatch):
+@pytest.mark.parametrize("question", [
+    "Which form is best?",
+    "Should I use DOPS instead?",
+    "How should I think about portfolio evidence after a messy shift?",
+])
+async def test_case_specific_form_question_has_hard_limits_and_plain_text(monkeypatch, question):
+    from unittest.mock import AsyncMock
     import extractor
 
-    prompts = []
+    case_context = "Adult in ED with chest pain. I assessed and managed risk."
+    generate = AsyncMock(return_value="**CBD** fits because the case centres on clinical reasoning.")
+    monkeypatch.setattr(extractor, "_generate", generate)
 
-    async def fake_generate(prompt, **kwargs):
-        prompts.append(prompt)
-        return "CBD fits because the case centres on clinical reasoning."
+    answer = await extractor.answer_question(question, case_context=case_context)
 
-    monkeypatch.setattr(extractor, "_generate", fake_generate)
-
-    answer = await extractor.answer_question(
-        "Which form is best?",
-        case_context=(
-            "Adult in ED with chest pain. I assessed, discussed ECG/troponin "
-            "findings with a senior, managed risk and reflected on escalation."
-        ),
-    )
-
-    assert "Case-Based Discussion fits" in answer
-    assert prompts
-    prompt = prompts[-1]
+    generate.assert_awaited_once()
+    prompt = generate.call_args.args[0]
+    assert case_context in prompt
+    assert f"User question: {question}" in prompt
+    assert "suggest the 2-3 best RCEM WPBA form types for THIS specific case" in prompt
     assert "Portfolio Guru flexible reply style:" in prompt
-    assert "calm Emergency Medicine portfolio coach" in prompt
-    assert "do not change workflow decisions" in prompt
-
-
-def test_flexible_reply_style_envelope_does_not_touch_draft_generators():
-    import extractor
-
-    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" in inspect.getsource(extractor.answer_question)
-    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" not in inspect.getsource(
-        extractor.extract_cbd_data
-    )
-    assert "FLEXIBLE_REPLY_STYLE_ENVELOPE" not in inspect.getsource(
-        extractor.extract_form_data
-    )
+    assert "- Never describe how Portfolio Guru stores, uses or protects logins or credentials, and never promise uploads, filing or saving." in prompt
+    assert generate.call_args.kwargs == {"purpose": "grounded_answer"}
+    assert "Case-Based Discussion fits" in answer
+    assert "**" not in answer
 
 
 @pytest.mark.asyncio

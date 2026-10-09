@@ -20,6 +20,8 @@ from privacy_guard import (
     model_person_names,
 )
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
+from channel_reply_policy import STATIC_COPY_INTENTS, select_deterministic_reply
+from conversational_router import route_message
 from evidence_artifact import (
     evidence_artifact_answer,
     looks_like_artifact_filing_question,
@@ -1140,11 +1142,15 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
 
 
 async def answer_question(text: str, case_context: str = "", document_name: str = "") -> str:
-    """Generate a helpful answer about the bot's capabilities.
+    """Answer product questions with reviewed copy and form questions with case-grounded advice.
 
     When case_context is provided and the question relates to form types,
     the answer is grounded in that specific case rather than being generic.
     """
+    if route_message(text).intent in STATIC_COPY_INTENTS:
+        reply = select_deterministic_reply(text, include_first_contact=False)
+        if reply is not None:
+            return reply.full_text()
     # A question about a certificate or award ("record it as a reflection or
     # just upload the file?") is answered deterministically. Sending it to the
     # model produced invented Kaizen/ARCP rules and an unverified SLO mapping.
@@ -1184,10 +1190,11 @@ Hard limits:
 - Never map anything to an SLO, key capability, or curriculum number.
 - Never state RCEM, ARCP, deanery, or Kaizen platform rules, and never predict how a panel will treat evidence.
 - Never tell the user to upload a loose file to Kaizen; this product saves drafts of the forms listed above.
+- Never describe how Portfolio Guru stores, uses or protects logins or credentials, and never promise uploads, filing or saving.
 
 {FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
             text = await _generate(prompt, purpose="grounded_answer")
-            return sanitize_internal_form_codes(text.strip())
+            return sanitize_internal_form_codes(text.replace("**", "").strip())
 
     # Check deterministic standalone product/help questions before broad form support.
     text_lower = text.lower()
@@ -1301,25 +1308,10 @@ Supported forms are auto-filled with structured data and saved as drafts in Kaiz
 
 Describe your case or activity and I'll recommend the right form.""")
 
-    # General question — use AI but with grounded facts
-    prompt = f"""You are Portfolio Guru, a Telegram bot that helps RCEM doctors file their clinical cases to the Kaizen e-portfolio.
-
-Answer this question about what you do. Be concise and helpful. Key facts:
-- You accept case descriptions via text, voice note, photo, or document (PDF, Word, PowerPoint)
-- You support 45 RCEM forms across assessments, reflections, teaching, management, audit and research
-- Supported forms are auto-filled to Kaizen as drafts after the user approves them
-- The draft is shown for review before filing
-- Nothing is submitted to a supervisor - only saved as a draft
-- Credentials are encrypted and never shared
-
-Question: {text}
-
-Answer concisely. If the question is about a specific form type, confirm it's supported.
-
-{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
-
-    text = await _generate(prompt, purpose="grounded_answer")
-    return sanitize_internal_form_codes(text.strip())
+    # Unknown/general questions fail closed to reviewed product copy. A model
+    # cannot author capability, upload, login or credential-handling promises.
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    return reply.full_text() if reply is not None else render_message("scope_redirect")
 
 
 ESSENTIAL_PRESENT = "present"

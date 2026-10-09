@@ -155,6 +155,7 @@ FILE_TERMS = (
 )
 
 ACCOUNT_TERMS = (
+    "account",
     "billing",
     "payment",
     "pay",
@@ -228,6 +229,15 @@ def route_message(message: str) -> RouterResult:
             intent=ConversationalIntent.SAFETY_OR_MEDICAL_ADVICE,
             confidence=0.9,
             signals=_compact_signals(action="medical_safety_redirect"),
+        )
+
+    # Case evidence owns the turn; a handover plan or login problem within a
+    # reflection is not a request to change the doctor's bot account.
+    if has_case_narrative(text):
+        return RouterResult(
+            intent=ConversationalIntent.NEW_CASE,
+            confidence=0.9,
+            signals=_compact_signals(action="start_case", form_type=form_type),
         )
 
     if _contains_any(text, SETUP_TERMS):
@@ -393,14 +403,39 @@ def _looks_like_question(text: str) -> bool:
 
 
 def _looks_like_case_description(text: str) -> bool:
-    clinical_hits = sum(1 for term in CLINICAL_TERMS if term in text)
+    clinical_hits = sum(1 for term in CLINICAL_TERMS if _contains_term(text, term))
     has_patient_demographic = bool(re.search(r"\b\d{1,3}\s*([mf]|male|female)\b", text))
-    enough_words = len(text.split()) >= 8
-    return enough_words and (clinical_hits >= 2 or has_patient_demographic)
+    return clinical_hits >= 2 or has_patient_demographic
 
 
 def _compact_signals(**signals: str | None) -> dict[str, str]:
     return {key: value for key, value in signals.items() if value}
+
+
+def has_case_narrative(message: str) -> bool:
+    """Recognise narrated evidence before incidental product/navigation words.
+
+    Reflection and team/teaching evidence need no patient demographic or
+    minimum clinical-keyword count. Require narrated activity so requests like
+    'Can you help with a reflection?' remain questions.
+    """
+    text = _normalise(message)
+    narrated_activity = bool(re.search(
+        r"\b(?:i|we)\s+(?:had|saw|assessed|managed|treated|reviewed|reflected|"
+        r"learnt|learned|clarified|delivered|attended|performed|led|observed)\b",
+        text,
+    ))
+    evidence_context = _contains_any(text, CLINICAL_TERMS + (
+        "reflection", "reflected", "handover", "handovers", "teaching",
+        "simulation", "simulated", "learning",
+    ))
+    reflection_notes = not _looks_like_question(text) and bool(re.search(
+        r"(?:^reflection\b|^reflective log\b|\breflection\s*:\s*\S|\bmy learning\b)",
+        text,
+    ))
+    return reflection_notes or (narrated_activity and evidence_context) or (
+        not _looks_like_question(text) and _looks_like_case_description(text)
+    )
 
 
 def _unknown() -> RouterResult:

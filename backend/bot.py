@@ -78,7 +78,7 @@ from kaizen_index import (
 )
 from kaizen_sync import sync_kaizen_portfolio_index_for_user
 from bulk_filer import bulk_file
-from conversational_router import ConversationalIntent, route_message
+from conversational_router import ConversationalIntent, has_case_narrative, route_message
 from channel_actions import to_telegram_keyboard
 from channel_reply_policy import select_deterministic_reply
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
@@ -2461,7 +2461,11 @@ def _has_rich_clinical_evidence(text: str) -> bool:
     case mentioning form/support words should enter the draft flow, not receive
     static "form is supported" copy.
     """
-    raw = (text or "").strip()
+    if not isinstance(text, str):
+        return False
+    raw = text.strip()
+    if has_case_narrative(raw):
+        return True
     if len(raw.split()) < 25:
         return False
     lowered = raw.lower()
@@ -2562,9 +2566,9 @@ def _use_shared_reply_policy_for_pre_capture(text: str) -> bool:
 
     The pre-capture router can identify many non-case questions. Some should use
     Portfolio Guru's shared deterministic reply policy (setup, broad "what can
-    you help with?", cost/payment safety copy). More specific form, pricing, and
-    style questions still go through ``answer_question`` so the answer can be
-    grounded without entering the case pipeline.
+    you help with?", account/payment safety copy). More specific form and
+    style questions use ``answer_question``'s reviewed answers without entering
+    the case pipeline.
     """
     raw = (text or "").strip()
     if not raw:
@@ -2578,7 +2582,7 @@ def _use_shared_reply_policy_for_pre_capture(text: str) -> bool:
     }:
         return True
     if routed.intent is ConversationalIntent.ACCOUNT_OR_BILLING:
-        return "cost" in lowered or "how much" in lowered or "payment details" in lowered
+        return True
     if "what can you help me with" in lowered:
         return True
     if "can you help me with" in lowered and (
@@ -14183,7 +14187,11 @@ async def handle_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _track_pending_bundle_message(context, ack)
             return AWAIT_CASE_INPUT
 
-        if context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form"):
+        if (
+            context.user_data.get("awaiting_detail") and context.user_data.get("chosen_form")
+        ) or _has_rich_clinical_evidence(raw_text):
+            # Evidence takes priority over menu words and both question
+            # classifiers. Continue through the normal capture/review path.
             case_text = raw_text
         else:
             words_lower = raw_text.lower()

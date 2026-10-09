@@ -142,11 +142,16 @@ async def test_standalone_product_questions_do_not_enter_case_pipeline(prompt):
          patch("bot._process_case_text", new=process_case):
         await bot.handle_case_input(update, context)
 
-    grounded.assert_awaited_once()
     process_case.assert_not_awaited()
     text = _last_text(sim)
     assert text.startswith((f"{HOUSE_EMOJI} ", "📋"))
-    assert "Portfolio/admin answer." in text
+    if prompt == "What is the pricing?":
+        from channel_reply_policy import select_deterministic_reply
+        grounded.assert_not_awaited()
+        assert text == select_deterministic_reply(prompt).full_text()
+    else:
+        grounded.assert_awaited_once()
+        assert "Portfolio/admin answer." in text
 
 
 @pytest.mark.asyncio

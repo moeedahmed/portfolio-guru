@@ -54,7 +54,10 @@ def producer_digest():
 # or callback payload added, removed or reworded.
 # 9 Oct 2026: the drafting progress message is deleted after the draft is
 # sent (edit fallback only); the draft keyboard and payloads are unchanged.
-PRODUCER_DIGEST = '87b81210fd73757c0fabeca942b2a2b4ddcd5df922f5908e08c9cc591082762e'
+# 9 Oct 2026: reviewed case/reflection priority before question/menu routing;
+# account replies use fixed copy. Existing keyboard/payload branches unchanged.
+# 9 Oct 2026: non-string input is never treated as case evidence; no branch change.
+PRODUCER_DIGEST = 'f744c4b27fb3d141288185d012c3fb36abbb3131e27884351238095f745039c8'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
