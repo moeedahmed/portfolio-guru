@@ -539,10 +539,12 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_still_s
     with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
         await handle_case_input(followup_update, context)
 
-    assert call_count["n"] == 1
-    # The draft is now sent as a new message (27 Sep 2026), so a failed edit
+    # Since 9 Oct 2026 the progress line is deleted after the draft is sent
+    # and only edited if that fails, so the failing edit may never be reached.
+    assert call_count["n"] <= 1
+    # The draft is sent as a new message (27 Sep 2026), so a failed edit
     # of the progress line is not a false success: the draft still arrives.
-    last_kind, last_text, _ = sim.messages_sent[-1]
+    last_kind, last_text, _ = [m for m in sim.messages_sent if m[0] not in {"delete", "bot_delete"}][-1]
     assert last_kind == "send" and "still needed" in last_text.lower()
     # The old prompt was still retired (deleted) before the failure.
     actions = [action for action, _, _ in sim.messages_sent]

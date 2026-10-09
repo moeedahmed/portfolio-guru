@@ -52,7 +52,9 @@ def producer_digest():
 # photo -> consent -> document intent and non-resuming state preservation.
 # Batch A (stop losing work): bot.py state/clean-up changes only; no keyboard
 # or callback payload added, removed or reworded.
-PRODUCER_DIGEST = 'fcab38c8b9c1d0486e97ed20f16da9fd2c3250f03d11d7544f1da278771b2c8c'
+# 9 Oct 2026: the drafting progress message is deleted after the draft is
+# sent (edit fallback only); the draft keyboard and payloads are unchanged.
+PRODUCER_DIGEST = '87b81210fd73757c0fabeca942b2a2b4ddcd5df922f5908e08c9cc591082762e'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

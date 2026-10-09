@@ -6772,14 +6772,11 @@ async def _show_draft_review(
     if edit:
         # The draft follows a slow drafting step. Telegram does not always
         # redraw an edit to an older message, so the draft arrives as a new
-        # message at the bottom and the progress message is closed off.
+        # message at the bottom. The progress message is then removed, since
+        # the draft speaks for itself; it is only closed off if removal fails.
         chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
         sent = None
         if chat_id:
-            try:
-                await _safe_edit_text(message, f"✅ {_form_display_name(form_type)} draft ready below.")
-            except Exception as exc:
-                logger.debug("Could not close the drafting progress message: %s", exc)
             try:
                 sent = await context.bot.send_message(
                     chat_id=chat_id,
@@ -6789,6 +6786,15 @@ async def _show_draft_review(
                 )
             except Exception as exc:
                 logger.warning("Draft review send failed, editing in place instead: %s", exc)
+            if sent is not None:
+                try:
+                    await message.delete()
+                except Exception as exc:
+                    logger.debug("Could not remove the drafting progress message: %s", exc)
+                    try:
+                        await _safe_edit_text(message, f"✅ {_form_display_name(form_type)} draft ready below.")
+                    except Exception as edit_exc:
+                        logger.debug("Could not close the drafting progress message: %s", edit_exc)
         if sent is None:
             await _safe_edit_text(
                 message,

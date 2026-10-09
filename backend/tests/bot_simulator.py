@@ -14,6 +14,9 @@ class BotSimulator:
     def __init__(self, user_id: int = 99999999):
         self.user_id = user_id
         self.messages_sent = []
+        # Bot-owned callback messages the bot removed (e.g. progress lines);
+        # kept apart so the last entry of messages_sent stays the reply.
+        self.callback_messages_deleted = []
         self.user_data = {}
         self.message_id_counter = 1
 
@@ -78,6 +81,7 @@ class BotSimulator:
         message.message_id = self.message_id_counter
         message.reply_text = AsyncMock(side_effect=self._capture_reply)
         message.edit_text = AsyncMock(side_effect=self._capture_edit)
+        message.delete = AsyncMock(side_effect=lambda *a, m=message, **k: self.callback_messages_deleted.append(m.text))
         self.message_id_counter += 1
 
         query = MagicMock(spec=CallbackQuery)
@@ -155,7 +159,11 @@ class BotSimulator:
         return []
 
     def get_last_text(self):
-        return self.messages_sent[-1][1] if self.messages_sent else None
+        # A trailing removal of the progress line is not a reply.
+        for kind, text, _ in reversed(self.messages_sent):
+            if kind not in {"delete", "bot_delete"}:
+                return text
+        return None
 
     def clear_messages(self):
         self.messages_sent = []
