@@ -1,9 +1,4 @@
-"""Non-invasive conversational intent router contract.
-
-Phase 1 keeps this module deliberately standalone: no Telegram handlers import
-or call it yet. Later phases can route ordinary text through this contract
-without changing the existing deterministic workflows.
-"""
+"""Pure intent routing shared by capture and open-draft workflows."""
 
 from __future__ import annotations
 
@@ -155,6 +150,16 @@ FILE_TERMS = (
 )
 
 ACCOUNT_TERMS = (
+    "account",
+    "tier",
+    "limit",
+    "access",
+    "blocked",
+    "trial",
+    "usage",
+)
+
+BILLING_TERMS = (
     "billing",
     "payment",
     "pay",
@@ -163,15 +168,11 @@ ACCOUNT_TERMS = (
     "how much",
     "subscribe",
     "subscription",
-    "plan",
     "price",
     "pricing",
-    "tier",
-    "limit",
-    "access",
-    "blocked",
-    "trial",
-    "usage",
+    "refund",
+    "upgrade",
+    "invoice",
 )
 
 SETUP_TERMS = (
@@ -181,6 +182,7 @@ SETUP_TERMS = (
     "credential",
     "credentials",
     "login",
+    "log in",
     "password",
     "username",
     "kaizen login",
@@ -230,25 +232,27 @@ def route_message(message: str) -> RouterResult:
             signals=_compact_signals(action="medical_safety_redirect"),
         )
 
-    if _contains_any(text, SETUP_TERMS):
+    # Workflow precedence is deliberate: an explicit filing instruction owns
+    # the turn; a direct product question/complaint owns its own sentence;
+    # otherwise activity evidence takes priority over incidental product words.
+    if _explicit_filing_request(text):
         return RouterResult(
-            intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
-            confidence=0.88,
-            signals=_compact_signals(action="setup_credentials"),
+            intent=ConversationalIntent.FILE_TO_KAIZEN,
+            confidence=0.9,
+            signals=_compact_signals(
+                action="file_to_kaizen", form_type=form_type, target_draft="current",
+            ),
         )
 
-    if _looks_like_question(text) and _contains_any(text, SECURITY_TERMS):
-        return RouterResult(
-            intent=ConversationalIntent.SETUP_OR_CREDENTIALS,
-            confidence=0.86,
-            signals=_compact_signals(action="security_credentials"),
-        )
+    product_help = _product_help(text)
+    if product_help:
+        return product_help
 
-    if _contains_any(text, ACCOUNT_TERMS):
+    if _has_activity_evidence(text):
         return RouterResult(
-            intent=ConversationalIntent.ACCOUNT_OR_BILLING,
-            confidence=0.86,
-            signals=_compact_signals(action="account_or_billing"),
+            intent=ConversationalIntent.NEW_CASE,
+            confidence=0.9,
+            signals=_compact_signals(action="start_case", form_type=form_type),
         )
 
     if _looks_like_form_help_request(text, form_type):
@@ -263,17 +267,6 @@ def route_message(message: str) -> RouterResult:
             intent=ConversationalIntent.HELP_OR_CAPABILITY,
             confidence=0.86,
             signals=_compact_signals(action="answer_capability"),
-        )
-
-    if _contains_any(text, FILE_TERMS):
-        return RouterResult(
-            intent=ConversationalIntent.FILE_TO_KAIZEN,
-            confidence=0.9,
-            signals=_compact_signals(
-                action="file_to_kaizen",
-                form_type=form_type,
-                target_draft="current",
-            ),
         )
 
     if _looks_like_edit_request(text):
@@ -387,20 +380,173 @@ def _contains_safety_medical_request(text: str) -> bool:
 
 
 def _looks_like_question(text: str) -> bool:
-    return "?" in text or bool(
-        re.match(r"^(what|which|how|why|when|where|who|can|could|do|does|is|are|will|should)\b", text)
+    return "?" in text or bool(_question_clauses(text))
+
+
+_QUESTION_START = re.compile(
+    r"^(?:(?:what|which|who)\b|"
+    r"how\s+(?:do|does|did|can|could|should|will|is|are|much|many)\b|"
+    r"(?:why|when|where)\s+(?:do|does|did|can|could|should|will|is|are|was|were|has|have)\b|"
+    r"(?:can|could|would|do|does|did|is|are|was|were|will|should|has|have)(?:n?['’]t)?\s+"
+    r"(?:i|we|you|my|our|this|that|the|portfolio guru|kaizen)\b)"
+)
+
+
+def _sentences(text: str) -> tuple[str, ...]:
+    # Keep narrated clauses intact; split a conjunction, comma or colon only
+    # before a direct question ("I taught handover, why is my account blocked?").
+    return tuple(part.strip() for part in re.split(
+        r"[?!.;]|\b(?:and|but)\s+(?=(?:how|why|what|when|where|can|could)\b)"
+        # A comma or colon is narrative punctuation unless a question follows:
+        # one ending in "?", or one about the doctor or their account
+        # ("..., what was difficult was IV access" stays one clause).
+        r"|[,:]\s*(?=(?:how|why|what|when|where|which|who|is|are|do|does|did|can|could|would|should|will|has|have)\b[^.;!?]*\?)"
+        r"|[,:]\s*(?=(?:(?:how|why|what|when|where)\s+)?"
+        r"(?:do|does|did|can|could|would|should|will|is|are|was|were|has|have)(?:n?['’]t)?\s+"
+        r"(?:i|you|my|we|our)\b)", text,
+    ) if part.strip())
+
+
+def _question_clauses(text: str) -> tuple[str, ...]:
+    return tuple(part for part in _sentences(text) if _QUESTION_START.match(part))
+
+
+def _evidence_writing_request(sentence: str) -> bool:
+    """The requested writing object matters, not incidental account/plan words."""
+    action = re.search(
+        r"\b(?:(?:help|support)\s+(?:me\s+)?(?:with\s+|(?:to\s+)?(?:write|draft|reflect)\s+)"
+        r"|(?:write|draft|rewrite)\s+|reflect\s+on\s+)", sentence,
     )
+    if not action:
+        return False
+    if re.search(r"\breflect\s+(?:on\s+)?$", action.group()):
+        return True
+    # Descriptive adjectives are unrestricted. Stop at the object's topic or
+    # purpose so "help with my account to save a reflection" stays account help.
+    subject = re.split(r"\b(?:about|on|to|because|for|so)\b", sentence[action.end():], maxsplit=1)[0]
+    return _contains_any(subject, (
+        "case", "activity", "experience", "draft", "reflection",
+        *(alias for aliases in FORM_ALIASES.values() for alias in aliases),
+    ))
+
+
+def _explicit_filing_request(text: str) -> bool:
+    prefix = r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?"
+    filing = "|".join(re.escape(term) for term in FILE_TERMS + ("save to kaizen",))
+    return any(re.match(prefix + rf"(?:{filing})\b", sentence) for sentence in _sentences(text))
+
+
+def _billing_context(text: str) -> bool:
+    return _contains_any(text, BILLING_TERMS) or bool(re.search(
+        r"\b(?:what|which)\s+plan\s+(?:am i|is my account)\s+on\b|"
+        r"\b(?:change|upgrade|cancel)\s+my\s+plan\b|"
+        r"\bplan\s+price\b|\b(?:paid|free)\s+plan\b", text,
+    ))
+
+
+def _product_help(text: str) -> RouterResult | None:
+    """Resolve direct questions first, then complaints/requests about the product.
+
+    Narrated events with incidental product vocabulary never enter this pass.
+    The result is shared with has_case_narrative so capture cannot undo it.
+    """
+    sentences = _sentences(text)
+    questions = tuple(part for part in sentences if _QUESTION_START.match(part))
+    requests = tuple(part for part in sentences if part not in questions and (
+        re.match(r"^(?:please\s+)?(?:tell me|help|connect|reconnect|set up|cancel|change|upgrade)\b", part)
+        or re.match(r"^i\s+(?:need|want)\b", part)
+        or _own_product_complaint(part)
+        or part in SETUP_TERMS + ACCOUNT_TERMS + BILLING_TERMS
+    ))
+    for sentence in questions + requests:
+        if _evidence_writing_request(sentence):
+            continue
+        topic = None
+        if _billing_context(sentence):
+            intent, action = ConversationalIntent.ACCOUNT_OR_BILLING, "account_or_billing"
+            topic = "billing"
+        elif _contains_any(sentence, SETUP_TERMS):
+            action = "setup_credentials"
+            # A reconnect or login failure concerns an existing account. New
+            # connection/setup and credential-security questions retain setup.
+            if _contains_term(sentence, "reconnect") or _own_product_complaint(sentence) or (
+                _contains_any(sentence, ("log in", "login"))
+                and re.search(r"\b(?:can(?:not|'t)|unable|fail\w*|blocked)\b", sentence)
+            ):
+                intent, topic = ConversationalIntent.ACCOUNT_OR_BILLING, "account"
+            else:
+                intent = ConversationalIntent.SETUP_OR_CREDENTIALS
+        elif _contains_any(sentence, SECURITY_TERMS):
+            intent, action = ConversationalIntent.SETUP_OR_CREDENTIALS, "security_credentials"
+        elif _contains_any(sentence, ACCOUNT_TERMS) or _own_product_complaint(sentence):
+            intent, action = ConversationalIntent.ACCOUNT_OR_BILLING, "account_or_billing"
+            topic = "account"
+        elif _contains_any(sentence, (
+            "upload", "save", "saving", "file", "filing", "submit", "bot", "app",
+        )):
+            intent, action = ConversationalIntent.HELP_OR_CAPABILITY, "answer_capability"
+        else:
+            continue
+        return RouterResult(intent=intent, confidence=0.88, signals=_compact_signals(action=action, topic=topic))
+    return None
+
+
+def _own_product_complaint(sentence: str) -> bool:
+    """A current account/save failure, not an account event inside an activity."""
+    own_subject = bool(re.match(
+        r"^(?:i\s+(?:can(?:not|'t)|could(?:n't| not)|am unable|have|had)|"
+        r"my\s+(?:account|login|access|subscription|payment|plan|draft)|"
+        r"(?:saving|filing|logging in)\b)", sentence,
+    ))
+    failure = bool(re.search(
+        r"\b(?:can(?:not|'t)|couldn't|unable|problem|blocked|blocking|failed|failing|"
+        r"fails|failure|error|won't|not working)\b", sentence,
+    ))
+    product = _contains_any(sentence, ACCOUNT_TERMS + SETUP_TERMS + BILLING_TERMS) or bool(re.search(
+        r"\b(?:saving|save|filing|file)\b.*\b(?:reflection|draft|kaizen|portfolio|evidence)\b", sentence,
+    ))
+    return own_subject and failure and product
 
 
 def _looks_like_case_description(text: str) -> bool:
-    clinical_hits = sum(1 for term in CLINICAL_TERMS if term in text)
+    clinical_hits = sum(1 for term in CLINICAL_TERMS if _contains_term(text, term))
     has_patient_demographic = bool(re.search(r"\b\d{1,3}\s*([mf]|male|female)\b", text))
-    enough_words = len(text.split()) >= 8
-    return enough_words and (clinical_hits >= 2 or has_patient_demographic)
+    return clinical_hits >= 2 or has_patient_demographic
 
 
 def _compact_signals(**signals: str | None) -> dict[str, str]:
     return {key: value for key, value in signals.items() if value}
+
+
+def has_case_narrative(message: str) -> bool:
+    """Recognise narrated evidence before incidental product/navigation words.
+
+    Reflection and team/teaching evidence need no patient demographic or
+    minimum clinical-keyword count. Require narrated activity so requests like
+    'Can you help with a reflection?' remain questions.
+    """
+    text = _normalise(message)
+    return not _explicit_filing_request(text) and not _product_help(text) and _has_activity_evidence(text)
+
+
+def _has_activity_evidence(text: str) -> bool:
+    """Recognise activity only after the higher-priority routes have been checked."""
+    narrated_activity = bool(re.search(
+        r"\b(?:i|we)\s+(?:had|saw|assessed|managed|treated|reviewed|reflected|taught|"
+        r"learnt|learned|clarified|delivered|attended|performed|led|observed)\b",
+        text,
+    ))
+    evidence_context = _contains_any(text, CLINICAL_TERMS + (
+        "reflection", "reflected", "handover", "handovers", "teaching",
+        "simulation", "simulated", "learning",
+    ))
+    reflection_notes = not _looks_like_question(text) and bool(re.search(
+        r"(?:^reflection\b|^reflective log\b|\breflection\s*:\s*\S|\bmy learning\b)",
+        text,
+    ))
+    return reflection_notes or (narrated_activity and evidence_context) or (
+        not _looks_like_question(text) and _looks_like_case_description(text)
+    )
 
 
 def _unknown() -> RouterResult:

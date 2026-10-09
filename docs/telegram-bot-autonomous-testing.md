@@ -33,9 +33,19 @@ removed for these synchronous pages; real locator actions and navigations run.
 
 Run `python -m pytest tests/test_kaizen_fake_browser.py -m kaizen_browser -q`
 from `backend`. Install with `python -m playwright install chromium`.
-A missing browser may skip locally; `PG_REQUIRE_BROWSER=1` makes it fail and is
-set by CI and `verify_release.sh`. A present browser that cannot start always
-fails. The lane also runs in `verify_changed.sh` and the full offline suite.
+A missing browser or a Chromium launch refusal may skip locally when
+`PG_REQUIRE_BROWSER` is unset; each affected browser test is reported as skipped.
+`PG_REQUIRE_BROWSER=1` makes launch failures fail and is set by CI and
+`verify_release.sh`. Filing failures after launch still fail in either mode.
+The lane also runs in `verify_changed.sh` and the full offline suite.
+
+The per-form bot matrix covers all 74 `FORM_FIELD_MAP` entries: real text capture,
+form choice and draft-review handlers, then the real approval/router/filer against
+the generated fake pages. Only model and profile boundaries are stubbed. Separate
+review tests run without Chromium; Save/persisted-field tests need Chromium.
+Case IDs name the form and its management, leadership, teaching, reflection or
+clinical group. There are currently no mapped file-upload fields; the utility
+`FILE_UPLOAD` forms have no deterministic field map, so no upload proof is claimed.
 
 ## On-demand operator Kaizen filing check
 
@@ -54,8 +64,16 @@ KAIZEN_LIVE_CHECK_APPROVED=operator-own-account \
   "$HOME/.local/share/portfolio-guru/venv/bin/python3" scripts/kaizen_live_check.py
 ```
 
-Add `--forms CBD MINI_CEX` to select a subset. Defaults are CBD, DOPS_2021,
-REFLECT_LOG and MINI_CEX (the 2021 Reflection form is not on the operator account; Kaizen redirects it and the bot reports that cleanly). Reflection links capabilities as tags, and a saved draft shows only how many tags it holds, so that row is reported as `count-only`, never `landed`. Approval must already be in the foreground
+Add `--forms CBD MINI_CEX` to select forms, or `--all-mapped` to select every
+deterministic form visible in a bot profile/category, including its catalogue
+2021 variants (currently 71 codes). Defaults remain CBD, DOPS_2021, REFLECT_LOG
+and MINI_CEX. Hidden, unmapped and utility forms are refused before credential
+retrieval. A form that Kaizen redirects away from on this operator account is
+reported as `unavailable`, not `failed`; it leaves the overall check incomplete
+(exit 2), even if every available form passed. No draft is written for that form.
+Reflection links capabilities as tags, and a saved draft shows only how many
+tags it holds, so that row is reported as `count-only`, never `landed`.
+Approval must already be in the foreground
 environment before dotenv is loaded. Staging/offline flags are checked again
 after dotenv. A missing stored password connection refuses the run; this lane
 does not borrow shared Chrome's login or provide a password-free login flow.
@@ -79,11 +97,15 @@ POSTs (`/token`, `/elastic/<index>`, `/<collection>/changes`), which real Kaizen
 needs to render a draft (found on the first real run, 8 Oct 2026). Each field reports
 landed, empty, mismatch or not-mapped, with the filer's skipped fields and
 `safe_skip` reasons. Dates compare as UK dates, dropdowns by value/selected
-label, and narrative text includes the normal AI declaration. Curriculum proof
+label, multi-select widgets by their exact selected option labels, and narrative
+text includes the normal AI declaration. Payloads use schema options and UK dates,
+including the distinct QIAT stage dropdown. Current mapped evidence forms have no
+file-upload fields; reports mark uploads `not-applicable`, without creating or
+uploading a synthetic file. Curriculum proof
 requires the exact checked capability (tag-style elements are ignored, since an
-unselected suggestion looks the same as a saved tag); a tag
-count alone cannot pass. A tree/tag identity hidden by Kaizen's read-only view
-stays a reported gap, rather than being inferred or opened through a write flow.
+unselected suggestion looks the same as a saved tag). A saved tag count is
+reported as `count-only` and can complete the check, but never proves tag identity.
+Missing or mismatched counts remain reported gaps; read-back never opens a picker.
 Raw DOM values, decrypted credentials, cookies and provider errors are omitted.
 
 JSON and Markdown go under gitignored
@@ -169,6 +191,78 @@ TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved REQUIRE_TELEGRAM_LIVE=1 s
 ```
 
 Only set `TELEGRAM_LIVE_APPROVED` after an already-approved task/card covers this exact run, or after Moeed has approved a standalone ad-hoc run. Never run Telethon live QA silently while Moeed is manually testing the bot.
+
+`--wider-journeys` is a separate, opt-in **test-bot-only** mode. Set
+`TELEGRAM_BOT_USERNAME=portfolio_guru_test_bot` and the singleton
+`TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_test_bot`, with the existing approved
+Telethon environment, or use `stage.sh smoke --sha <40hex> --wider`.
+It selects dedicated synthetic text CBD, handwritten-style photo, voice and
+PDF journeys: capture → Choose form → CBD choice → preview → change only the
+encounter date using the bot's reply-to-edit route → verify the refreshed date.
+Gathering mode must already be on: a missing Choose form is incomplete proof.
+`/settings` visits Portfolio defaults and its Portfolio, Pathway and Curriculum
+pickers, Reminders, Writing style sources and Manual examples, pressing Back
+from each without choosing values. Kaizen entries sampling is observed but
+never pressed: it automatically builds and activates the writing profile.
+A missing supervision detail has one bounded reply. Ready means the harness classifies a gap-free draft and observes
+exactly the Save to Kaizen boundary payload and safe Cancel control. Save is
+never pressed. Each new journey writes a separate transcript, including failure
+and exactly one `/cancel` in `finally`, without a leading reset or Cancel
+button click. Voice uses local `say` + `ffmpeg`/libopus; unavailable
+tools skip with a reason, and skipped/missing journeys fail wider completeness.
+This does not change production `--focused-release`, satisfy the
+whole-bot aggregate, or establish live proof until explicitly run.
+
+Staging journey proof is remembered in the gitignored local
+`.artifacts/telegram-bot-qa/journey-passes.json`, scoped to the test bot.
+Fingerprints hash `bot.py`, its transitive local imports (including lazy imports),
+runtime data/dependency files, the QA/verification scripts, and `test_e2e.py`
+plus its local harness and synthetic inputs. This is deliberately conservative:
+a shared `bot.py` or shared test-file change invalidates every journey; unrelated
+docs and tests do not. Both committed source equality and the exact staging
+runtime are checked before and after the run. Skips, failures and incomplete
+JUnit cases never create passes; completed journeys survive a later batch failure.
+
+Use `--only text,settings` for a bounded run, `--changed` for missing/changed
+fingerprints (also the default for `stage.sh smoke`), and `--full` to force every
+journey once before asking for Ship. Selection flags imply `--wider-journeys`
+when no catalogue mode is given; they cannot weaken focused-release or whole-bot
+proof. IDs are `LAT`, `TEACH`, `QIAT`, `MGMT_ROTA`, `SERIOUS_INC`, `PROC_LOG`,
+`US_CASE`, `FORMAL_COURSE`, `REFLECT_LOG`, `teaching-pdf`, `text`, `photo`, `voice`,
+`document`, `settings`, `form-switching`. An unchanged pass prints
+`already passed at <sha> (reused; no fresh pass)`. Partial smoke cannot approve a
+release: all sixteen current fingerprints must be covered at the release SHA,
+either fresh or reused, and the staging approval/release gate verifies them
+against that SHA’s Git objects. No live run is added to CI.
+
+`--form-variety` selects ten short, sequential ready-draft journeys on the same
+allowlisted test bot: LAT (shift leadership), TEACH, QIAT, MGMT_ROTA, SERIOUS_INC,
+PROC_LOG (chest drain), US_CASE (POCUS), FORMAL_COURSE and REFLECT_LOG text cases,
+plus a tiny synthetic teaching PDF routed to TEACH. Five text cases accept a
+matching recommendation (including `FORM|best` only with the exact target label);
+the others, and any mismatched recommendation, use Forms → category → target.
+Curriculum-specific 2021 variants are accepted where registered. Known supervision
+or reflection gaps get one generic synthetic reply; any unknown gap fails.
+Each journey observes ready Save/Cancel controls, never clicks Save, and sends
+one `/cancel` in `finally`, retaining a transcript on success or failure.
+`--wider-journeys` includes all ten plus form switching, so `stage.sh smoke --wider` runs sixteen
+journeys in total. Missing, skipped or failed journeys fail completeness.
+
+`--form-switching` selects the form-menu journey alone on the same singleton
+test-bot allowlist. One short synthetic case goes through Choose form →
+recommendation → Forms → every offered category and Back → recommendation →
+a different form's draft. The draft has only Save/Cancel, so switching uses
+the real Cancel control, resends the same invented case, and selects another
+form. It then cancels that draft, recaptures the case and presses the
+recommendation's Restart. Every tap checks screen text and exact labels/payloads,
+records edited-in-place versus replaced message IDs, checks history for duplicate
+screens and retired keyboards, and requires a forward/back/Cancel route (the
+cancelled screen explicitly invites a new case). Draft replacement and its
+in-place fallback are accepted; category/Back navigation must edit in place.
+Save, Submit, login, Reset and On/Off are never pressed. Exactly one `/cancel`
+in `finally` retains the transcript even on failure. Offline fake-client checks
+cover both draft display paths, stale controls, duplicate screens and dead ends.
+This mode remains opt-in and does not change existing default/focused proof.
 
 ## Whole-bot completion
 

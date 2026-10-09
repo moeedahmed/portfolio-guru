@@ -57,7 +57,7 @@
         'FORM|show_all',
       ),
       tuple(
-        '🔄 Restart',
+        '❌ Cancel',
         'CANCEL|form',
       ),
     ]),

@@ -243,3 +243,33 @@ async def test_edit_invalidates_pending_save_continuations(callback):
     curriculum.assert_not_called()
     assert context.user_data["attachment_path"] == "/synthetic/report.pdf"
     assert not context.user_data.get("attachment_upload_confirmed")
+
+
+
+@pytest.mark.parametrize("action", ["remove_possible_kc", "add_possible_kc"])
+@pytest.mark.parametrize("case_state", [None, bot.AWAIT_APPROVAL, bot.AWAIT_GATHERING])
+def test_retired_kc_buttons_route_to_stale_reply(app, action, case_state):
+    assert _route(app, make_callback_update(f"ACTION|{action}|abcdef"), case_state=case_state) == (
+        None, "_answer_unhandled_button")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["remove_possible_kc", "add_possible_kc"])
+@pytest.mark.parametrize("has_draft", [True, False])
+async def test_retired_kc_tap_answers_without_mutation_or_filing(action, has_draft):
+    import copy
+    from models import CBDData
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    if has_draft:
+        bot._store_draft(context, CBDData(key_capabilities=["SLO4 KC1", "SLO4 KC2"],
+                                        possible_key_capability={"capability": "SLO9 KC2"}))
+    before = copy.deepcopy(context.user_data)
+    callback = f"ACTION|{action}|{context.user_data.get('case_token', 'abcdef')}"
+    update = sim._make_callback_update(callback)
+    with patch('bot.route_filing', AsyncMock()) as filing:
+        assert await bot.handle_callback(update, context) is None
+    assert context.user_data == before
+    assert 'earlier step' in update.callback_query.answer.await_args.args[0]
+    filing.assert_not_awaited()

@@ -540,9 +540,14 @@ def _make_local_case_insight_reply(text: str):
         "- Key metrics or outcomes (if applicable)\n\n"
         "Reply with the above and I'll prepare your portfolio entry."
     )
+    from channel_actions import ChannelAction
     from conversation_supervisor import DRAFT_NOW_ACTION
 
-    return ChannelReply(body=body, actions=(DRAFT_NOW_ACTION,))
+    # This local recommendation already chose the form: the next numbered
+    # option renders a preview, rather than opening Telegram's form picker.
+    return ChannelReply(body=body, actions=(
+        ChannelAction(action_id=DRAFT_NOW_ACTION.action_id, label="📝 Preview draft"),
+    ))
 
 
 def _case_fact_from_text(key: str, value: str, *, turn_index: int):

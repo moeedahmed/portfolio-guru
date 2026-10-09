@@ -36,7 +36,7 @@ import sys
 import tempfile
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-PINNED_FILES = ("scripts/release_loop.sh", "scripts/release_card.py", "scripts/staging_proof.py")
+PINNED_FILES = ("scripts/release_loop.sh", "scripts/release_card.py", "scripts/staging_proof.py", "scripts/telegram_journey_proof.py")
 
 
 def fail(message: str) -> int:
@@ -136,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         env = dict(os.environ)
         env.update(
+            PYTHONDONTWRITEBYTECODE="1",
             RELEASE_LOOP_BOOTSTRAP="1",
             RELEASE_LOOP_PINNED_SHA=sha,
             RELEASE_LOOP_ROOT=root,

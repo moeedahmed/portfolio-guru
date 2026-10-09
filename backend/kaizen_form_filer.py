@@ -1282,7 +1282,8 @@ def normalise_fields_for_deterministic_filing(form_type: str, fields: dict) -> d
         out.pop("clinical_reasoning", None)
 
     elif handling_key == "LAT":
-        out.pop("clinical_setting", None)
+        # No verified setting control exists: retain it for skipped/partial
+        # reporting rather than losing supplied evidence or using trainee_post.
         if out.get("reflection"):
             out["clinical_reasoning"] = _append_section(out.get("clinical_reasoning"), "Reflection", out["reflection"])
             out.pop("reflection", None)

@@ -7,8 +7,12 @@ import json
 import os
 import re
 import tempfile
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import telegram_journey_proof as journeys
 
 TARGET = "portfolio_guru_test_bot"
 
@@ -46,6 +50,8 @@ def main(argv=None) -> int:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--result", choices=("pass", "fail"))
     parser.add_argument("--note")
+    parser.add_argument("--coverage", type=Path)
+    parser.add_argument("--root", type=Path, default=Path(os.environ.get("RELEASE_LOOP_ROOT", str(Path(__file__).resolve().parents[1]))))
     parser.add_argument("--risk", choices=("internal", "telegram", "broad"))
     args = parser.parse_args(argv)
     if args.action == "gate" and not args.risk:
@@ -74,10 +80,26 @@ def main(argv=None) -> int:
             if args.action == "automated":
                 if not args.result:
                     raise ValueError("automated requires --result")
-                value.update(automated=args.result, automated_at=now, moeed_approved=False)
+                value.update(automated="fail", automated_at=now, moeed_approved=False)
+                value.pop('journey_coverage', None)
+                write(sha, value)  # revoke even if supplied coverage is unreadable/stale
+                if args.result == 'pass':
+                    if args.coverage is None:
+                        raise ValueError('Full journey coverage required for passing staging smoke')
+                    coverage = json.loads(args.coverage.read_text())
+                    if not isinstance(coverage, dict) or coverage.get('schema') != 1 or coverage.get('sha') != sha or coverage.get('target') != TARGET:
+                        raise ValueError('Journey coverage does not name this exact SHA and test bot')
+                    # Partial smoke is useful, but cannot authorise promotion.
+                    if set(coverage.get('journeys', {})) != set(journeys.JOURNEYS):
+                        value['automated'] = 'partial'
+                    else:
+                        journeys.validate_coverage(coverage, args.root, sha)
+                        value['automated'] = 'pass'
+                        value['journey_coverage'] = coverage
             else:
                 if value.get("automated") != "pass":
                     raise ValueError(f"staging automated smoke missing: scripts/stage.sh smoke --sha {sha}")
+                journeys.validate_coverage(value.get('journey_coverage'), args.root, sha, committed=True)
                 if args.action == "approve":
                     note = args.note or ""
                     if not note.strip() or len(note) > 500 or any(ord(c) < 32 for c in note):
@@ -92,7 +114,7 @@ def main(argv=None) -> int:
     except FileNotFoundError:
         print(f"STAGING BLOCKED: scripts/stage.sh deploy --sha {sha}")
         return 1
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, AttributeError, journeys.subprocess.CalledProcessError) as exc:
         print(f"STAGING BLOCKED: {exc}; scripts/stage.sh deploy --sha {sha}" if args.action == "gate" and "scripts/stage.sh" not in str(exc) else f"STAGING BLOCKED: {exc}")
         return 1
 

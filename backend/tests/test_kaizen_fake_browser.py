@@ -17,12 +17,212 @@ from telegram.ext import ConversationHandler
 
 import bot
 import kaizen_form_filer as filer
+import kaizen_live_check as live_check
 from ai_declaration import DECLARATION_FIELD_PRIORITY, DEFAULT_DECLARATION_TEXT
 from tests.bot_simulator import BotSimulator
 from tests.helpers import isolate_bot_storage, unstamp
 from tests.kaizen_fake import FakeKaizen, HOSTS, PASSWORD, USERNAME, controls
 
 pytestmark = [pytest.mark.kaizen_browser, pytest.mark.asyncio]
+
+
+@pytest.fixture(scope="module")
+def chromium_launch_state():
+    return {"unavailable": None}
+
+
+@pytest.fixture(autouse=True)
+def optional_chromium_launch(monkeypatch, chromium_launch_state):
+    """CI requires Chromium; an optional sandbox run reports launch limits."""
+    real_launch = BrowserType.launch
+
+    async def launch(self, **kwargs):
+        required = os.environ.get("PG_REQUIRE_BROWSER") == "1"
+        if chromium_launch_state["unavailable"] and not required:
+            pytest.skip(chromium_launch_state["unavailable"])
+        # Direct DOM safety tests also need background traffic closed, even
+        # though their pages are set_content-only and have no remote resources.
+        kwargs.setdefault("args", ["--disable-background-networking", "--host-resolver-rules=MAP * ~NOTFOUND"])
+        try:
+            return await real_launch(self, **kwargs)
+        except Error as exc:
+            if required:
+                raise
+            chromium_launch_state["unavailable"] = f"Chromium cannot launch in this environment: {str(exc).splitlines()[0]}"
+            pytest.skip(chromium_launch_state["unavailable"])
+
+    monkeypatch.setattr(BrowserType, "launch", launch)
+
+
+def mapped_form_group(form_type):
+    base = filer.filing_form_base(form_type)
+    if base.startswith("MGMT_") or base in {"BUSINESS_CASE", "COST_IMPROVE", "EQUIP_SERVICE"}:
+        return "management"
+    if base in {"LAT", "ACAT", "ACAF", "STAT", "MSF", "CLIN_GOV"}:
+        return "leadership"
+    if base.startswith("TEACH") or base in {"SDL", "EDU_ACT", "FORMAL_COURSE", "JCF"}:
+        return "teaching"
+    if base in {"REFLECT_LOG", "ESLE_REFLECTION", "COMPLAINT", "SERIOUS_INC", "CRIT_INCIDENT", "PDP", "APPRAISAL"}:
+        return "reflection"
+    if base == "FILE_UPLOAD":
+        return "upload"
+    return "clinical-and-other"
+
+
+MAPPED_FORM_CASES = [
+    pytest.param(form_type, id=f"{mapped_form_group(form_type)}:{form_type}")
+    for form_type in sorted(filer.FORM_FIELD_MAP)
+]
+
+
+@pytest.fixture
+def mapped_bot_conversation(monkeypatch, tmp_path):
+    """Real case/form/review handlers; only model and profile boundaries are fake."""
+    import bot
+    from models import CBDData, FormDraft, FormTypeRecommendation
+    from tests.bot_simulator import BotSimulator
+    from tests.helpers import isolate_bot_storage
+
+    isolate_bot_storage(monkeypatch, tmp_path)
+    monkeypatch.setattr(bot, "has_credentials", lambda uid: True)
+    monkeypatch.setattr(bot, "get_credentials", lambda uid: (USERNAME, PASSWORD))
+    monkeypatch.setattr(bot, "get_training_level", lambda uid: "ST5")
+    monkeypatch.setattr(bot, "get_voice_profile", lambda uid: "")
+    monkeypatch.setattr(bot, "check_can_file", AsyncMock(return_value=(True, 0, -1, "beta")))
+    monkeypatch.setattr(bot, "classify_intent", AsyncMock(return_value="case"))
+    real_route_filing = bot.route_filing
+
+    async def conversation(form_type):
+        curriculum = "2021" if form_type.endswith("_2021") or form_type == "ESLE_PART1_2" else "2025"
+        monkeypatch.setattr(bot, "get_curriculum", lambda uid: curriculum)
+        fields = synthetic_fields(form_type)
+        if form_type in {"CBD", "CBD_2021"}:
+            fields["clinical_reasoning"] = "PG CHECK - synthetic test draft, safe to delete. Synthetic clinical reasoning."
+            # CBDData has no wrapper Description/end date. The filer derives
+            # Description from the first reasoning sentence and uses the
+            # encounter date for both wrapper date controls.
+            fields["event_description"] = "PG CHECK - synthetic test draft, safe to delete."
+            draft = CBDData(**{key: fields[key] for key in (
+                "date_of_encounter", "stage_of_training", "clinical_reasoning", "reflection",
+            )}, clinical_setting="Emergency Department", patient_presentation="Synthetic chest pain",
+                trainee_role="I assessed and managed this fictional case", level_of_supervision="Indirect")
+        else:
+            draft_fields = dict(fields)
+            base = filer.filing_form_base(form_type)
+            if base == "DOPS":
+                draft_fields.update(clinical_setting=fields["placement"],
+                                    indication="a synthetic indication",
+                                    trainee_performance="I performed the synthetic procedure under supervision.")
+                fields["case_observed"] = (
+                    f"This DOPS concerned {fields['procedure_name']}, {fields['placement']}, performed for a synthetic indication."
+                    "\n\nI performed the synthetic procedure under supervision."
+                )
+            elif base == "MINI_CEX":
+                draft_fields["clinical_reasoning"] = "Synthetic clinical assessment"
+                fields["patient_presentation"] += "\n\nClinical assessment: Synthetic clinical assessment"
+            elif base == "SDL":
+                choice = next(spec["options"][0] for spec in filer.FORM_SCHEMAS["SDL"]["fields"]
+                              if spec["key"] == "learning_activity_type")
+                draft_fields["learning_activity_type"] = [choice]
+                fields["resource_details"] += f"\n\nLearning activity type: {choice}"
+            elif base == "LAT":
+                # These are synthetic doctor-provided details. Reflection has
+                # a merge target; clinical_setting remains an unmapped field.
+                draft_fields["reflection"] = "Synthetic reflection"
+                draft_fields["clinical_setting"] = "Emergency Department"
+                fields["clinical_reasoning"] += "\n\nReflection: Synthetic reflection"
+            elif base in {"AUDIT", "RESEARCH"}:
+                draft_fields["reflection"] = "Synthetic reflection"
+            elif base == "QIAT":
+                draft_fields["qi_journey_aspects"] = ["Creating Conditions"]
+            draft = FormDraft(form_type=form_type, uuid=filer.FORM_UUIDS[form_type], fields=draft_fields)
+        # Stub provider calls, retaining _analyse_selected_form's profile/date
+        # adapters and all draft-review/save safety checks.
+        monkeypatch.setattr(bot, "extract_cbd_data", AsyncMock(return_value=draft))
+        monkeypatch.setattr(bot, "extract_form_data", AsyncMock(return_value=draft))
+        monkeypatch.setattr(bot, "recommend_form_types", AsyncMock(return_value=[
+            FormTypeRecommendation(form_type=form_type, rationale="Synthetic regression evidence", uuid=filer.FORM_UUIDS[form_type]),
+        ]))
+        sim = BotSimulator()
+        sim.filing_results = []
+        async def observed_filing(**kwargs):
+            result = await real_route_filing(**kwargs)
+            sim.filing_results.append(result)
+            return result
+        monkeypatch.setattr(bot, "route_filing", observed_filing)
+        context = sim._make_context()
+        text = (
+            "PG CHECK - synthetic test draft, safe to delete. A fictional adult with "
+            "chest pain was assessed in the emergency department. I escalated early "
+            "and reviewed the outcome with the team. I learnt to communicate the "
+            "plan clearly and will repeat an early structured review next time."
+        )
+        assert await bot.handle_case_input(sim._make_text_update(text), context) == bot.AWAIT_FORM_CHOICE
+        assert "FORM|best" in {data for _, data in sim.get_last_buttons()}
+        assert context.user_data["case_text"] == text
+        assert await bot.handle_form_choice(sim._make_callback_update(f"FORM|{form_type}"), context) == bot.AWAIT_APPROVAL
+        reviewed = bot._load_draft(context)
+        assert context.user_data["chosen_form"] == form_type
+        assert reviewed.form_type == ("CBD" if isinstance(draft, CBDData) else form_type)
+        if isinstance(draft, CBDData):
+            for key in ("date_of_encounter", "stage_of_training", "clinical_reasoning", "reflection"):
+                assert getattr(reviewed, key) == fields[key], (form_type, key)
+        else:
+            assert {key: reviewed.fields.get(key) for key in draft_fields} == draft_fields, f"{form_type}: mapped fields changed before Save"
+        assert "APPROVE|draft" in {data for _, data in sim.get_last_buttons()}
+        assert bot._draft_gaps(context) == [], (form_type, bot._draft_gaps(context))
+        assert "💾 Save to Kaizen" in {label for label, _ in sim.get_last_buttons()}, (form_type, sim.get_last_buttons())
+        # Use the real, stamped callback from the review, preserving stale-save
+        # protection rather than inventing an unbound Save callback.
+        save_callback = next(
+            button.callback_data
+            for _, _, markup in reversed(sim.messages_sent) if markup
+            for row in markup.inline_keyboard for button in row
+            if (button.callback_data or "").startswith("APPROVE|draft")
+        )
+        return sim, context, fields, save_callback
+
+    return conversation
+
+
+@pytest.mark.parametrize("form_type", MAPPED_FORM_CASES)
+async def test_each_mapped_form_conversation_reaches_ready_draft(mapped_bot_conversation, form_type):
+    # Keep conversation coverage runnable even when Chromium is unavailable.
+    await mapped_bot_conversation(form_type)
+
+
+@pytest.mark.parametrize("form_type", MAPPED_FORM_CASES)
+async def test_each_mapped_form_bot_save_persists_every_field_without_submission(
+    fake_browser, mapped_bot_conversation, form_type,
+):
+    import bot
+    from telegram.ext import ConversationHandler
+
+    fake, _ = fake_browser
+    sim, context, fields, save_callback = await mapped_bot_conversation(form_type)
+    result = await bot.handle_approval_approve(sim._make_callback_update(save_callback), context)
+    assert result == ConversationHandler.END, sim.messages_sent
+    assert context.user_data.get("last_filing_status") in {"success", "partial"}, sim.messages_sent
+    assert len(sim.filing_results) == 1
+    filing = sim.filing_results[0]
+    # Full schema details can reach a ready review even when Kaizen's verified
+    # map has a documented gap. A partial save must name only that gap; every
+    # mapped control is still checked against the independent oracle below.
+    expected_unmapped = {
+        "AUDIT": {"reflection"}, "RESEARCH": {"reflection"},
+        "LAT": {"clinical_setting"}, "QIAT": {"qi_journey_aspects"},
+    }.get(filer.filing_form_base(form_type), set())
+    if filing["status"] == "partial":
+        assert expected_unmapped, (form_type, filing)
+        assert set(filing["skipped"]) == expected_unmapped, (form_type, filing)
+    else:
+        assert filing["status"] == "success", (form_type, filing)
+        assert filing["skipped"] == [], (form_type, filing)
+    assert len(fake.drafts) == 1
+    assert filer.canonical_form_type(fake.drafts[0]["form_type"]) == filer.canonical_form_type(form_type)
+    assert fake.drafts[0]["values"] == expected_values(form_type, fields)
+    assert fake.submit_clicks == 0, f"{form_type}: forbidden Submit/Send/Sign click"
+    assert fake.forbidden_clicks == [], f"{form_type}: forbidden clicks {fake.forbidden_clicks}"
 
 
 def synthetic_fields(form_type):
@@ -103,6 +303,7 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
     async def yield_only(*_args, **_kwargs):
         await real_sleep(0)
     monkeypatch.setattr(filer, "asyncio", SimpleNamespace(sleep=yield_only))
+    monkeypatch.setattr(Page, "wait_for_timeout", yield_only)
     real_type = Locator.type
     async def fast_type(self, text, **kwargs):
         kwargs["delay"] = 0
@@ -137,14 +338,31 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
                 # page-level navigation instead; every hop still goes through this handler.
                 headers = {k: v for k, v in headers.items() if k.lower() not in {"location", "content-length", "content-type"}}
                 headers["Content-Type"] = "text/html; charset=utf-8"
-                body = f"<script>location.replace({json.dumps(location)})</script>".encode()
+                pause = "await window.waitForFakeSaveRedirect();" if parsed.path.startswith("/save/") and getattr(fake, "save_redirect_release", None) else ""
+                body = f"<script>(async () => {{{pause}location.replace({json.dumps(location)})}})()</script>".encode()
                 status = 200
             await request_route.fulfill(status=status, headers=headers, body=body)
+
+        # A fulfilled redirect is a JavaScript hop, not the HTTP navigation
+        # Playwright normally waits for in click(). Pacing sleeps are removed
+        # above, so wait for the actual saved-document page before the filer
+        # reads page.url or begins post-save QA.
+        real_click = Locator.click
+        async def settled_submit(self, **kwargs):
+            action = await self.evaluate("el => el.form && el.type === 'submit' ? (el.getAttribute('formaction') || el.form.getAttribute('action')) : null")
+            result = await real_click(self, **kwargs)
+            if action and action.startswith("/save/"):
+                await self.page.wait_for_url("**/events/fillin/**", wait_until="load")
+            return result
+        monkeypatch.setattr(Locator, "click", settled_submit)
 
         real_new_page = Browser.new_page
         async def routed_page(self, **kwargs):
             kwargs["service_workers"] = "block"
             page = await real_new_page(self, **kwargs)
+            async def wait_for_fake_redirect(_source):
+                await fake.save_redirect_release.wait()
+            await page.expose_binding("waitForFakeSaveRedirect", wait_for_fake_redirect)
             await page.context.route("**/*", route)
             await page.context.route_web_socket("**/*", lambda ws: ws.close())
             return page
@@ -171,7 +389,32 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
             pytest.skip(message)
         yield fake, blocked
         assert fake.submit_clicks == 0, "Draft filing must never send to an assessor"
+        assert fake.forbidden_clicks == [], "Draft filing must never submit, sign or delete"
         assert not blocked, f"Unexpected non-fake browser traffic: {blocked}"
+
+
+async def test_serious_incident_save_waits_for_deferred_redirect_before_readback(fake_browser, monkeypatch):
+    """Hold the JS redirect until the save waiter starts; never rely on pacing."""
+    fake, _ = fake_browser
+    fake.save_redirect_release = asyncio.Event()
+    real_wait = Page.wait_for_url
+    async def release_redirect_when_waited(self, url, **kwargs):
+        if url == "**/events/fillin/**":
+            fake.save_redirect_release.set()
+        return await real_wait(self, url, **kwargs)
+    monkeypatch.setattr(Page, "wait_for_url", release_redirect_when_waited)
+    real_verify = filer._verify_entry_saved
+    async def verify_only_saved_page(page, form_type, fields=None):
+        assert fake.save_redirect_release.is_set(), "Post-save verification raced the redirect"
+        assert filer._saved_draft_url(page.url), "Read-back started on the transient redirect page"
+        return await real_verify(page, form_type, fields)
+    monkeypatch.setattr(filer, "_verify_entry_saved", verify_only_saved_page)
+    form_type = "SERIOUS_INC_2021"
+    fields = synthetic_fields(form_type)
+    result = await filer.file_to_kaizen(form_type, fields, USERNAME, PASSWORD, telegram_user_id=99999999)
+    assert result["status"] == "success", result
+    assert result["saved_url"] == result["draft_url"] == fake.drafts[0]["url"]
+    assert fake.drafts[0]["values"] == expected_values(form_type, fields)
 
 
 @pytest.mark.parametrize("form_type", sorted(filer.FORM_FIELD_MAP))
@@ -234,7 +477,10 @@ async def test_routes_abort_non_fake_hosts_and_socket_guard_stays_closed(fake_br
     assert fake.requests == []
 
 
-@pytest.mark.parametrize("form_type", ("CBD", "DOPS_2021", "REFLECT_LOG", "MINI_CEX"))
+@pytest.mark.parametrize("form_type", [
+    pytest.param(form_type, id=f"{mapped_form_group(form_type)}:{form_type}")
+    for form_type in live_check.mapped_forms()
+])
 async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, monkeypatch, tmp_path, form_type):
     import credentials
     import kaizen_live_check as check
@@ -250,8 +496,12 @@ async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, m
     assert code == 0, report
     entry = report["forms"][0]
     assert entry["draft_url"] == fake.drafts[0]["url"]
-    assert all(row["classification"] == "landed" or (row["field"].startswith("tag:") and row["classification"] == "count-only")
+    # Conditional fields outside the synthetic scenario (e.g. PROC_LOG "Other"
+    # boxes) are reported not-applicable rather than filled.
+    assert all(row["classification"] in {"landed", "not-applicable"}
+               or (row["field"].startswith("tag:") and row["classification"] == "count-only")
                for row in entry["fields"])
+    assert any(row["classification"] == "landed" for row in entry["fields"])
     assert any(row["field"] in {"kc:SLO6 KC1", "tag:SLO6 KC1"} for row in entry["fields"])
     assert requested == [check.OPERATOR_USER_ID]
     assert fake.submit_clicks == 0
@@ -577,7 +827,7 @@ async def password_submit(journey, username=USERNAME, password=PASSWORD):
 async def connected_case(journey):
     assert await journey_call(journey, bot.handle_case_input, LOGIN_CASE) == bot.AWAIT_FORM_CHOICE
     login_step(journey.sim, "Best fit:", "Select a form to draft it.", buttons=[
-        ("🩺 CBD", "FORM|best"), ("📋 Forms", "FORM|show_all"), ("🔄 Restart", "CANCEL|form"),
+        ("🩺 CBD", "FORM|best"), ("📋 Forms", "FORM|show_all"), ("❌ Cancel", "CANCEL|form"),
     ])
     assert journey.ctx.user_data["case_text"] == LOGIN_CASE
 
@@ -660,7 +910,7 @@ async def test_login_journey_unexpected_sign_in_page_refuses_success(login_journ
     # A same-host non-portfolio page must not pass the broad URL matcher.
     assert state == bot.AWAIT_PASSWORD
     login_step(j.sim, "Couldn't reach Kaizen to verify the login", "Select Retry", buttons=[
-        ("🔄 Retry", "ACTION|retry_setup_login"), ("❌ Cancel", "ACTION|cancel"),
+        ("🔄 Retry sign-in", "ACTION|retry_setup_login"), ("❌ Cancel", "ACTION|cancel"),
     ])
     assert not bot.has_credentials(j.sim.user_id)
     assert not any("Kaizen connected" in (text or "") for _, text, _ in j.sim.messages_sent)
@@ -715,7 +965,7 @@ async def passwordless_choice(j):
     assert await journey_call(j, bot.passwordless_setup_start, "ACTION|connect_passwordless", callback=True) == ConversationHandler.END
     login_step(j.sim, "Open Kaizen sign-in", "confirm here", buttons=[
         ("🔒 Open Kaizen sign-in", "https://connect.invalid/handoff#" + j.links[-1].token),
-        ("🔑 Share my login instead", "ACTION|setup_password"), ("❌ Cancel", "ACTION|cancel"),
+        ("🔑 Share my login (recommended)", "ACTION|setup_password"), ("❌ Cancel", "ACTION|cancel"),
     ])
 
 
@@ -795,7 +1045,7 @@ async def test_login_journey_session_failure_reconnect_resumes_save(handoff_jour
         ("❌ Cancel", "ACTION|cancel"),
     ])
     await j.sign_in()
-    login_step(j.sim, "connected again", "draft is still waiting", buttons=[("💾 Save the draft now", "ACTION|pwl_reconnected")])
+    login_step(j.sim, "connected again", "draft is still waiting", buttons=[("💾 Save to Kaizen", "ACTION|pwl_reconnected")])
     await journey_call(j, bot.passwordless_reconnected, "ACTION|pwl_reconnected", callback=True)
     assert j.ctx.user_data["last_filing_status"] == "success"
     assert len(j.fake.drafts) == 1

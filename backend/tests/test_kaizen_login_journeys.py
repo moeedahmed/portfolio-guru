@@ -202,7 +202,7 @@ async def test_unfinished_passwordless_link_expires_and_new_link_replaces_old_bu
     first_url = f"https://connect.example.test/handoff#{created_links[0].token}"
     assert latest_buttons(sim) == [
         ("🔒 Open Kaizen sign-in", first_url),
-        ("🔑 Share my login instead", "ACTION|setup_password"),
+        ("🔑 Share my login (recommended)", "ACTION|setup_password"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
     record = store.get_by_viewer_token(store.exchange(created_links[0].token))
@@ -237,7 +237,7 @@ async def test_unfinished_passwordless_link_expires_and_new_link_replaces_old_bu
     assert sim.get_last_text() == bot._PASSWORDLESS_LINK_TEXT
     assert latest_buttons(sim) == [
         ("🔒 Open Kaizen sign-in", second_url),
-        ("🔑 Share my login instead", "ACTION|setup_password"),
+        ("🔑 Share my login (recommended)", "ACTION|setup_password"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
     assert_private(sim, caplog)

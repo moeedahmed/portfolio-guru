@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import kaizen_offline
+from curriculum import validate_curriculum
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ PLATFORM_REGISTRY = {
             # 2025 Update forms
             "CBD", "DOPS", "LAT", "ACAT", "ACAF", "STAT", "MSF",
             "MINI_CEX", "JCF", "QIAT", "TEACH", "PROC_LOG", "SDL",
-            "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2", "COMPLAINT", "SERIOUS_INC",
+            "US_CASE", "ESLE", "ESLE_ASSESS", "ESLE_PART1_2", "ESLE_REFLECTION", "COMPLAINT", "SERIOUS_INC",
             "EDU_ACT", "FORMAL_COURSE", "REFLECT_LOG", "TEACH_OBS",
             # 2021 versions
             "CBD_2021", "DOPS_2021", "ACAT_2021", "ACAF_2021", "STAT_2021",
@@ -141,6 +142,11 @@ async def route_filing(
     rest queue on the semaphore. Routing behaviour and the result contract
     are documented on _route_filing_unbounded.
     """
+    if curriculum_links is not None and "curriculum_links" not in fields:
+        fields = {**fields, "curriculum_links": curriculum_links}
+    fields = validate_curriculum(fields)
+    fields.pop("possible_key_capability", None)
+    curriculum_links = fields.get("curriculum_links", curriculum_links)
     if kaizen_offline.enabled():
         return kaizen_offline.filing_result(fields, submit=submit)
     if _filing_slots.locked():

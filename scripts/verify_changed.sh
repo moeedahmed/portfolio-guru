@@ -61,6 +61,7 @@ JOURNEY_TESTS=(
   # Test-bot isolation and exact-SHA staging release receipts.
   tests/test_staging_bot.py
   tests/test_staging_scripts.py
+  tests/test_telegram_journey_proof.py
   # Whole-bot harness and aggregate contracts (fake clients only).
   tests/test_telegram_live_harness.py
   tests/test_whole_bot_explorer.py

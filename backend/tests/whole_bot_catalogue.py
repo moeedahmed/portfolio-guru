@@ -54,7 +54,33 @@ def producer_digest():
 # or callback payload added, removed or reworded.
 # Login onboarding: case retention, validation, stale acknowledgements and structural
 # telemetry only. Existing copy/payloads are unchanged; FORM re-entry is dispatch-tested.
-PRODUCER_DIGEST = '62835dcfa91dd3e3c0957f8e8088a939985c58db1631fa03b9e27377e0b7562e'
+# 9 Oct 2026: the drafting progress message is deleted after the draft is
+# sent (edit fallback only); the draft keyboard and payloads are unchanged.
+# 9 Oct 2026: reviewed case/reflection priority before question/menu routing;
+# account replies use fixed copy. Existing keyboard/payload branches unchanged.
+# 9 Oct 2026: non-string input is never treated as case evidence; no branch change.
+# 9 Oct 2026: reviewed schema-only reflection footer and draft-stamped possible-KC Add.
+# Add updates KCs only after the tap; stale/save-in-progress taps are inert.
+# 9 Oct 2026: reviewed regeneration guard retains unconfirmed possible KCs;
+# only the existing Add tap selects them. No keyboard or callback changes.
+# 9 Oct 2026: reviewed static curriculum-only possible-KC copy and metadata
+# preservation through field edits and active/pending re-analysis. Add remains
+# the sole selection action;
+# existing keyboards, callback payloads and approval ownership are unchanged.
+# 9 Oct 2026: reviewed catalogue validation at draft reconstruction and preview;
+# invalid KCs are removed before filing. No keyboard or callback payload changes.
+# 9 Oct 2026: reviewed account/billing topic routing; connection failures retain
+# the existing Connect Kaizen/Settings actions; pricing appears only for billing.
+# 9 Oct 2026: third KC selected by default with Remove instead of Add.
+# 9 Oct 2026: Remove syncs the pending snapshot and is hidden/rejected for
+# saved-draft amendments and reopens; existing callback payloads are unchanged.
+# 9 Oct 2026: KC Remove button dropped; one label per button action.
+# 9 Oct 2026: photo reflection hints use filled draft fields; source warning
+# removed, text-as-case and all Save labels aligned, descriptive KC edits validated.
+# 2026-10-09: restored photo reflection provenance at preview/storage/filing;
+# required reflection fields checked individually. Existing controls unchanged.
+# 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
+PRODUCER_DIGEST = 'd9405d9543075fc202af8889a7fae128d5e24d6efea40f06357818bf624c1cab'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
@@ -200,6 +226,8 @@ def reviewed_units(slots):
 
 # Registration candidate paths shift when consent moves into case_conv.
 # FORM branch candidates also include the tested post-setup case entry point.
+# 9 Oct 2026: retired KC callbacks removed from active approval ownership.
+# 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
 CATALOGUE_DIGEST = 'a8ae9cc094612f3bd05722452b9b3a613dc3f23b3e2d3a63e3bbec79503cef8d'
 
 
@@ -286,7 +314,7 @@ AUDIT_TESTS = """test_reset_command test_funnel_metrics test_flow_walker test_e2
  test_consent_gate test_missing_essentials_replay_guard test_concurrent_user_isolation
  test_modality_clause_coverage test_setup_manual_profile_fallback test_setup_connect_flow test_attachment_upload_consent
  test_curriculum_filing_recovery test_channel_contract test_forms test_kc_edit_retention
- test_filing_reliability test_filing_reliability_matrix""".split()
+ test_filing_reliability test_filing_reliability_matrix test_kc_quality test_rcem_ai_policy test_button_routing""".split()
 
 if __name__ == "__main__":
     print(" ".join("tests/" + name + ".py" for name in AUDIT_TESTS))

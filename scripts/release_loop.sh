@@ -37,6 +37,10 @@
 
 set -euo pipefail
 
+# Python helpers import sibling release tooling; keep those imports read-only,
+# including direct prepare calls that do not pass through the pinned bootstrap.
+export PYTHONDONTWRITEBYTECODE=1
+
 ORIGINAL_ARGS=("$@")
 
 banner() { printf '\n=== %s ===\n' "$*"; }

@@ -161,3 +161,96 @@ async def test_first_draft_selection_is_never_topped_up():
     with patch("extractor._generate", new=AsyncMock(return_value=json.dumps(_payload([KC_INJURY])))):
         draft = await extract_cbd_data(CASE)
     assert draft.key_capabilities == [KC_INJURY]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
+@pytest.mark.parametrize('instruction,requested,expected', [
+    ('Remove teaching and supervision', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
+    ('Remove the teaching and supervision capability', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
+    ('remove SLO9 KC2', ['SLO4 KC1', 'SLO4 KC2'], ['SLO4 KC1', 'SLO4 KC2']),
+    ('change the KCs to SLO1 KC1', ['SLO1 KC1'], ['SLO1 KC1']),
+    ('change the KCs to SLO1 KC1 and SLO99 KC1', ['SLO1 KC1', 'SLO99 KC1'], ['SLO1 KC1']),
+    ('remove all KCs', [], []),
+])
+async def test_reply_kc_edit_is_validated_and_survives_regeneration(form_type, instruction, requested, expected):
+    import bot
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+
+    selected = [KC_FULL_TEXT[k] for k in ('SLO4 KC1', 'SLO4 KC2')]
+    candidate = {'capability': KC_FULL_TEXT['SLO9 KC2']}
+    original = (CBDData(key_capabilities=selected, possible_key_capability=candidate)
+                if form_type == 'CBD' else FormDraft(form_type=form_type,
+                    fields={'key_capabilities': selected}, possible_key_capability=candidate))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=CASE, chosen_form=form_type)
+    bot._store_pending_draft(context, original)
+    bot._store_draft(context, original)
+    # Drive the real field-update parser and model validation; mock only AI
+    # output and the separate essentials assessment.
+    with patch('bot.classify_intent', AsyncMock(return_value='edit_detail')), \
+         patch('extractor._generate', AsyncMock(return_value=json.dumps(
+             {'updates': {'key_capabilities': requested}}))) as generate, \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(instruction), context) == bot.AWAIT_APPROVAL
+    assert 'SLO9 KC2' in generate.await_args.args[0]
+    edited = bot._load_draft(context)
+    fields = bot._cbd_filing_fields(edited) if form_type == 'CBD' else edited.fields
+    assert fields['key_capabilities'] == [KC_FULL_TEXT[k] for k in expected]
+    assert fields['curriculum_links'] == list(dict.fromkeys(k.split()[0] for k in expected))
+    assert 'excluded_key_capabilities' not in fields
+    # An old Show draft button must not resurrect the pending snapshot.
+    with patch('bot._track_funnel_event'):
+        await bot.handle_callback(sim._make_callback_update('ACTION|continue_thin'), context)
+    assert bot._load_draft(context) == edited
+    # The next extraction tries to put the removed default back.
+    extractor_name = 'bot.extract_cbd_data' if form_type == 'CBD' else 'bot.extract_form_data'
+    regenerated = (CBDData(key_capabilities=[*expected, 'SLO9 KC2'], possible_key_capability=candidate)
+                   if form_type == 'CBD' else FormDraft(form_type=form_type,
+                       fields={'key_capabilities': [*expected, 'SLO9 KC2']}, possible_key_capability=candidate))
+    with patch(extractor_name, AsyncMock(return_value=regenerated)), \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)), \
+         patch('bot.get_voice_profile', return_value=''), patch('bot._safe_edit_text', AsyncMock()):
+        await bot._regenerate_active_draft_with_feedback(sim._make_text_update('Update the date'), context, 'Update the date')
+    updated = bot._load_draft(context)
+    fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
+    assert fields['key_capabilities'] == [KC_FULL_TEXT[k] for k in expected]
+
+
+def test_default_three_kcs_have_only_save_and_cancel_buttons():
+    import bot
+    from models import CBDData
+    from tests.bot_simulator import BotSimulator
+    context = BotSimulator()._make_context()
+    bot._store_draft(context, CBDData(key_capabilities=['SLO4 KC1', 'SLO4 KC2'],
+                                    possible_key_capability={'capability': 'SLO9 KC2'}))
+    assert len(bot._load_draft(context).key_capabilities) == 3
+    for keyboard in (bot._active_draft_keyboard(context), bot._build_amend_keyboard(context=context)):
+        assert [b.text for row in keyboard.inline_keyboard for b in row] == ['💾 Save to Kaizen', '❌ Cancel']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
+async def test_reply_can_deliberately_select_a_previously_excluded_kc(form_type):
+    import bot
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    removed = KC_FULL_TEXT['SLO9 KC2']
+    draft = (CBDData(key_capabilities=['SLO4 KC1'], excluded_key_capabilities=[removed])
+             if form_type == 'CBD' else FormDraft(form_type=form_type,
+                 fields={'key_capabilities': ['SLO4 KC1']}, excluded_key_capabilities=[removed]))
+    context.user_data.update(case_text=CASE, chosen_form=form_type)
+    bot._store_draft(context, draft)
+    with patch('bot.classify_intent', AsyncMock(return_value='edit_detail')), \
+         patch('extractor._generate', AsyncMock(return_value=json.dumps(
+             {'updates': {'key_capabilities': ['SLO4 KC1', 'SLO9 KC2']}}))), \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)):
+        await bot.handle_mid_conversation_text(sim._make_text_update('Add SLO9 KC2'), context)
+    updated = bot._load_draft(context)
+    fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
+    assert fields['key_capabilities'] == [KC_FULL_TEXT['SLO4 KC1'], removed]
+    assert not updated.excluded_key_capabilities

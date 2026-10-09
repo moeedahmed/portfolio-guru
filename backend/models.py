@@ -1,8 +1,57 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+from curriculum import canonical_kc, canonical_kcs, validate_curriculum
 from typing import Optional, List, Literal
 
 
-class CBDData(BaseModel):
+class CurriculumDraft(BaseModel):
+    # Doctor-owned exclusions are independent of the current default extra.
+    excluded_key_capabilities: List[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_draft_curriculum(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        excluded = canonical_kcs(data.get("excluded_key_capabilities") or [])
+        possible = data.get("possible_key_capability")
+        capability = canonical_kc(possible.get("capability")) if isinstance(possible, dict) else None
+        # Migrate legacy removed metadata when reconstructing existing drafts.
+        if capability and possible.get("removed") is True and capability not in excluded:
+            excluded.append(capability)
+        data["excluded_key_capabilities"] = excluded
+        if capability in excluded:
+            data["possible_key_capability"] = {"capability": capability, "removed": True}
+        target = dict(data["fields"]) if isinstance(data.get("fields"), dict) else data
+        if excluded and "key_capabilities" in target:
+            values = target.get("key_capabilities") or []
+            if not isinstance(values, list):
+                values = [values]
+            # Filter before the three-KC cap, so excluded links cannot crowd out
+            # valid supported links or a new default extra.
+            target["key_capabilities"] = [kc for kc in values if canonical_kc(kc) not in excluded]
+            target["curriculum_links"] = list(dict.fromkeys(
+                kc.split()[0] for kc in canonical_kcs(target["key_capabilities"])))
+        if isinstance(data.get("fields"), dict):
+            data["fields"] = target
+            data = validate_curriculum(data)
+            data["fields"] = validate_curriculum(
+                {**data["fields"], "possible_key_capability": data.get("possible_key_capability")},
+                select_possible=True,
+            )
+            # Removal identity stays in draft metadata, never filing fields.
+            data["fields"].pop("possible_key_capability", None)
+        else:
+            data = validate_curriculum(data, select_possible=True)
+        return data
+
+    def model_copy(self, *, update=None, deep=False):
+        # Pydantic's default copy trusts updates, bypassing model validators.
+        copied = super().model_copy(update=update, deep=deep)
+        return type(self).model_validate(copied.model_dump())
+
+
+class CBDData(CurriculumDraft):
     form_type: Literal["CBD"] = "CBD"
     date_of_encounter: str = ""              # YYYY-MM-DD
     patient_age: Optional[str] = None        # e.g. "45-year-old"
@@ -16,13 +65,15 @@ class CBDData(BaseModel):
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
     key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
+    possible_key_capability: Optional[dict] = None  # auto-selected KC identity and optional removed flag
 
 
-class FormDraft(BaseModel):
+class FormDraft(CurriculumDraft):
     """Generic draft — holds any form's extracted field values as a flat dict."""
     form_type: str
     fields: dict        # key → extracted value, keyed by schema field key
     uuid: Optional[str] = None
+    possible_key_capability: Optional[dict] = None  # never part of the filing fields
 
 
 class DraftPreviewField(BaseModel):

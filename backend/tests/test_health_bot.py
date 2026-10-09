@@ -144,7 +144,7 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 ARCP month", "ACTION|health_review_setup"),
+            ("📅 Choose review month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -157,7 +157,7 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("📝 To send (7)", "ACTION|health_queue|draft|0"),
             ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
@@ -168,7 +168,7 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("⬅️ Previous", "ACTION|health_queue|draft|0"),
             ("➡️ Next", "ACTION|health_queue|draft|2"),
         ],
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     # Pager rows stay separate from the cross-link and Health row.
     assert _keyboard_rows(
@@ -179,7 +179,7 @@ def test_health_keyboards_are_contextual_in_every_view():
         [
             ("➡️ Next", "ACTION|health_queue|awaiting|1"),
         ],
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(
         bot._health_view_keyboard(
@@ -189,22 +189,22 @@ def test_health_keyboards_are_contextual_in_every_view():
         [
             ("⬅️ Previous", "ACTION|health_queue|awaiting|0"),
         ],
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("about")) == [
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("more")) == [
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("coverage")) == [
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("curriculum")) == [
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
     assert _keyboard_rows(bot._health_view_keyboard("scan")) == [
-        [("🔙 Health", "ACTION|health_view|priorities")],
+        [("📊 Portfolio health", "ACTION|health_view|priorities")],
     ]
 
     # Empty queues are not rendered as buttons that can only fail on tap.
@@ -242,7 +242,7 @@ def test_health_keyboards_are_contextual_in_every_view():
             ("⏳ With assessor (20)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 ARCP month", "ACTION|health_review_setup"),
+            ("📅 Choose review month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -263,7 +263,7 @@ def test_health_keyboards_are_contextual_in_every_view():
         ],
         [
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
-            ("📅 ARCP month", "ACTION|health_review_setup"),
+            ("📅 Choose review month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -293,7 +293,7 @@ async def test_health_landing_callbacks_open_independent_paginated_queues(monkey
             ("⏳ With assessor (10)", "ACTION|health_queue|awaiting|0"),
         ],
         [
-            ("📅 ARCP month", "ACTION|health_review_setup"),
+            ("📅 Choose review month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -303,7 +303,7 @@ async def test_health_landing_callbacks_open_independent_paginated_queues(monkey
     )
     assert sim.get_last_text() == "draft page 2"
     assert ("⬅️ Previous", "ACTION|health_queue|draft|0") in sim.get_last_buttons()
-    assert ("🔙 Health", "ACTION|health_view|priorities") in sim.get_last_buttons()
+    assert ("📊 Portfolio health", "ACTION|health_view|priorities") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_queue|awaiting|0"), context
@@ -343,7 +343,7 @@ async def test_old_more_maps_to_about_and_legacy_detail_views_remain_safe():
         assert sim.get_last_text() == expected_text
         if callback != "ACTION|health_view|priorities":
             assert sim.get_last_buttons() == [
-                ("🔙 Health", "ACTION|health_view|priorities")
+                ("📊 Portfolio health", "ACTION|health_view|priorities")
             ]
 
 
@@ -395,7 +395,7 @@ async def test_expired_health_report_callback_offers_refresh_recovery():
 
     assert sim.get_last_text() == bot._HEALTH_REPORT_EXPIRED
     assert sim.get_last_buttons() == [
-        ("🔄 Refresh health", "ACTION|health"),
+        ("📊 Portfolio health", "ACTION|health"),
     ]
 
 
@@ -418,7 +418,7 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         sim._make_callback_update("ACTION|health_review_setup"), context
     )
     assert saved == []
-    assert ("🔙 Cancel", "ACTION|health_view|priorities") in sim.get_last_buttons()
+    assert ("📊 Portfolio health", "ACTION|health_view|priorities") in sim.get_last_buttons()
     month_callback = next(
         callback
         for _label, callback in sim.get_last_buttons()
@@ -432,7 +432,7 @@ async def test_review_month_selection_and_back_do_not_persist(monkeypatch):
         callback.startswith("ACTION|health_review_confirm|")
         for _label, callback in sim.get_last_buttons()
     )
-    assert ("🔙 Cancel", "ACTION|health_view|priorities") in sim.get_last_buttons()
+    assert ("📊 Portfolio health", "ACTION|health_view|priorities") in sim.get_last_buttons()
 
     await bot.handle_action_button(
         sim._make_callback_update("ACTION|health_view|priorities"), context
@@ -477,7 +477,7 @@ async def test_review_month_confirmation_persists_through_existing_profile_path(
     assert len(saved) == 1
     assert saved[0].pathway_config[bot.REVIEW_DATE_KEY] == "2026-10-01"
     assert (
-        "🔄 Refresh health",
+        "📊 Portfolio health",
         "ACTION|health",
     ) in sim.get_last_buttons()
     track.assert_any_call(
@@ -665,8 +665,8 @@ async def test_settings_pathway_change_saves_and_returns_to_settings(isolated_he
     assert ('📁 Portfolio Pathway', "PATHWAY_SETTINGS|cesr_portfolio") in sim.get_last_buttons()
     # The pathway picker is a section under Portfolio defaults, so its Back
     # button must return to the Portfolio defaults submenu, not main /settings.
-    assert ('🔙 Back', "ACTION|portfolio_defaults") in sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|settings") not in sim.get_last_buttons()
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in sim.get_last_buttons()
+    assert ('⚙️ Settings', "ACTION|settings") not in sim.get_last_buttons()
 
     result = await bot.handle_pathway_choice(
         sim._make_callback_update("PATHWAY_SETTINGS|cesr_portfolio"),
@@ -700,7 +700,7 @@ async def test_portfolio_defaults_back_button_returns_to_settings(isolated_healt
     )
 
     buttons = sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|settings") in buttons
+    assert ('⚙️ Settings', "ACTION|settings") in buttons
     # The submenu must not strand the user with a bare "Back" label.
     assert ("Back", "ACTION|settings") not in buttons
 
@@ -720,8 +720,8 @@ async def test_change_level_back_button_returns_to_portfolio_defaults(monkeypatc
     )
 
     buttons = sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
-    assert ('🔙 Back', "ACTION|settings") not in buttons
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons
+    assert ('⚙️ Settings', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -739,8 +739,8 @@ async def test_change_curriculum_back_button_returns_to_portfolio_defaults(monke
     )
 
     buttons = sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
-    assert ('🔙 Back', "ACTION|settings") not in buttons
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons
+    assert ('⚙️ Settings', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -758,8 +758,8 @@ async def test_change_pathway_back_button_returns_to_portfolio_defaults(isolated
     )
 
     buttons = sim.get_last_buttons()
-    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons
-    assert ('🔙 Back', "ACTION|settings") not in buttons
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons
+    assert ('⚙️ Settings', "ACTION|settings") not in buttons
 
 
 @pytest.mark.asyncio
@@ -802,7 +802,7 @@ async def test_health_empty_state_clarifies_scan_scope_and_offers_next_routes(mo
     assert _keyboard_rows(keyboard) == [
         [
             ("🎯 SLO map", "ACTION|health_view|curriculum"),
-            ("📅 ARCP month", "ACTION|health_review_setup"),
+            ("📅 Choose review month", "ACTION|health_review_setup"),
         ],
         [("ℹ️ About", "ACTION|health_view|about")],
     ]
@@ -2120,7 +2120,7 @@ async def test_one_tap_route_choice_saves_it_and_returns_to_health(isolated_heal
     assert "📊 *Appraisal readiness*" in text
     buttons = sim.get_last_buttons()
     assert not any(data.startswith("ACTION|health_review_select|") for _, data in buttons)
-    assert ("📅 ARCP month", "ACTION|health_review_setup") in buttons
+    assert ("📅 Choose review month", "ACTION|health_review_setup") in buttons
 
 
 @pytest.mark.asyncio
@@ -2189,7 +2189,7 @@ def test_reconnecting_keeps_a_confirmed_non_trainee_route(isolated_health_store,
     assert bot._route_needs_confirm(stored, datetime.now(UTC).date())
 
 
-@pytest.mark.parametrize('trainee,label', [(True, '📅 ARCP month'), (False, '📅 Appraisal month')])
+@pytest.mark.parametrize('trainee,label', [(True, '📅 Choose review month'), (False, '📅 Choose review month')])
 def test_health_month_label_survives_stored_report_navigation(trainee, label):
     import bot
     context = SimpleNamespace(user_data={})
@@ -2203,7 +2203,7 @@ def test_health_month_label_survives_stored_report_navigation(trainee, label):
         [('ℹ️ About', 'ACTION|health_view|about')],
     ]
     del context.user_data['last_health_report']['month_label_trainee']
-    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(
+    assert ('📅 Choose review month', 'ACTION|health_review_setup') in sum(
         _keyboard_rows(bot._health_view_payload(context, 'priorities')[1]), []
     )
 
@@ -2220,13 +2220,13 @@ def test_queue_cross_link_opens_other_list_and_preserves_page(queue, label, targ
     assert text == f'{queue} page 2'
     assert _keyboard_rows(markup)[-1] == [
         (label, f'ACTION|health_queue|{target}|0'),
-        ('🔙 Health', 'ACTION|health_view|priorities'),
+        ('📊 Portfolio health', 'ACTION|health_view|priorities'),
     ]
     bot._health_view_payload(context, 'action_queue', queue=target, page=0)
     assert bot._health_view_payload(context, 'action_queue', queue=queue)[0] == text
     context.user_data['last_health_report']['action_queue_totals'][target] = 0
     assert _keyboard_rows(bot._health_view_payload(context, 'action_queue', queue=queue)[1])[-1] == [
-        ('🔙 Health', 'ACTION|health_view|priorities')
+        ('📊 Portfolio health', 'ACTION|health_view|priorities')
     ]
 
 
@@ -2290,8 +2290,8 @@ async def test_future_arcp_month_keeps_existing_change_control(monkeypatch):
         user_id=99999999, chat=SimpleNamespace(send_action=AsyncMock()),
         send_progress=AsyncMock(), send_result=sent, fail_fn=AsyncMock(), context_store=store,
     )
-    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(_keyboard_rows(sent.await_args.args[1]), [])
-    assert ('📅 ARCP month', 'ACTION|health_review_setup') in sum(_keyboard_rows(bot._health_view_payload(store, 'priorities')[1]), [])
+    assert ('📅 Choose review month', 'ACTION|health_review_setup') in sum(_keyboard_rows(sent.await_args.args[1]), [])
+    assert ('📅 Choose review month', 'ACTION|health_review_setup') in sum(_keyboard_rows(bot._health_view_payload(store, 'priorities')[1]), [])
     assert 'From 0 items in Portfolio Guru history' in sent.await_args.args[0]
     assert 'Reads Kaizen only' not in store.user_data['last_health_report']['views']['about']
 

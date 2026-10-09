@@ -20,6 +20,8 @@ from privacy_guard import (
     model_person_names,
 )
 from message_policy import FLEXIBLE_REPLY_STYLE_ENVELOPE, render_message
+from channel_reply_policy import STATIC_COPY_INTENTS, select_deterministic_reply
+from conversational_router import route_message
 from evidence_artifact import (
     evidence_artifact_answer,
     looks_like_artifact_filing_question,
@@ -29,106 +31,8 @@ from privacy_guard import deidentify_clinical_text
 import ai_telemetry
 from usage import payments_enabled
 
-# RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen checkbox labels
-# Source: Live Kaizen CBD form screenshot (verified 2026-03-08)
-# NOTE: Kaizen's SLO numbering differs from rcemcurriculum.co.uk — use these numbers.
-RCEM_KC_MAP = """RCEM Higher EM Curriculum (2025 Update) — Exact Kaizen Checkbox Labels:
-
-SLO1: Care for acutely physiologically stable adult patients presenting to acute care across the full range of complexity (2025 Update)
-  KC1: to be expert in assessing and managing all adult patients attending the ED. These capabilities will apply to patients attending with both physical and psychological ill health (2025 Update)
-
-SLO2: Support the ED team by answering clinical questions and making safe decisions (2025 Update)
-  KC1: able to support the pre-hospital, medical, nursing and administrative team in answering clinical questions and in making safe decisions for patients with appropriate levels of risk in the ED (2025 Update)
-  KC2: aware of when it is appropriate to review patients remotely or directly and able to teach these principles to others (2025 Update)
-
-SLO3: Resuscitate and stabilise patients in the ED knowing when it is appropriate to stop (2025 Update)
-  KC1: provide airway management & ventilatory support to critically ill patients (2025 Update)
-  KC2: be expert in fluid management and circulatory support in critically ill patients (2025 Update)
-  KC3: manage all the life-threatening conditions including peri-arrest & arrest situations in the ED (2025 Update)
-  KC4: be expert in caring for ED patients and their relatives and loved ones at the end of the patient's life (2025 Update)
-  KC5: effectively lead and support resuscitation teams (2025 Update)
-
-SLO4: Care for acutely injured patients across the full range of complexity (2025 Update)
-  KC1: be expert in assessment, investigation and clinical management of patients attending with all injuries, regardless of complexity (2025 Update)
-  KC2: provide expert leadership of the Major Trauma Team (2025 Update)
-
-SLO5: Care for children of all ages, at all stages of development and with complex needs (2025 Update)
-  KC1: be expert in assessing and managing all children and young adult patients attending the ED (2025 Update)
-  KC2: be able to provide airway management & ventilatory support to critically ill paediatric patients (2025 Update)
-  KC3: be able to lead and support a multidisciplinary paediatric resuscitation including trauma (2025 Update)
-  KC4: be expert in fluid management and circulatory support in critically ill paediatric patients (2025 Update)
-  KC5: be able to manage all the life-threatening paediatric conditions including peri-arrest & arrest situations in the ED (2025 Update)
-  KC6: be able to assess and formulate a management plan for children and young adults who present with complex medical and social needs (2025 Update)
-
-SLO6: Deliver key procedural skills needed in EM (2025 Update)
-  KC1: the clinical knowledge to identify when key EM practical/emergency skills are indicated (2025 Update)
-  KC2: the knowledge and psychomotor skills to perform EM procedural skills safely and in a timely fashion (2025 Update)
-  KC3: be able to supervise and guide colleagues in delivering procedural skills (2025 Update)
-
-SLO7: Deal with complex or challenging situations in the workplace (2025 Update)
-  KC1: have expert communication skills to negotiate, manage complicated or evolving interactions (2025 Update)
-  KC2: behave professionally in dealings with colleagues and team members within the ED (2025 Update)
-  KC3: work professionally and effectively with those outside the ED (2025 Update)
-
-SLO8: Lead the ED shift (2025 Update)
-  KC1: will provide support to ED staff at all levels and disciplines on the ED shift (2025 Update)
-  KC2: will be able to liaise with the rest of the acute/urgent care team and wider hospital as shift leader (2025 Update)
-  KC3: will maintain situational awareness throughout the shift to ensure safety is optimised (2025 Update)
-  KC4: will anticipate challenges, generate options, make decisions and communicate these effectively to the team as lead clinician (2025 Update)
-
-SLO9: Support, supervise & educate others working in the ED (2025 Update)
-  KC1: be able to undertake training and supervision of members of the ED team in the clinical environment (2025 Update)
-  KC2: be able to prepare and deliver teaching sessions outside of the clinical environment, including simulation, small group work, and didactic presentations (2025 Update)
-  KC3: be able to provide effective constructive feedback to colleagues, including debrief (2025 Update)
-  KC4: understand the principles necessary to mentor and appraise junior doctors (2025 Update)
-
-SLO10: Participate in research and manage data appropriately (2025 Update)
-  KC1: be able to appraise, synthesise, communicate and use research evidence to develop EM care (2025 Update)
-  KC2: be able to actively participate in research (2025 Update)
-
-SLO11: Participate in & promote activity to improve quality & safety of patient care (2025 Update)
-  KC1: be able to provide clinical leadership on effective Quality Improvement work (2025 Update)
-  KC2: be able to support and develop a culture of departmental safety, and good clinical governance (2025 Update)
-
-SLO12: Lead & Manage (2025 Update)
-  KC1: be able to demonstrate their involvement in a range of management activities and show an understanding of the relevant medicolegal directives (2025 Update)
-  KC2: be able to investigate a patient safety incident, participate and contribute effectively to department clinical governance activities and risk reduction processes (2025 Update)
-  KC3: be able to manage the staff rota being aware of relevant employment law and recruitment activities (2025 Update)
-  KC4: be able to effectively represent the ED at inter-specialty meetings (2025 Update)
-  KC5: demonstrate an understanding of how effective Emergency Medicine Leadership positively impacts on standards of patient care and patient safety (2025 Update)
-  KC6: demonstrate a positive impact on the culture of the Emergency Department through attitudes and behaviours that impact positively on colleagues, patients and their relatives (2025 Update)
-"""
-
-def _parse_rcem_kc_full_text() -> dict[str, str]:
-    full_text: dict[str, str] = {}
-    current_slo: str | None = None
-    for line in RCEM_KC_MAP.splitlines():
-        slo_match = re.match(r"\s*SLO(\d+):", line)
-        if slo_match:
-            current_slo = f"SLO{int(slo_match.group(1))}"
-            continue
-        kc_match = re.match(r"\s*KC(\d+):\s*(.+)", line)
-        if current_slo and kc_match:
-            code = f"{current_slo} KC{int(kc_match.group(1))}"
-            full_text[code] = f"{code}: {kc_match.group(2).strip()}"
-    return full_text
-
-
-KC_FULL_TEXT = _parse_rcem_kc_full_text() | {
-    "SLO11 KC1": (
-        "SLO11 KC1: be able to provide clinical leadership on effective "
-        "Quality Improvement work (2025 Update)"
-    ),
-    "SLO11 KC2": (
-        "SLO11 KC2: be able to support and develop a culture of departmental "
-        "safety, and good clinical governance (2025 Update)"
-    ),
-    "SLO12 KC2": (
-        "SLO12 KC2: be able to investigate a patient safety incident, "
-        "participate and contribute effectively to department clinical "
-        "governance activities and risk reduction processes (2025 Update)"
-    ),
-}
+from curriculum import (RCEM_KC_MAP, KC_FULL_TEXT, canonical_kc as _canonical_kc,
+                        canonical_kcs as _canonical_kcs, validate_curriculum)
 
 _client = None
 
@@ -297,7 +201,9 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
                 ])
                 if is_retryable:
                     if attempt < retries:
-                        await asyncio.sleep(1)
+                        # Vertex 429s are short bursts; back off a little longer.
+                        rate_limited = any(term in error_msg for term in ("429", "rate", "quota", "resource_exhausted"))
+                        await asyncio.sleep(2 * (attempt + 1) if rate_limited else 1)
                         continue
                     logger.warning("%s failed (%s), trying next provider", provider["name"], e)
                     break  # next provider
@@ -1137,12 +1043,62 @@ def _looks_like_form_support_question(text_lower: str) -> bool:
     return questionish and any(_contains_standalone_term(text_lower, signal) for signal in support_signals)
 
 
+# User-input routing only: product questions go to reviewed product copy.
+_CASE_PRODUCT_TOPICS = (
+    r"\b(?:log[ -]?ins?|log(?:ged|ging)?\s+(?:in|into|on)|"
+    r"sign[ -]?ins?|sign(?:ed|ing)?\s+(?:in|into|on)|password\w*|credential\w*|encrypt\w*|"
+    r"accounts?|upload\w*|filing|files?|filed|sav(?:e|es|ed|ing)|submi(?:t|ss)\w*|"
+    r"kaizen|supervisor\w*|portfolio\s*guru|bot|app|product|automat\w*|"
+    r"support(?:s|ed)?|capabilit(?:y|ies)|application|platform|assistant|"
+    r"secure|security|privacy|protect\w*|stor(?:e|es|ed|ing|age)|guarantee\w*)\b"
+)
+# Reviewed 9 Oct 2026: descriptions identify evidence types only. The model
+# selects codes; no model sentence is used on the case-form advice surface.
+_CASE_FORM_DESCRIPTIONS = {
+    "CBD": "clinical reasoning and management",
+    "DOPS": "an observed procedure",
+    "MINI_CEX": "an observed patient assessment",
+    "ACAT": "observed care across multiple patients",
+    "LAT": "leadership during clinical work",
+    "ACAF": "critical appraisal of research evidence",
+    "STAT": "a formally assessed teaching session",
+    "MSF": "feedback from colleagues",
+    "QIAT": "quality improvement work",
+    "JCF": "a journal club discussion",
+    "TEACH": "a teaching session you delivered",
+    "PROC_LOG": "a record of a procedure",
+    "SDL": "self-directed learning",
+    "US_CASE": "reflection on an ultrasound case",
+    "ESLE": "learning from an extended supervised clinical session",
+    "COMPLAINT": "reflection on a complaint",
+    "SERIOUS_INC": "reflection on a serious incident",
+    "EDU_ACT": "an educational activity you attended",
+    "FORMAL_COURSE": "a formal course you attended",
+    "REFLECT_LOG": "reflection on your practice and learning",
+}
+
+
+def _is_case_form_choice_question(text):
+    lower = text.casefold()
+    # Product/setup words never make a form-selection question, even with a case.
+    if re.search(_CASE_PRODUCT_TOPICS, lower):
+        return False
+    question = "?" in lower or bool(re.match(r"^(?:what|which|should|could|would|can)\b", lower))
+    form = bool(re.search(r"\b(?:forms?|wpbas?|cbd|dops|mini[ -]?cex|acat|lat|acaf|stat|msf|qiat|jcf|esle)\b", lower))
+    choice = bool(re.search(r"\b(?:what|which|best|better|right|instead|choose|use|suggest|recommend)\b", lower))
+    return question and form and choice
+
+
 async def answer_question(text: str, case_context: str = "", document_name: str = "") -> str:
-    """Generate a helpful answer about the bot's capabilities.
+    """Answer product questions with reviewed copy and form questions with case-grounded advice.
 
     When case_context is provided and the question relates to form types,
     the answer is grounded in that specific case rather than being generic.
     """
+    if route_message(text).intent in STATIC_COPY_INTENTS:
+        reply = select_deterministic_reply(text, include_first_contact=False)
+        if reply is not None:
+            return reply.full_text()
     # A question about a certificate or award ("record it as a reflection or
     # just upload the file?") is answered deterministically. Sending it to the
     # model produced invented Kaizen/ARCP rules and an unverified SLO mapping.
@@ -1155,37 +1111,37 @@ async def answer_question(text: str, case_context: str = "", document_name: str 
 
     # If the user has an active case and is asking about forms/suggestions,
     # give a case-specific answer instead of a generic list
-    if case_context:
-        text_lower = text.lower()
-        case_question_signals = [
-            "suggest", "recommend", "right", "better", "instead",
-            "which", "what form", "what type", "should i", "best",
-            "wrong", "not sure", "doubt",
-        ]
-        if any(sig in text_lower for sig in case_question_signals):
-            prompt = f"""You are Portfolio Guru. The user has an active clinical case and is asking what form type would be best for it.
-
+    if case_context and _is_case_form_choice_question(text):
+        from filer_router import PLATFORM_REGISTRY
+        supported = PLATFORM_REGISTRY.get("kaizen", {}).get("supported_forms", [])
+        available = tuple(code for code in _CASE_FORM_DESCRIPTIONS
+                          if code in supported and code in FORM_SCHEMAS)
+        prompt = f"""Select the 2-3 best RCEM portfolio form codes for THIS specific case.
 Active case:
-\"\"\"
-{case_context[:800]}
-\"\"\"
-
+<case>{case_context[:800]}</case>
 User question: {text}
-
-Analyse the case and suggest the 2-3 best RCEM WPBA form types for THIS specific case.
-Available forms: CBD, DOPS, Mini-CEX, ACAT, LAT, ACAF, STAT, MSF, QIAT, JCF, Teaching, Procedural Log, SDL, Ultrasound Case, ESLE, Complaint, Serious Incident, Educational Activity, Formal Course.
-
-Be concise. For each suggestion give the form name and a one-line reason why it fits this case.
-
-Hard limits:
-- Suggest only from the list above. Never invent a form, and never claim a form does or does not exist on Kaizen.
-- Never map anything to an SLO, key capability, or curriculum number.
-- Never state RCEM, ARCP, deanery, or Kaizen platform rules, and never predict how a panel will treat evidence.
-- Never tell the user to upload a loose file to Kaizen; this product saves drafts of the forms listed above.
-
-{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
-            text = await _generate(prompt, purpose="grounded_answer")
-            return sanitize_internal_form_codes(text.strip())
+Available form codes: {", ".join(available)}.
+Return ONLY JSON: {{"form_codes": ["CBD", "DOPS"]}}.
+Return codes only, no explanations, reasons, sentences, curriculum links or product claims.
+Use an empty list if none fits."""
+        generated = await _generate(prompt, purpose="grounded_answer")
+        try:
+            data = json.loads(generated)
+        except (ValueError, TypeError):
+            data = None
+        codes = data.get("form_codes") if isinstance(data, dict) else None
+        valid = []
+        if isinstance(codes, list):
+            for code in codes:
+                if isinstance(code, str) and code in available and code not in valid:
+                    valid.append(code)
+        if valid:
+            return "🩺 Possible forms:\n" + "\n".join(
+                f"• {public_form_name(code)}: {_CASE_FORM_DESCRIPTIONS[code]}"
+                for code in valid[:3]
+            )
+        reply = select_deterministic_reply(text, include_first_contact=False)
+        return reply.full_text() if reply is not None else render_message("scope_redirect")
 
     # Check deterministic standalone product/help questions before broad form support.
     text_lower = text.lower()
@@ -1299,25 +1255,10 @@ Supported forms are auto-filled with structured data and saved as drafts in Kaiz
 
 Describe your case or activity and I'll recommend the right form.""")
 
-    # General question — use AI but with grounded facts
-    prompt = f"""You are Portfolio Guru, a Telegram bot that helps RCEM doctors file their clinical cases to the Kaizen e-portfolio.
-
-Answer this question about what you do. Be concise and helpful. Key facts:
-- You accept case descriptions via text, voice note, photo, or document (PDF, Word, PowerPoint)
-- You support 45 RCEM forms across assessments, reflections, teaching, management, audit and research
-- Supported forms are auto-filled to Kaizen as drafts after the user approves them
-- The draft is shown for review before filing
-- Nothing is submitted to a supervisor - only saved as a draft
-- Credentials are encrypted and never shared
-
-Question: {text}
-
-Answer concisely. If the question is about a specific form type, confirm it's supported.
-
-{FLEXIBLE_REPLY_STYLE_ENVELOPE}"""
-
-    text = await _generate(prompt, purpose="grounded_answer")
-    return sanitize_internal_form_codes(text.strip())
+    # Unknown/general questions fail closed to reviewed product copy. A model
+    # cannot author capability, upload, login or credential-handling promises.
+    reply = select_deterministic_reply(text, include_first_contact=False)
+    return reply.full_text() if reply is not None else render_message("scope_redirect")
 
 
 ESSENTIAL_PRESENT = "present"
@@ -3199,33 +3140,64 @@ Pre-preview quality check:
 
 
 _KC_EDIT_DROP_FIELD = "dropped_key_capabilities"
-_KC_REVIEW_TIMEOUT_SECONDS = 8.0
+# The review regenerates the whole extraction; 3.5 Flash needs well over 8s.
+_KC_REVIEW_TIMEOUT_SECONDS = 20.0
 # CBD callers allow 45 seconds; reserve five for final normalisation/return.
 _KC_REVIEW_DEADLINE_SECONDS = 40.0
 
 
-def _canonical_kc(capability):
-    if not isinstance(capability, str):
-        return None
-    match = re.fullmatch(r"\s*(SLO[1-9]\d*)\s+(KC[1-9]\d*)(?:\s*:\s*\S.*)?\s*",
-                         capability, re.IGNORECASE | re.DOTALL)
-    if not match:
-        return None
-    return KC_FULL_TEXT.get(f"{match[1].upper()} {match[2].upper()}")
+_POSSIBLE_KC_INSTRUCTION = """
+If fewer than 3 distinct KCs are genuinely supported, you may return ONE separate
+top-level "possible_key_capability": {"capability": "<exact KC from the curriculum>",
+"evidence": "<exact quote from the doctor's case or feedback>"}.
+This extra will be selected by default and the doctor can remove it: return it
+separately, not in key_capabilities or curriculum_links. It must be a distinct,
+plausible link grounded in something actually described,
+not invented activity or a generic filler to reach three. Never suggest a KC
+the doctor has explicitly excluded. Return null if there is no such candidate,
+or if 3 KCs are already supported. Do not return a list of possible KCs.
+"""
 
 
-def _canonical_kcs(capabilities, *, strict=False):
-    if not isinstance(capabilities, list):
-        raise ValueError("Invalid KC list")
-    result = []
-    for capability in capabilities:
-        canonical = _canonical_kc(capability)
-        if canonical is None and strict:
-            raise ValueError("Unknown or malformed KC")
-        value = canonical or capability
-        if value not in result:
-            result.append(value)
-    return result
+def _validated_possible_key_capability(candidate, selected, source_text=None, *, excluded=()):
+    """Canonical curriculum identity and source anchor for the default extra.
+
+    Extraction requires an exact source quote. Store only curriculum identity;
+    model reasons and source quotes never reach preview or persistence.
+    Draft construction selects this validated metadata; Remove retains its identity.
+    """
+    if not isinstance(candidate, dict):
+        return None
+    validated = validate_curriculum({"possible_key_capability": candidate})["possible_key_capability"]
+    canonical = validated["capability"] if validated else None
+    selected_ids = {_kc_identity(kc) for kc in selected}
+    if (not canonical or len(selected_ids) >= 3 or
+            _kc_identity(canonical) in selected_ids or _kc_identity(canonical) in excluded):
+        return None
+    if source_text is not None:
+        evidence = candidate.get("evidence")
+        if not isinstance(evidence, str) or not evidence.strip():
+            return None
+        if " ".join(evidence.split()).casefold() not in " ".join(source_text.split()).casefold():
+            return None
+    return {"capability": canonical}
+
+
+def preserve_possible_kc_selection(previous, regenerated):
+    """Carry exclusions forward without replacing a newly validated extra."""
+    excluded = list(dict.fromkeys([
+        *getattr(previous, "excluded_key_capabilities", []),
+        *regenerated.excluded_key_capabilities,
+    ]))
+    candidate = getattr(previous, "possible_key_capability", None)
+    # Keep compatibility with older drafts containing only a removed flag.
+    if isinstance(candidate, dict) and candidate.get("removed") is True:
+        capability = _canonical_kc(candidate.get("capability"))
+        if capability and capability not in excluded:
+            excluded.append(capability)
+    possible = regenerated.possible_key_capability or candidate
+    return regenerated.model_copy(update={"excluded_key_capabilities": excluded,
+                                          "possible_key_capability": possible})
 
 
 def _validated_kc_drop_claims(claims):
@@ -3386,6 +3358,8 @@ INSTRUCTIONS:
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
+{_POSSIBLE_KC_INSTRUCTION}
+
 KC1 RULE (critical): KC1 for most SLOs is written so broadly it technically fits any clinical case.
 Do NOT select KC1 just because it "could apply". Only select KC1 if:
 - The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
@@ -3520,14 +3494,17 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
             excluded = {_kc_identity(claim["capability"])
                         for claim in _validated_kc_drop_claims(merged_claims)}
             reviewed_kcs = [kc for kc in reviewed_kcs if _kc_identity(kc) not in excluded]
-        except Exception:
+        except Exception as exc:
             # Includes provider/timeout/shape errors; cancellation by the caller
-            # still propagates. Do not log provider output or clinical content.
-            logger.warning("Unusable CBD KC review; preserving original selection")
+            # still propagates. Log only the error class, never provider output
+            # or clinical content.
+            logger.warning("Unusable CBD KC review (%s); preserving original selection",
+                           type(exc).__name__)
         else:
             # Adopt atomically, and only curriculum fields, after validation.
             data["key_capabilities"] = reviewed_kcs
             data[_KC_EDIT_DROP_FIELD] = merged_claims
+            data["possible_key_capability"] = reviewed.get("possible_key_capability")
 
     normalised = {
         "form_type": "CBD",
@@ -3567,8 +3544,7 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     # curriculum_links, so any drift silently drops KCs from what the doctor
     # sees. Re-derive curriculum_links from the selected KCs so every KC is
     # represented.
-    if normalised["key_capabilities"]:
-        normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
+    normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
     normalised = _fill_blank_clinical_setting_from_source(
         normalised,
         case_description,
@@ -3592,6 +3568,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     if phi_labels:
         logger.warning("De-identified CBD draft fields: %s", phi_labels)
 
+    normalised["possible_key_capability"] = _validated_possible_key_capability(
+        data.get("possible_key_capability"), normalised["key_capabilities"],
+        f"{case_description}\n{edit_feedback}",
+        excluded={_kc_identity(claim["capability"])
+                  for claim in _validated_kc_drop_claims(data.get(_KC_EDIT_DROP_FIELD))},
+    )
     return CBDData(**normalised)
 
 
@@ -3757,6 +3739,8 @@ Rules:
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
 - For date fields: return YYYY-MM-DD format. Resolve relative references using today's date above: "today" → {today_str}, "yesterday" → {yesterday_str}, "this morning/afternoon/evening" → {today_str}, "last [weekday]" → calculate from today. Only return empty string if no date at all can be inferred.
 - For text fields: extract directly from the case and keep the doctor's original wording where possible
+
+{_POSSIBLE_KC_INSTRUCTION}
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
 
@@ -3848,6 +3832,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 
     if has_kc_tick:
         normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
+        # Invalid model identities must not seed the existing breadth heuristics.
+        normalised = validate_curriculum(normalised)
+    possible = (_validated_possible_key_capability(
+        data.get("possible_key_capability"), normalised.get("key_capabilities", []),
+        f"{case_description}\n{edit_feedback}",
+    ) if has_kc_tick else None)
 
     normalised = _fill_blank_date_fields_from_source(
         normalised,
@@ -3881,6 +3871,13 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         schema_key=schema_key,
         has_kc_tick=has_kc_tick,
     )
+    if possible:
+        # Keep the extra separate until the draft validator selects it, so
+        # existing breadth heuristics cannot duplicate its curriculum identity.
+        proposed_id = _kc_identity(possible["capability"])
+        normalised["key_capabilities"] = [kc for kc in normalised.get("key_capabilities", [])
+                                          if _kc_identity(kc) != proposed_id]
+        normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
     if schema_key == "QIAT":
         normalised = _polish_qiat_fields(normalised, case_description)
     if schema_key == "ACAF":
@@ -3913,7 +3910,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     return FormDraft(
         form_type=form_type,
         fields=normalised,
-        uuid=FORM_UUIDS.get(form_type)
+        uuid=FORM_UUIDS.get(form_type),
+        possible_key_capability=_validated_possible_key_capability(possible, normalised.get("key_capabilities", [])),
     )
 
 
@@ -3929,7 +3927,7 @@ async def review_draft(form_type: str, fields: dict, case_text: str) -> dict:
     today_str = today.strftime("%Y-%m-%d")
     day_of_week = today.strftime("%A")
 
-    fields_summary = json.dumps(fields, indent=2, default=str)
+    fields_summary = json.dumps(validate_curriculum(fields), indent=2, default=str)
 
     prompt = f"""You are a senior UK Emergency Medicine consultant and WPBA assessor.
 Today's date: {today_str} ({day_of_week}).
@@ -4082,7 +4080,8 @@ async def extract_field_updates(form_type: str, current_fields: dict, instructio
 
     today = datetime.now().strftime("%Y-%m-%d")
     field_summary = json.dumps(
-        {k: (str(v)[:120] if v is not None else None) for k, v in current_fields.items()},
+        {k: ([kc.split(":", 1)[0] for kc in v] if k == "key_capabilities" and isinstance(v, list)
+             else str(v)[:120] if v is not None else None) for k, v in current_fields.items()},
         indent=2,
         default=str,
     )
@@ -4106,6 +4105,8 @@ Identify which existing fields (and ONLY those listed above) the doctor wants to
 - If a field can't be matched confidently to one of the listed fields, do NOT include it.
 - If the instruction is not actually an edit (e.g. a question, a new case), return an empty updates object.
 - Keep new values short and matching the existing field's type/format.
+- For a KC edit, return the complete wanted key_capabilities list, keeping all KCs the doctor did not ask to remove. Use an empty list to remove all KCs.
+- For edits to other fields, do not change key_capabilities or curriculum_links.
 
 Return ONLY valid JSON in this shape:
 {{"updates": {{"field_name": "new_value"}}, "summary": "one short sentence describing what changed"}}

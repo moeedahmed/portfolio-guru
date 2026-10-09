@@ -91,6 +91,8 @@ EXPECTED_MODEL_BACKED_RAW_BUTTON_SITES = Counter(
 
 
 def _assert_functional_action_label(label: str) -> None:
+    if re.search(r"^[^\w]*save\b", label, re.IGNORECASE):
+        assert label == "💾 Save to Kaizen", label
     assert not (set(label) & BANNED_DECORATIVE_EMOJI), label
     match = _EMOJI_CLUSTER.match(label)
     assert match is not None, f"missing leading functional emoji: {label!r}"
@@ -122,6 +124,13 @@ def _literal_or_prefixed_text(
         first = expression.values[0] if expression.values else None
         if isinstance(first, ast.Constant) and isinstance(first.value, str):
             return first.value + "dynamic wording"
+        return None
+    if isinstance(expression, ast.IfExp):
+        choices = [_literal_or_prefixed_text(branch, module_constants) for branch in (expression.body, expression.orelse)]
+        if all(choice is not None for choice in choices):
+            for choice in choices:
+                _assert_functional_action_label(choice)
+            return choices[0]
         return None
     if isinstance(expression, ast.Subscript):
         return _literal_or_prefixed_text(expression.value, module_constants)
@@ -294,3 +303,87 @@ def test_every_form_and_category_mapping_icon_is_policy_compliant():
         _assert_functional_action_label(f"{emoji} Form")
     for category_label in bot.FORM_CATEGORIES:
         _assert_functional_action_label(category_label)
+
+
+def test_one_label_per_callback_action_across_all_producers():
+    """Inventory fixed buttons in every producer, including channel/raw templates.
+
+    Payload arguments (case tokens, months, pages) are data, not new actions.
+    Dynamic form/field labels are exercised by the builder inventory below.
+    """
+    from collections import defaultdict
+    labels = defaultdict(set)
+    for path in _production_python_files():
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        constants = _module_string_constants(tree)
+        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        for node in ast.walk(tree):
+            callback = label = None
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, 'id', getattr(node.func, 'attr', ''))
+                kws = {kw.arg: kw.value for kw in node.keywords}
+                if name == 'InlineKeyboardButton':
+                    callback = kws.get('callback_data')
+                    label = node.args[0] if node.args else kws.get('text')
+                elif name == 'ChannelAction':
+                    callback = kws.get('action_id', node.args[0] if node.args else None)
+                    label = kws.get('label', node.args[1] if len(node.args) > 1 else None)
+            elif isinstance(node, ast.Dict):
+                kws = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant)}
+                callback, label = kws.get('callback_data'), kws.get('text')
+            # Check labels even when callbacks are built dynamically.
+            text = _literal_or_prefixed_text(label, constants) if label is not None else None
+            if text is not None and re.search(r"^[^\w]*save\b", text, re.IGNORECASE):
+                assert text == "💾 Save to Kaizen", (str(path), text)
+            if isinstance(callback, ast.Call) and getattr(callback.func, 'id', '') == '_case_button':
+                callback = callback.args[0]
+            if isinstance(callback, ast.Name) and _scope_name(node, parents) == '_build_approval_keyboard':
+                callback = ast.Constant({'save': 'APPROVE|draft', 'cancel': 'CANCEL|draft'}.get(callback.id))
+            if isinstance(callback, ast.JoinedStr):
+                # Keep fixed action segments; tokens/dates/pages are arguments.
+                action = ''.join(part.value if isinstance(part, ast.Constant) else '{' + ast.unparse(part.value) + '}' for part in callback.values)
+            elif isinstance(callback, ast.Constant) and isinstance(callback.value, str):
+                action = callback.value
+            else:
+                continue
+            text = label.value if isinstance(label, ast.Constant) else constants.get(label.id) if isinstance(label, ast.Name) else None
+            if text is not None:
+                labels[action].add(text)
+    conflicts = {action: sorted(texts) for action, texts in labels.items() if len(texts) > 1}
+    assert not conflicts, conflicts
+
+
+def test_dynamic_field_buttons_use_one_label_per_field_action():
+    from collections import defaultdict
+    from models import FormDraft
+    labels = defaultdict(set)
+    markups = [bot._build_edit_field_keyboard()]
+    for form_type in bot.FORM_SCHEMAS:
+        markups.append(bot._build_edit_field_keyboard(FormDraft(form_type=form_type, fields={})))
+    for markup in markups:
+        for row in markup.inline_keyboard:
+            for button in row:
+                labels[button.callback_data].add(button.text)
+    for key in bot._FIELD_FRIENDLY:
+        for row in bot._build_field_edit_buttons([key]):
+            for button in row:
+                labels[button.callback_data].add(button.text)
+    assert not {action: sorted(texts) for action, texts in labels.items() if len(texts) > 1}
+
+
+def test_navigation_and_recovery_builder_inventory_has_one_label_per_action():
+    from collections import defaultdict
+    labels = defaultdict(set)
+    contexts = [SimpleNamespace(user_data={}), SimpleNamespace(user_data={'form_recommendations': ['CBD']})]
+    markups = [bot._build_change_form_keyboard(context) for context in contexts]
+    from datetime import date
+    markups.extend([bot._health_view_keyboard(needs_review_month=True, month_label_trainee=trainee) for trainee in (True, False)])
+    markups.append(bot._health_review_month_confirmation_keyboard(date(2026, 11, 1)))
+    markups.extend([bot._build_approval_keyboard(can_back_to_missing=True),
+                    bot._build_amend_keyboard(), bot._build_doc_intent_keyboard(),
+                    bot._build_image_intent_keyboard(), bot._build_video_intent_keyboard()])
+    for markup in markups:
+        for row in markup.inline_keyboard:
+            for button in row:
+                labels[button.callback_data].add(button.text)
+    assert not {action: sorted(texts) for action, texts in labels.items() if len(texts) > 1}

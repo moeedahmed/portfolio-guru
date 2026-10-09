@@ -51,7 +51,7 @@ async def test_reply_to_old_open_draft_asks_before_changing_it(monkeypatch):
     assert "Updating" not in text
     assert sim.get_last_buttons() == [
         ("➕ New case", "CASE|new"),
-        ("✏️ Add to draft", "CASE|improve"),
+        ("✏️ Edit draft", "CASE|improve"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
 

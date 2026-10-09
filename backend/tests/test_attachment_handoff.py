@@ -95,8 +95,8 @@ async def test_document_case_stores_attachment_path():
     assert os.path.exists(context.user_data["_pending_doc"]["path"])
     extract_mock.assert_not_called()
     buttons = sim.get_last_buttons()
-    assert ('📝 Use as case', "DOCUSE|info") in buttons
-    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
+    assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "clinical-notes.pdf" not in _all_visible_text(sim)
     
@@ -141,10 +141,10 @@ async def test_photo_case_stores_pending_image_and_asks_intent():
     # any text to offer. Text was found here, so the choice is real and shown.
     extract_mock.assert_called_once()
     buttons = sim.get_last_buttons()
-    assert ('📝 Read text', "DOCUSE|info") in buttons
-    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
+    assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
-    assert ('❌ Remove', "DOCUSE|ignore") in buttons
+    assert ('❌ Remove file', "DOCUSE|ignore") in buttons
 
     path = context.user_data["_pending_doc"]["path"]
     if os.path.exists(path):
@@ -368,7 +368,7 @@ async def test_document_attach_only_does_not_extract_and_waits_for_case_details(
     assert "before choosing a form." in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "evidence.pdf" not in _all_visible_text(sim)
@@ -404,7 +404,7 @@ async def test_image_attach_only_does_not_extract_and_waits_for_case_details():
     assert "send your own interpretation/context" in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-image.jpg" not in _all_visible_text(sim)
@@ -453,7 +453,7 @@ async def test_image_attach_only_prompt_rejoins_gathering_loop_on_next_text(monk
     assert sim.get_last_text() == render_message("gathering_captured")
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
 
     if os.path.exists(temp_path):
@@ -523,7 +523,7 @@ async def test_video_attach_only_waits_for_user_context_without_extracting():
     assert "won't interpret clinical videos" in sim.get_last_text()
     assert sim.get_last_buttons() == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
     assert context.user_data["gathering_msg_id"] == update.callback_query.message.message_id
     assert "portfolio-video.mp4" not in _all_visible_text(sim)
@@ -1561,7 +1561,7 @@ def test_image_buttons_do_not_promise_interpretation():
     import bot
 
     labels = [b.text for row in bot._build_image_intent_keyboard().inline_keyboard for b in row]
-    assert any("Read text" in label for label in labels)
+    assert any("Use text as case" in label for label in labels)
     assert not any("drafting" in label.lower() for label in labels)
 
 

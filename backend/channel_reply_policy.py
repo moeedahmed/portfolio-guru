@@ -90,7 +90,10 @@ def select_deterministic_reply(
     routed = route_message(text or "")
     intent = routed.intent
 
-    if intent is ConversationalIntent.SETUP_OR_CREDENTIALS:
+    if intent is ConversationalIntent.SETUP_OR_CREDENTIALS or (
+        intent is ConversationalIntent.ACCOUNT_OR_BILLING
+        and routed.signals.get("action") == "setup_credentials"
+    ):
         return ChannelReply(
             body=render_message("kaizen_setup_guide"),
             actions=(CONNECT_KAIZEN_ACTION, SETTINGS_ACTION),
@@ -121,9 +124,10 @@ def select_deterministic_reply(
         return ChannelReply(body=render_message("medical_advice_refusal"))
 
     if intent is ConversationalIntent.ACCOUNT_OR_BILLING:
+        plan_summary = _plan_summary_text() + "\n\n" if routed.signals.get("topic") == "billing" else ""
         return ChannelReply(
             body=style_grounded_answer(
-                _plan_summary_text() + "\n\n"
+                plan_summary +
                 "For account, access, billing or subscription changes, use the main "
                 "Portfolio Guru account/support flow rather than chat. I will not ask "
                 "for payment details or Kaizen credentials here."

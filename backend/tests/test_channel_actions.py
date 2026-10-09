@@ -23,7 +23,7 @@ def _reply() -> ChannelReply:
         continuation="💬 Back to your case — add detail or choose a form.",
         actions=(
             ChannelAction(action_id="GATHER|done", label="📋 Choose form"),
-            ChannelAction(action_id="ACTION|cancel", label="❌ Discard case"),
+            ChannelAction(action_id="ACTION|cancel", label="❌ Cancel"),
         ),
     )
 
@@ -44,7 +44,7 @@ def test_telegram_keyboard_uses_action_id_as_callback_data():
 
     assert [(b.text, b.callback_data) for b in buttons] == [
         ("📋 Choose form", "GATHER|done"),
-        ("❌ Discard case", "ACTION|cancel"),
+        ("❌ Cancel", "ACTION|cancel"),
     ]
     assert len(markup.inline_keyboard) == 1
 
@@ -53,7 +53,7 @@ def test_plain_telegram_button_rows_use_action_id_as_callback_data():
     assert to_telegram_button_rows(_reply()) == [
         [
             {"text": "📋 Choose form", "callback_data": "GATHER|done"},
-            {"text": "❌ Discard case", "callback_data": "ACTION|cancel"},
+            {"text": "❌ Cancel", "callback_data": "ACTION|cancel"},
         ],
     ]
 
@@ -70,7 +70,7 @@ def test_numbered_render_preserves_every_label_and_context():
     assert "Back to your case" in rendered
     # Same labels as the Telegram buttons, just numbered.
     assert "1. 📋 Choose form" in rendered
-    assert "2. ❌ Discard case" in rendered
+    assert "2. ❌ Cancel" in rendered
     assert "Reply with the number" in rendered
 
 
@@ -95,7 +95,7 @@ def test_channel_renderers_do_not_require_identical_body_copy_for_stable_actions
     assert original.full_text() != variant.full_text()
     assert to_telegram_button_rows(original) == to_telegram_button_rows(variant)
     assert resolve_numbered_choice(variant, "1") == "GATHER|done"
-    assert resolve_numbered_choice(variant, "discard case") == "ACTION|cancel"
+    assert resolve_numbered_choice(variant, "cancel") == "ACTION|cancel"
 
 
 def test_resolve_numbered_choice_by_number():
@@ -107,7 +107,7 @@ def test_resolve_numbered_choice_by_number():
 def test_resolve_numbered_choice_by_label_ignoring_emoji_and_case():
     reply = _reply()
     assert resolve_numbered_choice(reply, "Choose form") == "GATHER|done"
-    assert resolve_numbered_choice(reply, "  discard case  ") == "ACTION|cancel"
+    assert resolve_numbered_choice(reply, "  cancel  ") == "ACTION|cancel"
 
 
 def test_resolve_numbered_choice_returns_none_for_no_match():

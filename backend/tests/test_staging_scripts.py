@@ -32,7 +32,13 @@ def test_receipts_reset_pass_and_human_approval(monkeypatch, tmp_path):
     assert proof.main(['gate', '--sha', SHA, '--risk', 'internal']) == 0
     assert proof.main(['deploy', '--sha', SHA, '--result', 'pass']) == 0
     assert proof.main(['gate', '--sha', SHA, '--risk', 'telegram']) == 1
-    assert proof.main(['automated', '--sha', SHA, '--result', 'pass']) == 0
+    coverage = tmp_path / 'coverage.json'
+    fingerprints = {key: key + '-digest' for key in proof.journeys.JOURNEYS}
+    monkeypatch.setattr(proof.journeys, 'fingerprints', lambda *a, **kw: fingerprints)
+    coverage.write_text(json.dumps({'schema': 1, 'sha': SHA, 'target': proof.TARGET, 'journeys': {
+        key: {'fingerprint': value, 'sha': PREV, 'target': proof.TARGET, 'status': 'reused'}
+        for key, value in fingerprints.items()}}))
+    assert proof.main(['automated', '--sha', SHA, '--result', 'pass', '--coverage', str(coverage)]) == 0
     assert proof.main(['gate', '--sha', SHA, '--risk', 'internal']) == 0
     assert proof.main(['gate', '--sha', SHA, '--risk', 'telegram']) == 1
     assert proof.main(['approve', '--sha', SHA, '--note', 'Moeed tapped Ship']) == 0
@@ -65,7 +71,7 @@ def deploy_harness(tmp_path):
     repo = tmp_path / 'dev'
     scripts = repo / 'scripts'
     scripts.mkdir(parents=True)
-    for name in ('deploy_staging.sh', 'stage.sh', 'install_staging.sh', 'staging_proof.py', 'com.portfolioguru.staging-bot.plist'):
+    for name in ('deploy_staging.sh', 'stage.sh', 'install_staging.sh', 'staging_proof.py', 'telegram_journey_proof.py', 'com.portfolioguru.staging-bot.plist'):
         shutil.copy(ROOT / 'scripts' / name, scripts / name)
     home = tmp_path / 'home'
     staging = home / 'projects/portfolio-guru-staging'
@@ -85,6 +91,8 @@ printf 'git %s\\n' "$*" >> "$COMMAND_LOG"
 case "$1 $2" in
   'remote get-url') echo synthetic-origin ;;
   'rev-parse --git-common-dir') echo .git ;;
+  'ls-files '*) exec /usr/bin/git -C "$SNAPSHOT_REPO" ls-files -z --cached --others --exclude-standard ;;
+  'archive '*) exec /usr/bin/git -C "$SNAPSHOT_REPO" archive HEAD ;;
   'rev-parse HEAD') cat "$STATE" ;;
   'status --porcelain') [[ -z "${FAKE_DIRTY:-}" ]] || echo ' M bot.py' ;;
   'branch --show-current') echo feature/test ;;
@@ -121,14 +129,49 @@ else: print('LIVE_RUNTIME_OK')
     executable(staging / 'scripts/telegram_bot_qa.sh', '''#!/bin/bash
 /usr/bin/env > "$QA_ENV_LOG"
 printf 'qa %s\\n' "$*" >> "$COMMAND_LOG"
+if [[ "${FAKE_QA_EXIT:-0}" == 0 && -z "${FAKE_NO_REPORT:-}" ]]; then
+  python3 - <<'COVERAGE'
+import json,os,sys
+from pathlib import Path
+root = Path(os.environ['SNAPSHOT_REPO'])
+sys.path.insert(0, str(root / 'scripts'))
+import telegram_journey_proof as journeys
+current = journeys.fingerprints(root)
+if os.environ.get('FAKE_PARTIAL'): current = {'text': current['text']}
+report = {'schema': 1, 'sha': os.environ['CANDIDATE'], 'target': journeys.TARGET,
+          'journeys': {key: {'fingerprint': value, 'sha': os.environ['CANDIDATE'],
+                            'target': journeys.TARGET, 'status': 'passed'} for key,value in current.items()}}
+path = Path(os.environ['TELEGRAM_JOURNEY_COVERAGE_REPORT'])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(report))
+COVERAGE
+fi
 exit "${FAKE_QA_EXIT:-0}"
 ''')
+    for name in ('telegram_journey_proof.py', 'verify_live_runtime.py',
+                 'install_staging.sh', 'deploy_staging.sh', 'com.portfolioguru.staging-bot.plist'):
+        shutil.copy(scripts / name, staging / 'scripts' / name)
+    # Cached journey proof binds the actual launch chain and configuration,
+    # even though this harness stubs every external command and bot process.
+    shutil.copy(ROOT / 'start-bot.sh', staging / 'start-bot.sh')
+    for name in ('run_local.sh', 'staging_env.sh', '.env.example', 'model_config.py',
+                 'gemini_client.py', 'requirements.txt', 'requirements-dev.txt'):
+        shutil.copy(ROOT / 'backend' / name, staging / 'backend' / name)
+    (staging / 'backend/tests').mkdir()
+    (staging / 'backend/bot.py').write_text('VALUE = 1\n')
+    (staging / 'backend/tests/test_e2e.py').write_text('CASE = "synthetic"\n')
+    (staging / 'backend/tests/conftest.py').write_text('')
+    (staging / '.gitignore').write_text('.artifacts/\n__pycache__/\nbackend/venv/\n')
+    subprocess.run(['/usr/bin/git', 'init', '-q', str(staging)], check=True)
+    subprocess.run(['/usr/bin/git', '-C', str(staging), 'add', '.'], check=True)
+    subprocess.run(['/usr/bin/git', '-C', str(staging), '-c', 'user.name=QA', '-c', 'user.email=qa@example.invalid',
+                    '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'synthetic fixture'], check=True)
     plist = home / 'Library/LaunchAgents/com.portfolioguru.staging-bot.plist'
     plist.parent.mkdir(parents=True)
     plist.write_bytes(plistlib.dumps({'Label': 'com.portfolioguru.staging-bot', 'WorkingDirectory': str(staging),
         'ProgramArguments': ['/bin/bash', str(staging / 'start-bot.sh')], 'EnvironmentVariables': {'PG_ENV': 'staging'}}))
     env = {'PATH': str(bin_dir) + ':/usr/bin:/bin', 'HOME': str(home), 'STATE': str(state),
-        'COMMAND_LOG': str(log), 'CANDIDATE': SHA, 'TEST_PID': str(os.getpid()),
+        'SNAPSHOT_REPO': str(staging), 'COMMAND_LOG': str(log), 'CANDIDATE': SHA, 'TEST_PID': str(os.getpid()),
         'PID_QUERIES': str(tmp_path / 'pid-queries'), 'QA_ENV_LOG': str(tmp_path / 'qa-env'),
         'PORTFOLIO_GURU_STAGING_PROOF_DIR': str(tmp_path / 'proofs'),
         'PORTFOLIO_GURU_STAGING_DEPLOY_LOCK': str(tmp_path / 'staging-deploy.lock')}
@@ -197,7 +240,7 @@ def test_stage_smoke_runs_only_exact_test_target_and_revokes_old_approval(deploy
     for name in ('TELEGRAM_BOT_USERNAME', 'TELEGRAM_LIVE_ALLOWED_BOTS', 'RELEASE_LIVE_TARGET', 'RELEASE_LIVE_ALLOWLIST'):
         assert qa_env[name] == 'portfolio_guru_test_bot'
     assert qa_env['TELEGRAM_LIVE_APPROVED'] == 'portfolio-guru-live-qa-approved'
-    assert deploy_harness['log'].read_text().count('qa --focused-release') == 2
+    assert deploy_harness['log'].read_text().count('qa --wider-journeys --changed') == 2
 
 
 def test_install_renders_isolated_plist_without_loading(deploy_harness):
@@ -213,3 +256,73 @@ def test_install_renders_isolated_plist_without_loading(deploy_harness):
     assert p['EnvironmentVariables']['PG_VERTEX_SA_SECRET_ID'] == 'synthetic-id'
     assert 'portfolio-guru-staging/bot.log' in p['StandardOutPath']
     assert not deploy_harness['log'].exists()  # no launchctl / network / secrets
+
+
+def test_stage_wider_smoke_selects_opt_in_mode(deploy_harness):
+    assert deploy(deploy_harness).returncode == 0
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, '--wider'],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'qa --wider-journeys' in deploy_harness['log'].read_text()
+    assert 'qa --focused-release' not in deploy_harness['log'].read_text()
+
+
+@pytest.mark.parametrize('action', ['deploy', 'approve', 'status'])
+def test_stage_wider_flag_is_smoke_only(deploy_harness, action):
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), action, '--sha', SHA, '--wider'],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 64
+    assert '--wider is only valid for smoke' in result.stderr
+    assert not deploy_harness['log'].exists()
+
+
+@pytest.mark.parametrize('override,args', [
+    ({}, ['--target', 'portfolio_guru_bot']),
+    ({'TELEGRAM_BOT_USERNAME': 'portfolio_guru_bot'}, []),
+    ({'RELEASE_LIVE_TARGET': 'other_bot'}, []),
+    ({'TELEGRAM_LIVE_ALLOWED_BOTS': 'portfolio_guru_test_bot,portfolio_guru_bot'}, []),
+    ({'RELEASE_LIVE_ALLOWLIST': 'portfolio_guru_bot'}, []),
+])
+def test_stage_wider_smoke_refuses_redirection_before_effects(deploy_harness, override, args):
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, '--wider', *args],
+        env={**deploy_harness['env'], **override}, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 21
+    assert not deploy_harness['log'].exists()
+
+
+@pytest.mark.parametrize('flags', [('--only', 'text'), ('--changed',), ('--full',)])
+def test_stage_forwards_journey_selection(deploy_harness, flags):
+    assert deploy(deploy_harness).returncode == 0
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, *flags],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'qa --wider-journeys ' + ' '.join(flags) in deploy_harness['log'].read_text()
+
+
+def test_stage_partial_smoke_does_not_authorise_ship(deploy_harness):
+    assert deploy(deploy_harness).returncode == 0
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA, '--only', 'text'],
+        env={**deploy_harness['env'], 'FAKE_PARTIAL': '1'}, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = json.loads((Path(deploy_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{SHA}.json').read_text())
+    assert record['automated'] == 'partial' and record['moeed_approved'] is False
+    result = subprocess.run(['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'approve', '--sha', SHA, '--note', 'Ship'],
+        env=deploy_harness['env'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1
+
+
+def test_stage_missing_coverage_cannot_preserve_prior_pass(deploy_harness):
+    assert deploy(deploy_harness).returncode == 0
+    command = ['bash', str(deploy_harness['scripts'] / 'stage.sh'), 'smoke', '--sha', SHA]
+    assert subprocess.run(command, env=deploy_harness['env'], capture_output=True).returncode == 0
+    result = subprocess.run(command, env={**deploy_harness['env'], 'FAKE_NO_REPORT': '1'}, capture_output=True, text=True)
+    assert result.returncode == 1
+    record = json.loads((Path(deploy_harness['env']['PORTFOLIO_GURU_STAGING_PROOF_DIR']) / f'{SHA}.json').read_text())
+    assert record['automated'] == 'fail' and record['moeed_approved'] is False
+
+
+def test_legacy_focused_pass_cannot_authorise_release(monkeypatch, tmp_path):
+    monkeypatch.setenv('PORTFOLIO_GURU_STAGING_PROOF_DIR', str(tmp_path))
+    proof.write(SHA, {'sha': SHA, 'target': proof.TARGET, 'smoke': 'pass', 'automated': 'pass', 'moeed_approved': True})
+    assert proof.main(['gate', '--sha', SHA, '--risk', 'telegram']) == 1
+    assert proof.main(['approve', '--sha', SHA, '--note', 'Ship']) == 1

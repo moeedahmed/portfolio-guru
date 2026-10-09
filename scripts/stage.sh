@@ -7,15 +7,25 @@ ACTION="${1:-}"
 SHA=""
 NOTE=""
 TARGET="portfolio_guru_test_bot"
+WIDER=0
+JOURNEY_OPTIONS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha) SHA="${2:?missing SHA}"; shift 2 ;;
     --note) NOTE="${2:?missing note}"; shift 2 ;;
     --target) TARGET="${2:?missing target}"; shift 2 ;;
+    --wider) WIDER=1; shift ;;
+    --only) JOURNEY_OPTIONS+=(--only "${2:?missing journey ids}"); shift 2 ;;
+    --changed|--full) JOURNEY_OPTIONS+=("$1"); shift ;;
     *) echo "Unknown stage option: $1" >&2; exit 64 ;;
   esac
 done
-case "$ACTION" in deploy|smoke|approve|status) ;; *) echo "Usage: scripts/stage.sh deploy|smoke|approve|status [--sha <40hex>] [--note <line>]"; exit 64 ;; esac
+case "$ACTION" in deploy|smoke|approve|status) ;; *) echo "Usage: scripts/stage.sh deploy|smoke|approve|status [--sha <40hex>] [--note <line>] [--wider] [--only <ids>|--changed|--full (smoke only)]"; exit 64 ;; esac
+if [[ "$WIDER" == 1 && "$ACTION" != smoke ]]; then echo "--wider is only valid for smoke" >&2; exit 64; fi
+if [[ ${#JOURNEY_OPTIONS[@]} -gt 0 && "$ACTION" != smoke ]]; then echo "Journey selection is only valid for smoke" >&2; exit 64; fi
+if [[ ${#JOURNEY_OPTIONS[@]} -gt 2 || ( ${#JOURNEY_OPTIONS[@]} == 2 && "${JOURNEY_OPTIONS[0]}" != --only ) ]]; then
+  echo "--only, --changed and --full are mutually exclusive" >&2; exit 64
+fi
 # deploy, smoke and status default to HEAD. approve never does: the approval must
 # name the exact SHA Moeed tried, and HEAD may have moved since.
 if [[ "$ACTION" == approve && -z "$SHA" ]]; then echo "approve needs --sha <40hex>: the SHA Moeed tried on the test bot" >&2; exit 64; fi
@@ -90,17 +100,22 @@ PY
       TELETHON_API_HASH="$(bws_value c12e7352-2756-4d91-af4e-b41201443d74)"
       export TELETHON_SESSION TELETHON_API_ID TELETHON_API_HASH
     fi
+    # Routine smoke reuses unchanged proof. --full forces all sixteen sends.
+    COVERAGE="$STAGING_DIR/.artifacts/telegram-bot-qa/staging-coverage.json"
+    rm -f "$COVERAGE"
+    if [[ ${#JOURNEY_OPTIONS[@]} == 0 ]]; then JOURNEY_OPTIONS=(--changed); fi
     if env -u PORTFOLIO_GURU_APP_DIR RELEASE_LIVE_TARGET=portfolio_guru_test_bot RELEASE_LIVE_ALLOWLIST=portfolio_guru_test_bot \
       TELEGRAM_BOT_USERNAME=portfolio_guru_test_bot TELEGRAM_LIVE_ALLOWED_BOTS=portfolio_guru_test_bot \
       TELEGRAM_LIVE_APPROVED=portfolio-guru-live-qa-approved RUN_LIVE_TELEGRAM=1 \
-      bash "$STAGING_DIR/scripts/telegram_bot_qa.sh" --focused-release; then
+      JOURNEY_RUNTIME_SHA="$SHA" TELEGRAM_JOURNEY_COVERAGE_REPORT="$COVERAGE" \
+      bash "$STAGING_DIR/scripts/telegram_bot_qa.sh" --wider-journeys "${JOURNEY_OPTIONS[@]}"; then
       verify_staging
-      python3 "$PROOF_TOOL" automated --sha "$SHA" --result pass
+      python3 "$PROOF_TOOL" automated --sha "$SHA" --result pass --coverage "$COVERAGE" --root "$STAGING_DIR"
     else
       echo "Staging automated smoke failed; receipt remains failed" >&2
       exit 1
     fi
     ;;
-  approve) python3 "$PROOF_TOOL" approve --sha "$SHA" --note "$NOTE" ;;
+  approve) python3 "$PROOF_TOOL" approve --sha "$SHA" --note "$NOTE" --root "$ROOT" ;;
   status) python3 "$PROOF_TOOL" status --sha "$SHA" ;;
 esac

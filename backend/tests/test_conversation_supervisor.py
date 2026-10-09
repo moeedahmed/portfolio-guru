@@ -98,7 +98,7 @@ async def test_continue_decision_adds_to_case_and_offers_form_choice():
     assert decision.reply is not None
     assert decision.reply.actions == (CHOOSE_FORM_ACTION,)
     assert CHOOSE_FORM_ACTION.label == "📋 Choose form"
-    assert DRAFT_NOW_ACTION.label == "📝 Draft"
+    assert DRAFT_NOW_ACTION.label == "📋 Choose form"
 
 
 @pytest.mark.asyncio

@@ -149,7 +149,7 @@ async def test_handle_set_level_routes_back_to_portfolio_defaults_outside_setup(
         for row in markup.inline_keyboard
         for btn in row
     ]
-    assert ('🔙 Back', "ACTION|portfolio_defaults") in buttons, (
+    assert ('📋 Portfolio defaults', "ACTION|portfolio_defaults") in buttons, (
         f"handle_set_level lost its Portfolio defaults return route: {buttons!r}"
     )
 

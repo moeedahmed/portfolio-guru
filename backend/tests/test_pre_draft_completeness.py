@@ -57,6 +57,21 @@ def _common_patches():
     )
 
 
+@pytest.mark.parametrize("missing", [
+    ("reflective_notes", "lessons_learned"), ("reflective_notes",),
+    ("lessons_learned",), ("resources_used",), (),
+])
+def test_formal_course_checks_each_required_reflection_field(missing):
+    fields = {"stage_of_training": "Higher/ST4-ST6", "project_description": "Synthetic ALS course",
+              "reflective_notes": "I learned to allocate roles earlier.",
+              "resources_used": "ALS manual", "lessons_learned": "I will brief the team earlier."}
+    fields.update({key: "" for key in missing})
+    draft = FormDraft(form_type="FORMAL_COURSE", fields=fields)
+    context = BotSimulator()._make_context()
+    bot._store_draft(context, draft)
+    assert {gap["key"] for gap in bot._draft_gaps(context)} == set(missing)
+
+
 @pytest.fixture(autouse=True)
 def sufficient_case_by_default():
     """These tests are about what happens *around* a draft, so the default is
@@ -539,10 +554,12 @@ async def test_edit_failure_on_remaining_gap_preserves_merged_answer_and_still_s
     with patches[0], patches[1], patches[2], patch("bot._analyse_selected_form", new=analyse):
         await handle_case_input(followup_update, context)
 
-    assert call_count["n"] == 1
-    # The draft is now sent as a new message (27 Sep 2026), so a failed edit
+    # Since 9 Oct 2026 the progress line is deleted after the draft is sent
+    # and only edited if that fails, so the failing edit may never be reached.
+    assert call_count["n"] <= 1
+    # The draft is sent as a new message (27 Sep 2026), so a failed edit
     # of the progress line is not a false success: the draft still arrives.
-    last_kind, last_text, _ = sim.messages_sent[-1]
+    last_kind, last_text, _ = [m for m in sim.messages_sent if m[0] not in {"delete", "bot_delete"}][-1]
     assert last_kind == "send" and "still needed" in last_text.lower()
     # The old prompt was still retired (deleted) before the failure.
     actions = [action for action, _, _ in sim.messages_sent]
@@ -567,7 +584,8 @@ def _saving(context, draft):
 
 
 @pytest.mark.asyncio
-async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written():
+@pytest.mark.parametrize("source", ["text", "photo"])
+async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written(source):
     """Draft first (25 Sep 2026): Save is always available. A reflection the
     doctor never supplied is saved blank for them to write in Kaizen."""
     from bot import handle_approval_approve
@@ -576,6 +594,8 @@ async def test_save_with_a_missing_reflection_files_it_blank_never_ai_written():
     context = sim._make_context()
     context.user_data["case_text"] = "45M with chest pain, troponin positive, managed as ACS."
     context.user_data["chosen_form"] = "CBD"
+    context.user_data["case_input_source"] = source
+    context.user_data["case_has_user_context"] = source != "photo"
     route_filing = _saving(context, _cbd_draft(reflection="This case reinforced early ECG review."))
 
     with patch("bot.get_credentials", return_value=("user", "pass")), \
@@ -604,4 +624,3 @@ async def test_save_with_other_blank_essentials_still_files_the_draft():
 
     route_filing.assert_awaited_once()
     assert route_filing.await_args.kwargs["fields"]["clinical_setting"] == ""
-

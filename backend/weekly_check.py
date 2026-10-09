@@ -183,7 +183,7 @@ async def _send_message(
         "reply_markup": json.dumps(
             {
                 "inline_keyboard": [
-                    [{"text": "\U0001f4cb File a case", "callback_data": "ACTION|file"}]
+                    [{"text": "➕ New case", "callback_data": "ACTION|file"}]
                 ]
             }
         ),

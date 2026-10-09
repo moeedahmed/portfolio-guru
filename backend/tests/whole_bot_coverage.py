@@ -62,7 +62,12 @@ def registration_digest(slots):
 # scenario, not an automatically regenerated approval manifest.
 # Consent now enters/falls back through case_conv; dispatch tests prove state retention.
 # Retained case -> watched setup -> Best fit is exercised in test_setup_connect_flow.
-REGISTRATION_DIGEST = 'a047eb74ed7c5a25608e6fdfb160931e94efde3675a249dfb6ac70b72836498e'
+# 9 Oct 2026: possible-KC Add reaches the existing approval callback slot;
+# the global ACTION handler excludes it. Offline routing tests prove ownership.
+# 9 Oct 2026: Remove replaces Add in the same approval callback slot; routing tests prove ownership.
+# 9 Oct 2026: old Add/Remove taps reach the inert stale-button fallback.
+# 9 Oct 2026: final main/wider-journey merge, own-word provenance and draft-message fix.
+REGISTRATION_DIGEST = '4ecbef234a4a57c80ee3953e8cf162a78f071cd9d9c4b7fac7ae86422c3a02d5'
 CATEGORIES = {
     name: category for category, names in {
         "admin": "assignbeta_command filingreport_command funnelreport_command listusers_command setbeta_command settier_command",

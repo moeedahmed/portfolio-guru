@@ -296,15 +296,16 @@ def render_message(key: str, **kwargs) -> str:
 
 
 def style_grounded_answer(body: str) -> str:
-    """Make a free-form grounded answer follow the house emoji standard.
+    """Make an answer follow the house emoji and plain-text standards.
 
     Templated copy in this module already leads with an emoji; a grounded
     answer about forms, billing, or setup may arrive as bare prose. Prefix
     the house marker so a supervisor side-question answer is visually
     consistent with every other Portfolio Guru message, on every channel.
-    Answers that already lead with an emoji are returned unchanged.
+    Answers that already lead with an emoji retain their existing prefix.
     """
-    stripped = body.strip()
+    # Answers are sent as plain text across channels, never Markdown.
+    stripped = body.replace("**", "").strip()
     if not stripped or _LEADING_EMOJI.match(stripped):
         return stripped
     return f"{HOUSE_EMOJI} {stripped}"

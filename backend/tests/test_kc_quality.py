@@ -337,18 +337,17 @@ def test_preview_deduplicates_repeated_kc_entries():
     assert out.count("↳ KC1:") == 1
 
 
-def test_preview_fallback_truncation_is_clean_for_unknown_kc():
+def test_preview_drops_unknown_kc():
     from bot import _format_curriculum_hierarchy
 
     out = _format_curriculum_hierarchy(
         ["SLO1"],
         ["SLO1 KC9: be expert in some newly added capability that the curated map does not yet know about and keeps going (2025 Update)"],
     )
-    # Unknown code falls back to a cleaned truncation: no "(2025 Update)" noise,
-    # no trailing conjunction, leading filler stripped.
+    # An unknown catalogue identity is never presented as a curriculum link.
     assert "(2025 Update)" not in out
     assert "be expert in" not in out
-    assert "↳ KC9:" in out
+    assert "KC9" not in out
 
 
 # --- Post-save confirmation: never leak raw internal KC/tag labels ---
@@ -786,3 +785,579 @@ async def test_generate_attempt_cap_prevents_retry_and_provider_fallback(monkeyp
         with pytest.raises(RuntimeError, match="503"):
             await extractor._generate("fixture", retries=0, max_attempts=1)
     assert post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_backs_off_longer_on_rate_limit(monkeypatch):
+    import extractor
+    from unittest.mock import MagicMock
+
+    providers = [{"name": "fixture", "type": "openai_compat", "model": "fixture",
+                  "base_url": "https://example.invalid", "env_key": "FIXTURE_KEY"}]
+    monkeypatch.setenv("FIXTURE_KEY", "offline-fixture")
+    ok = MagicMock()
+    ok.raise_for_status = MagicMock()
+    ok.json = MagicMock(return_value={"choices": [{"message": {"content": "{}"}}]})
+    post = AsyncMock(side_effect=[RuntimeError("429 RESOURCE_EXHAUSTED"), ok])
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = post
+    sleep = AsyncMock()
+    with patch("extractor._select_providers", return_value=providers), \
+         patch("extractor.httpx.AsyncClient", return_value=client), \
+         patch("extractor.asyncio.sleep", sleep), \
+         patch("extractor.ai_telemetry.record"):
+        assert await extractor._generate("fixture") == "{}"
+    sleep.assert_awaited_once_with(2)
+
+
+POSSIBLE_CASE = "I assessed an ankle injury and discussed imaging with my supervisor."
+
+
+
+async def _remove_kc_by_reply(sim, context, capability="SLO2 KC1"):
+    import bot
+    draft = bot._load_draft(context)
+    fields = draft.fields if hasattr(draft, "fields") else draft.model_dump()
+    selected = [kc for kc in fields["key_capabilities"] if kc.split(":", 1)[0] != capability]
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=draft.form_type)
+    with patch("bot.classify_intent", AsyncMock(return_value="edit_detail")), \
+         patch("bot.extract_field_updates", AsyncMock(return_value={"key_capabilities": selected})), \
+         patch("bot._essentials_gate_before_draft", AsyncMock(return_value=None)):
+        return await bot.handle_mid_conversation_text(sim._make_text_update("remove " + capability), context)
+
+
+def _possible_kc():
+    return {"capability": "SLO2 KC1", "reason": "You discussed the imaging decision with a senior.",
+            "evidence": "discussed imaging with my supervisor"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+@pytest.mark.parametrize("candidate,valid", [
+    (_possible_kc(), True),
+    ({**_possible_kc(), "capability": "SLO99 KC1: invented"}, False),
+    ({**_possible_kc(), "capability": "SLO2 KC99: invented"}, False),
+    ({**_possible_kc(), "reason": ""}, True),
+    ({k: v for k, v in _possible_kc().items() if k != "reason"}, True),
+    ({**_possible_kc(), "reason": "Attachments are sent straight to your e-portfolio"}, True),
+    ({**_possible_kc(), "reason": "Your access details are kept confidential"}, True),
+    ({**_possible_kc(), "evidence": "I taught a medical student"}, False),
+    ({**_possible_kc(), "capability": "SLO4 KC1"}, False),
+    ([_possible_kc(), _possible_kc()], False),
+])
+async def test_possible_kc_is_selected_by_default_when_valid_and_case_grounded(form_type, candidate, valid):
+    from extractor import KC_FULL_TEXT, extract_cbd_data, extract_form_data
+    payload = {"key_capabilities": ["SLO4 KC1"], "curriculum_links": ["SLO4"],
+               "possible_key_capability": candidate}
+    generate = AsyncMock(return_value=json.dumps(payload))
+    with patch("extractor._generate", generate):
+        draft = (await extract_cbd_data(POSSIBLE_CASE) if form_type == "CBD"
+                 else await extract_form_data(POSSIBLE_CASE, form_type))
+    selected = draft.key_capabilities if form_type == "CBD" else draft.fields["key_capabilities"]
+    assert 1 <= len(selected) <= 3
+    assert ("SLO2 KC1" in {kc.split(":", 1)[0] for kc in selected}) is valid
+    assert (draft.possible_key_capability is not None) is valid
+    if valid:
+        assert draft.possible_key_capability["capability"] == KC_FULL_TEXT["SLO2 KC1"]
+        assert set(draft.possible_key_capability) == {"capability"}
+        assert "possible_key_capability" in generate.call_args.args[0]
+    if form_type == "CBD":
+        assert generate.await_count == 2  # same bounded review, no extra model call
+
+
+
+
+def test_possible_kc_has_no_button_or_preview_line_with_three_supported_links():
+    import bot
+    from extractor import KC_FULL_TEXT
+    from models import CBDData
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    draft = CBDData(key_capabilities=[KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO3 KC3", "SLO4 KC1")],
+                    possible_key_capability=_possible_kc())
+    bot._store_draft(context, draft)
+    assert "Possible extra:" not in bot._format_draft_preview(draft)
+    assert not any("remove_possible_kc" in b.callback_data for row in bot._build_approval_keyboard(context=context).inline_keyboard for b in row)
+
+
+@pytest.mark.asyncio
+async def test_possible_generic_kc_is_selected_once_despite_existing_breadth_heuristic():
+    from extractor import extract_form_data
+    payload = {"key_capabilities": ["SLO4 KC1"],
+               "possible_key_capability": {**_possible_kc(), "capability": "SLO1 KC1"}}
+    with patch("extractor._generate", AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data(POSSIBLE_CASE, "TEACH")
+    from curriculum import KC_FULL_TEXT
+    assert draft.fields["key_capabilities"] == [KC_FULL_TEXT["SLO4 KC1"], KC_FULL_TEXT["SLO1 KC1"]]
+    assert draft.possible_key_capability["capability"].startswith("SLO1 KC1:")
+
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+@pytest.mark.parametrize("remove_extra", [False, True])
+async def test_approval_filer_receives_three_kcs_by_default_or_two_after_reply_remove(form_type, remove_extra):
+    import bot
+    from extractor import KC_FULL_TEXT
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    selected = [KC_FULL_TEXT["SLO4 KC1"], KC_FULL_TEXT["SLO4 KC2"]]
+    possible = {**_possible_kc(), "capability": KC_FULL_TEXT["SLO2 KC1"]}
+    draft = (CBDData(key_capabilities=selected, curriculum_links=["SLO4"], possible_key_capability=possible)
+             if form_type == "CBD" else
+             FormDraft(form_type="TEACH", fields={"key_capabilities": selected, "curriculum_links": ["SLO4"]},
+                       possible_key_capability=possible))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_draft(context, draft)
+    if remove_extra:
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
+    save = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if b.callback_data.startswith("APPROVE|"))
+    route = AsyncMock(return_value={"status": "failed", "filled": [], "skipped": [],
+                                   "error": "offline payload capture", "method": "deterministic"})
+    with patch("bot.get_credentials", return_value=("fixture-user", "fixture-pass")), \
+         patch("bot.route_filing", new=route), \
+         patch("bot.compose_filing_recovery_copy", new=AsyncMock(return_value="")), \
+         patch("bot._alert_filing_failure", new=AsyncMock()):
+        assert await bot.handle_approval_approve(sim._make_callback_update(save), context) == bot.AWAIT_APPROVAL
+    route.assert_awaited_once()
+    fields = route.await_args.kwargs["fields"]
+    assert fields["key_capabilities"] == (selected if remove_extra else selected + [KC_FULL_TEXT["SLO2 KC1"]])
+    assert "possible_key_capability" not in fields
+    assert "evidence" not in fields
+    assert route.await_args.kwargs["curriculum_links"] == (["SLO4"] if remove_extra else ["SLO4", "SLO2"])
+
+
+@pytest.mark.parametrize('reason', [
+    'Your login passwords are encrypted.', 'I will upload the imaging to Kaizen.',
+    'Your account credentials are secure.', 'I can file and save this automatically.',
+    'The supervisor can submit it.', 'Portfolio Guru fully supports this.',
+    'Log in to continue.', 'Submission is handled.',
+    'Attachments are sent straight to your e-portfolio',
+    'Your access details are kept confidential',
+])
+def test_possible_kc_discards_all_model_reasons_despite_valid_source_quote(reason):
+    from extractor import _validated_possible_key_capability
+    import bot
+    from models import FormDraft
+    possible = _validated_possible_key_capability({**_possible_kc(), 'reason': reason}, ['SLO4 KC1'], POSSIBLE_CASE)
+    assert possible is not None
+    assert set(possible) == {'capability'}
+    preview = bot._format_draft_preview(FormDraft(form_type='TEACH', fields={'key_capabilities': ['SLO4 KC1']}, possible_key_capability=possible))
+    assert 'Possible extra:' not in preview
+    assert 'SLO2' in preview
+    assert '↳ KC1' in preview
+    assert reason not in preview
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
+async def test_remove_then_date_only_regeneration_keeps_two_kcs(form_type):
+    import bot
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    from extractor import KC_FULL_TEXT
+    selected = [KC_FULL_TEXT['SLO4 KC1'], KC_FULL_TEXT['SLO4 KC2']]
+    offered = {**_possible_kc(), 'capability': KC_FULL_TEXT['SLO2 KC1']}
+    draft = (CBDData(key_capabilities=selected, curriculum_links=['SLO4'], possible_key_capability=offered)
+             if form_type == 'CBD' else FormDraft(form_type=form_type, fields={'key_capabilities': selected, 'curriculum_links': ['SLO4']}, possible_key_capability=offered))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_draft(context, draft)
+    with patch('bot._safe_edit_text', AsyncMock()):
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
+    payload = {'date_of_encounter': '2026-10-08', 'key_capabilities': [*selected, offered['capability']], 'curriculum_links': ['SLO4', 'SLO2']}
+    with patch('extractor._generate', AsyncMock(return_value=json.dumps(payload))), patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)), patch('bot.get_voice_profile', return_value=''), patch('bot._safe_edit_text', AsyncMock()):
+        for _ in range(2):
+            assert await bot._regenerate_active_draft_with_feedback(sim._make_text_update('Change only the date to 8 October 2026'), context, 'Change only the date to 8 October 2026') == bot.AWAIT_APPROVAL
+            updated = bot._load_draft(context)
+            fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
+            assert offered['capability'] not in fields['key_capabilities']
+            assert fields['key_capabilities'] == selected
+            assert 'SLO2' not in fields['curriculum_links']
+            assert offered['capability'] in updated.excluded_key_capabilities
+            assert 'SLO2' not in bot._format_draft_preview(updated)
+            assert not any('possible_kc' in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
+
+
+def test_extra_identity_survives_three_other_links_and_is_selected_when_room_returns():
+    from extractor import KC_FULL_TEXT, preserve_possible_kc_selection
+    from models import CBDData
+    offered = {**_possible_kc(), 'capability': KC_FULL_TEXT['SLO2 KC1']}
+    previous = CBDData(key_capabilities=[KC_FULL_TEXT['SLO4 KC1']], possible_key_capability=offered)
+    three = [KC_FULL_TEXT[k] for k in ('SLO4 KC1', 'SLO1 KC1', 'SLO7 KC1')]
+    regenerated = preserve_possible_kc_selection(previous, CBDData(key_capabilities=three))
+    assert regenerated.possible_key_capability is not None
+    later = preserve_possible_kc_selection(regenerated, CBDData(key_capabilities=[three[0], offered['capability']]))
+    assert later.key_capabilities == [three[0], offered['capability']]
+    assert later.possible_key_capability['capability'] == offered['capability']
+
+
+
+def test_rejected_legacy_possible_reason_does_not_forget_default_extra_identity():
+    from extractor import KC_FULL_TEXT, preserve_possible_kc_selection
+    from models import CBDData
+    offered = {**_possible_kc(), 'reason': 'You discussed imaging with your supervisor.'}
+    previous = CBDData(key_capabilities=[KC_FULL_TEXT['SLO4 KC1']], possible_key_capability=offered)
+    changed = preserve_possible_kc_selection(previous, CBDData(key_capabilities=previous.key_capabilities))
+    later = preserve_possible_kc_selection(changed, CBDData(key_capabilities=[*previous.key_capabilities, KC_FULL_TEXT['SLO2 KC1']]))
+    assert later.key_capabilities == previous.key_capabilities
+    assert 'supervisor' not in str(changed.possible_key_capability)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['TEACH', 'DOPS'])
+async def test_removed_kc_survives_field_edit_reconstruction_then_regeneration(form_type):
+    import bot
+    from models import FormDraft
+    from extractor import KC_FULL_TEXT
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    selected = [KC_FULL_TEXT['SLO4 KC1']]
+    offered = {'capability': KC_FULL_TEXT['SLO2 KC1']}
+    bot._store_draft(context, FormDraft(form_type=form_type,
+        fields={'key_capabilities': selected, 'curriculum_links': ['SLO4']}, possible_key_capability=offered))
+    with patch('bot._safe_edit_text', AsyncMock()):
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
+    offered = {**offered, 'removed': True}
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    feedback = 'Change the date to 8 October 2026'
+    with patch('bot.classify_intent', AsyncMock(return_value='edit_detail')), \
+         patch('bot.extract_field_updates', AsyncMock(return_value={'date_of_encounter': '2026-10-08'})), \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update(feedback), context) == bot.AWAIT_APPROVAL
+    edited = bot._load_draft(context)
+    assert edited.possible_key_capability is None
+    # The regenerated model attempts to restore the removed candidate.
+    regenerated = edited.model_copy(update={'fields': {**edited.fields, 'key_capabilities': [*selected, offered['capability']]}, 'possible_key_capability': None})
+    with patch('bot.extract_form_data', AsyncMock(return_value=regenerated)), \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)), \
+         patch('bot.get_voice_profile', return_value=''), patch('bot._safe_edit_text', AsyncMock()):
+        assert await bot._regenerate_active_draft_with_feedback(sim._make_text_update(feedback), context, feedback) == bot.AWAIT_APPROVAL
+    updated = bot._load_draft(context)
+    assert updated.fields['key_capabilities'] == selected
+    assert updated.fields['curriculum_links'] == ['SLO4']
+    assert offered["capability"] in updated.excluded_key_capabilities
+    assert not any('possible_kc' in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH'])
+@pytest.mark.parametrize('pending', [False, True])
+async def test_form_reanalysis_cannot_restore_a_removed_kc_from_active_or_pending_draft(form_type, pending):
+    import bot
+    from models import CBDData, FormDraft
+    from extractor import KC_FULL_TEXT
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    selected = [KC_FULL_TEXT['SLO4 KC1']]
+    offered = {'capability': KC_FULL_TEXT['SLO2 KC1'], 'removed': True}
+    previous = (CBDData(key_capabilities=selected, curriculum_links=['SLO4'], possible_key_capability=offered)
+                if form_type == 'CBD' else FormDraft(form_type=form_type,
+                    fields={'key_capabilities': selected, 'curriculum_links': ['SLO4']}, possible_key_capability=offered))
+    (bot._store_pending_draft if pending else bot._store_draft)(context, previous)
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    fields = {'key_capabilities': [*selected, offered['capability']], 'curriculum_links': ['SLO4', 'SLO2']}
+    regenerated = CBDData(**fields) if form_type == 'CBD' else FormDraft(form_type=form_type, fields=fields)
+    extractor_name = 'bot.extract_cbd_data' if form_type == 'CBD' else 'bot.extract_form_data'
+    with patch(extractor_name, AsyncMock(return_value=regenerated)), patch('bot.get_voice_profile', return_value=''):
+        updated = await bot._analyse_selected_form(context, sim.user_id, POSSIBLE_CASE, form_type)
+    updated_fields = bot._cbd_filing_fields(updated) if form_type == 'CBD' else updated.fields
+    assert updated_fields['key_capabilities'] == selected
+    assert updated_fields['curriculum_links'] == ['SLO4']
+    assert offered["capability"] in updated.excluded_key_capabilities
+    assert bot._load_pending_draft(context).possible_key_capability == offered
+
+
+@pytest.mark.asyncio
+async def test_cbd_field_edit_cannot_restore_a_removed_kc():
+    import bot
+    from models import CBDData
+    from extractor import KC_FULL_TEXT
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    selected = [KC_FULL_TEXT['SLO4 KC1']]
+    offered = {'capability': KC_FULL_TEXT['SLO2 KC1'], 'removed': True}
+    bot._store_draft(context, CBDData(key_capabilities=selected, curriculum_links=['SLO4'], possible_key_capability=offered))
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form='CBD')
+    updates = {'date_of_encounter': '2026-10-08', 'key_capabilities': [*selected, offered['capability']]}
+    with patch('bot.classify_intent', AsyncMock(return_value='edit_detail')), \
+         patch('bot.extract_field_updates', AsyncMock(return_value=updates)), \
+         patch('bot._essentials_gate_before_draft', AsyncMock(return_value=None)):
+        assert await bot.handle_mid_conversation_text(sim._make_text_update('Change the date to 8 October 2026'), context) == bot.AWAIT_APPROVAL
+    updated = bot._load_draft(context)
+    assert updated.key_capabilities == selected
+    assert updated.curriculum_links == ['SLO4']
+    assert offered["capability"] in updated.excluded_key_capabilities
+
+
+@pytest.mark.parametrize('selection', [None, []])
+def test_removed_possible_kc_survives_cleared_generic_selection(selection):
+    from extractor import KC_FULL_TEXT, preserve_possible_kc_selection
+    from models import FormDraft
+    offered = {'capability': KC_FULL_TEXT['SLO2 KC1'], 'removed': True}
+    previous = FormDraft(form_type='TEACH', fields={}, possible_key_capability=offered)
+    updated = preserve_possible_kc_selection(previous, previous.model_copy(update={'fields': {'key_capabilities': selection}}))
+    assert updated.fields['key_capabilities'] == []
+    assert offered["capability"] in updated.excluded_key_capabilities
+
+
+# 2026-10-09: every draft boundary rejects invented catalogue identities.
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS', 'REFLECT_LOG', 'QIAT', 'MINI_CEX'])
+@pytest.mark.asyncio
+async def test_unknown_curriculum_never_reaches_extracted_draft_or_preview(form_type, caplog):
+    from extractor import extract_form_data, KC_FULL_TEXT
+    from bot import _format_draft_preview
+
+    payload = {
+        'key_capabilities': ['SLO99 KC99: invented curriculum', 'SLO1 KC99: invented leaf', 'SLO7 KC1'],
+        'curriculum_links': ['SLO99', 'SLO1', 'SLO7'],
+        'possible_key_capability': {'capability': 'SLO99 KC99: invented curriculum', 'evidence': 'Synthetic evidence'},
+    }
+    with patch('extractor._generate', new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data('Synthetic evidence only.', form_type)
+    fields = draft.fields if hasattr(draft, 'fields') else draft.model_dump()
+    assert KC_FULL_TEXT['SLO7 KC1'] in fields['key_capabilities']
+    assert all(kc in KC_FULL_TEXT.values() for kc in fields['key_capabilities'])
+    assert set(fields['curriculum_links']) == {kc.split()[0] for kc in fields['key_capabilities']}
+    assert 'SLO1' not in fields['curriculum_links']
+    assert draft.possible_key_capability is None
+    assert 'SLO99' not in _format_draft_preview(draft)
+    assert 'invented' not in caplog.text
+    assert 'Dropped invalid curriculum capabilities: count=' in caplog.text
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+def test_curriculum_reconstruction_and_edit_boundaries(form_type):
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _format_draft_preview
+    bad = {'key_capabilities': ['SLO99 KC99: invented curriculum'], 'curriculum_links': ['SLO99']}
+    data = dict(bad, possible_key_capability={'capability': 'SLO99 KC99'})
+    raw = dict(data, _type='CBD') if form_type == 'CBD' else dict(_type='FORM', form_type=form_type, fields=bad, possible_key_capability=data['possible_key_capability'])
+    draft = _deserialise_draft(raw)
+    edited = draft.model_copy(update=data if form_type == 'CBD' else dict(fields=bad, possible_key_capability=data['possible_key_capability']))
+    fields = edited.fields if isinstance(edited, FormDraft) else edited.model_dump()
+    assert fields['key_capabilities'] == []
+    assert fields['curriculum_links'] == []
+    assert edited.possible_key_capability is None
+    # Mutable legacy drafts must also be safe at the preview boundary.
+    if isinstance(edited, CBDData):
+        edited.key_capabilities.append('SLO99 KC99: invented curriculum')
+        edited.curriculum_links.append('SLO99')
+    else:
+        edited.fields.update(bad)
+    assert 'SLO99' not in _format_draft_preview(edited)
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_filing_boundary_drops_unknown_kcs_and_possible_metadata(form_type):
+    from filer_router import route_filing
+    fields = {'key_capabilities': ['SLO99 KC99: invented curriculum'], 'curriculum_links': ['SLO99'],
+              'possible_key_capability': {'capability': 'SLO7 KC1'}}
+    filed = AsyncMock(return_value={'status': 'failed'})
+    with patch('filer_router._route_filing_unbounded', new=filed), patch('filer_router.kaizen_offline.enabled', return_value=False):
+        await route_filing('kaizen', form_type, fields, {}, curriculum_links=['SLO99'])
+    assert filed.await_args.kwargs['fields']['key_capabilities'] == []
+    assert filed.await_args.kwargs['curriculum_links'] == []
+    assert 'possible_key_capability' not in filed.await_args.kwargs['fields']
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+def test_valid_legacy_slo_only_drafts_survive_copy_restore_and_preview(form_type):
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _serialise_draft, _format_draft_preview
+    fields = {'curriculum_links': ['SLO7', 'SLO99']}
+    draft = CBDData(**fields) if form_type == 'CBD' else FormDraft(form_type=form_type, fields=fields)
+    copied = draft.model_copy()
+    restored = _deserialise_draft(_serialise_draft(copied))
+    result = restored.model_dump() if form_type == 'CBD' else restored.fields
+    assert result['curriculum_links'] == ['SLO7']
+    assert 'SLO7' in _format_draft_preview(restored)
+    assert 'SLO99' not in _format_draft_preview(restored)
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_filing_keeps_valid_selection_while_dropping_invented_kc(form_type):
+    from curriculum import KC_FULL_TEXT
+    from filer_router import route_filing
+    fields = {'key_capabilities': ['SLO7 KC1: wrong wording', 'SLO99 KC99: invented'],
+              'curriculum_links': ['SLO99']}
+    filed = AsyncMock(return_value={'status': 'failed'})
+    with patch('filer_router._route_filing_unbounded', new=filed), patch('filer_router.kaizen_offline.enabled', return_value=False):
+        await route_filing('kaizen', form_type, fields, {}, curriculum_links=['SLO99'])
+    assert filed.await_args.kwargs['fields']['key_capabilities'] == [KC_FULL_TEXT['SLO7 KC1']]
+    assert filed.await_args.kwargs['curriculum_links'] == ['SLO7']
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.asyncio
+async def test_unknown_leaf_does_not_leave_a_broad_parent_link(form_type):
+    from extractor import extract_form_data
+    payload = {'key_capabilities': ['SLO1 KC99: invented curriculum'], 'curriculum_links': ['SLO1']}
+    with patch('extractor._generate', new=AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data('Synthetic evidence only.', form_type)
+    fields = draft.fields if hasattr(draft, 'fields') else draft.model_dump()
+    assert fields['key_capabilities'] == []
+    assert fields['curriculum_links'] == []
+
+
+@pytest.mark.asyncio
+async def test_review_prompt_revalidates_curriculum_fields():
+    from extractor import review_draft
+    generate = AsyncMock(return_value='{}')
+    with patch('extractor._generate', generate):
+        await review_draft('TEACH', {
+            'key_capabilities': ['SLO99 KC99: invented curriculum', 'SLO7 KC1'],
+            'curriculum_links': ['SLO99'],
+            'possible_key_capability': {'capability': 'SLO99 KC99'},
+        }, 'Synthetic evidence only.')
+    prompt = generate.await_args.args[0]
+    assert 'SLO99' not in prompt
+    assert 'invented curriculum' not in prompt
+    assert 'SLO7 KC1' in prompt
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+@pytest.mark.parametrize('candidate', [None, {'capability': 'SLO99 KC99'}, {'capability': 'SLO4 KC1'}])
+def test_two_selected_kcs_stay_two_without_a_valid_distinct_extra(form_type, candidate):
+    from curriculum import KC_FULL_TEXT
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _serialise_draft
+    selected = [KC_FULL_TEXT['SLO4 KC1'], KC_FULL_TEXT['SLO4 KC2']]
+    draft = (CBDData(key_capabilities=selected, possible_key_capability=candidate) if form_type == 'CBD'
+             else FormDraft(form_type=form_type, fields={'key_capabilities': selected}, possible_key_capability=candidate))
+    restored = _deserialise_draft(_serialise_draft(draft.model_copy()))
+    fields = restored.model_dump() if form_type == 'CBD' else restored.fields
+    assert fields['key_capabilities'] == selected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+async def test_filing_payload_never_exceeds_three_unique_curriculum_kcs(form_type):
+    from curriculum import KC_FULL_TEXT
+    from models import CBDData, FormDraft
+    from filer_router import route_filing
+    from bot import _cbd_filing_fields
+    selected = ['SLO4 KC1', 'SLO4 KC1: model wording', 'SLO4 KC2', 'SLO7 KC1', 'SLO2 KC1']
+    candidate = {'capability': 'SLO1 KC1'}
+    draft = (CBDData(key_capabilities=selected, possible_key_capability=candidate) if form_type == 'CBD'
+             else FormDraft(form_type=form_type, fields={'key_capabilities': selected}, possible_key_capability=candidate))
+    fields = _cbd_filing_fields(draft) if form_type == 'CBD' else draft.fields
+    expected = [KC_FULL_TEXT[k] for k in ('SLO4 KC1', 'SLO4 KC2', 'SLO7 KC1')]
+    assert fields['key_capabilities'] == expected
+    filed = AsyncMock(return_value={'status': 'failed'})
+    # Exercise both the draft payload and raw input at the filing choke point.
+    with patch('filer_router._route_filing_unbounded', new=filed), patch('filer_router.kaizen_offline.enabled', return_value=False):
+        for payload in (fields, {'key_capabilities': selected, 'possible_key_capability': candidate}):
+            await route_filing('kaizen', form_type, payload, {})
+            actual = filed.await_args.kwargs['fields']
+            assert actual['key_capabilities'] == expected
+            assert actual['curriculum_links'] == ['SLO4', 'SLO7']
+            assert 'possible_key_capability' not in actual
+
+
+@pytest.mark.parametrize('form_type', ['CBD', 'TEACH', 'DOPS'])
+def test_default_extra_stays_selected_through_copy_restore_and_regeneration(form_type):
+    from curriculum import KC_FULL_TEXT
+    from extractor import preserve_possible_kc_selection
+    from models import CBDData, FormDraft
+    from bot import _deserialise_draft, _serialise_draft
+    selected = [KC_FULL_TEXT['SLO4 KC1'], KC_FULL_TEXT['SLO4 KC2']]
+    candidate = {'capability': KC_FULL_TEXT['SLO2 KC1']}
+    previous = (CBDData(key_capabilities=selected, possible_key_capability=candidate) if form_type == 'CBD'
+                else FormDraft(form_type=form_type, fields={'key_capabilities': selected}, possible_key_capability=candidate))
+    regenerated = (CBDData(key_capabilities=selected) if form_type == 'CBD'
+                   else FormDraft(form_type=form_type, fields={'key_capabilities': selected}))
+    updated = preserve_possible_kc_selection(previous, regenerated)
+    restored = _deserialise_draft(_serialise_draft(updated.model_copy()))
+    fields = restored.model_dump() if form_type == 'CBD' else restored.fields
+    assert fields['key_capabilities'] == [*selected, candidate['capability']]
+    assert fields['curriculum_links'] == ['SLO4', 'SLO2']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+async def test_earlier_show_draft_keeps_removed_kc_excluded(form_type):
+    import bot
+    from models import CBDData, FormDraft
+    from extractor import KC_FULL_TEXT
+    from tests.bot_simulator import BotSimulator
+    selected = [KC_FULL_TEXT[k] for k in ("SLO4 KC1", "SLO4 KC2")]
+    possible = {"capability": KC_FULL_TEXT["SLO2 KC1"]}
+    draft = (CBDData(key_capabilities=selected, possible_key_capability=possible)
+             if form_type == "CBD" else FormDraft(form_type=form_type,
+                 fields={"key_capabilities": selected}, possible_key_capability=possible))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_pending_draft(context, draft)
+    bot._store_draft(context, draft)
+    with patch("bot._safe_edit_text", AsyncMock()), patch("bot._track_funnel_event"):
+        assert await _remove_kc_by_reply(sim, context) == bot.AWAIT_APPROVAL
+        assert await bot.handle_callback(sim._make_callback_update("ACTION|continue_thin"), context) == bot.AWAIT_APPROVAL
+    for updated in (bot._load_draft(context), bot._load_pending_draft(context)):
+        fields = bot._cbd_filing_fields(updated) if form_type == "CBD" else updated.fields
+        assert fields["key_capabilities"] == selected
+        assert fields["curriculum_links"] == ["SLO4"]
+        assert updated.possible_key_capability is None
+        assert possible["capability"] in updated.excluded_key_capabilities
+    assert not any("possible_kc" in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
+
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+async def test_regeneration_replacement_extra_retains_all_reply_exclusions(form_type):
+    import bot
+    from models import CBDData, FormDraft
+    from extractor import KC_FULL_TEXT
+    from tests.bot_simulator import BotSimulator
+    selected = [KC_FULL_TEXT[k] for k in ("SLO4 KC1", "SLO4 KC2")]
+    def make_draft(extra, attempted_exclusions=()):
+        possible = {"capability": KC_FULL_TEXT[extra]}
+        kcs = [*selected, *attempted_exclusions]
+        return (CBDData(key_capabilities=kcs, possible_key_capability=possible)
+                if form_type == "CBD" else FormDraft(form_type=form_type,
+                    fields={"key_capabilities": kcs}, possible_key_capability=possible))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_draft(context, make_draft("SLO2 KC1"))
+    excluded = []
+    extractor_name = "bot.extract_cbd_data" if form_type == "CBD" else "bot.extract_form_data"
+    for old_extra, new_extra in (("SLO2 KC1", "SLO7 KC1"), ("SLO7 KC1", "SLO9 KC1")):
+        with patch("bot._safe_edit_text", AsyncMock()):
+            assert await _remove_kc_by_reply(sim, context, old_extra) == bot.AWAIT_APPROVAL
+        excluded.append(KC_FULL_TEXT[old_extra])
+        # A stale model selection must not restore an excluded capability;
+        # the replacement stays selected without a KC button.
+        with patch(extractor_name, AsyncMock(return_value=make_draft(new_extra, excluded))), \
+             patch("bot._essentials_gate_before_draft", AsyncMock(return_value=None)), \
+             patch("bot.get_voice_profile", return_value=""), patch("bot._safe_edit_text", AsyncMock()):
+            assert await bot._regenerate_active_draft_with_feedback(
+                sim._make_text_update("Added detail"), context, "Added detail") == bot.AWAIT_APPROVAL
+        updated = bot._load_draft(context)
+        fields = bot._cbd_filing_fields(updated) if form_type == "CBD" else updated.fields
+        assert fields["key_capabilities"] == selected + [KC_FULL_TEXT[new_extra]]
+        assert updated.possible_key_capability == {"capability": KC_FULL_TEXT[new_extra]}
+        assert updated.excluded_key_capabilities == excluded
+        assert not any("possible_kc" in b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row)
+        raw = updated.model_dump()
+        target = raw if form_type == "CBD" else raw["fields"]
+        target["key_capabilities"] = [*excluded, *fields["key_capabilities"]]
+        edited = type(updated).model_validate(raw)
+        edited_fields = bot._cbd_filing_fields(edited) if form_type == "CBD" else edited.fields
+        assert edited_fields["key_capabilities"] == fields["key_capabilities"]
+        assert "excluded_key_capabilities" not in edited_fields

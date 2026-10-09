@@ -239,11 +239,20 @@ def ship_harness(tmp_path):
     scripts.mkdir(parents=True)
     shutil.copy(CARD_TOOL, scripts / "release_card.py")
     shutil.copy(REPO_ROOT / "scripts/staging_proof.py", scripts / "staging_proof.py")
+    # Fake Git has no source blobs. Stub fingerprint calculation only; keep
+    # the real sixteen-journey coverage/receipt gate for release-loop tests.
+    journey_source = (REPO_ROOT / "scripts/telegram_journey_proof.py").read_text()
+    (scripts / "telegram_journey_proof.py").write_text(journey_source +
+        "\ndef fingerprints(root, sha=None):\n    return {key: key for key in JOURNEYS}\n")
     proofs = tmp_path / "staging-proofs"
     proofs.mkdir()
     (proofs / f"{PUSHED_SHA}.json").write_text(json.dumps({
         "sha": PUSHED_SHA, "target": "portfolio_guru_test_bot", "smoke": "pass",
         "automated": "pass", "moeed_approved": True,
+        "journey_coverage": {"schema": 1, "sha": PUSHED_SHA, "target": "portfolio_guru_test_bot",
+            "journeys": {key: {"fingerprint": key, "sha": PUSHED_SHA, "target": "portfolio_guru_test_bot", "status": "passed"}
+                for key in ("LAT", "TEACH", "QIAT", "MGMT_ROTA", "SERIOUS_INC", "PROC_LOG", "US_CASE",
+                            "FORMAL_COURSE", "REFLECT_LOG", "teaching-pdf", "text", "photo", "voice", "document", "settings", "form-switching")}},
     }))
     for name in ("preflight.sh", "telegram_qa_offline.sh"):
         _write_executable(scripts / name, f"#!/usr/bin/env bash\n{_env_probe(name)}exit 0\n")

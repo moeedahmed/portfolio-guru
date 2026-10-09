@@ -157,8 +157,8 @@ async def test_photo_that_triggered_consent_resumes_to_image_intent(tmp_consent_
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ('📝 Read text', "DOCUSE|info") in buttons
-    assert ('📎 Attach only', "DOCUSE|attach") in buttons
+    assert ('📝 Use text as case', "DOCUSE|info") in buttons
+    assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
     assert ('📎 Read + attach', "DOCUSE|both") in buttons
     assert "_consent_pending_input" not in context.user_data
 
@@ -326,8 +326,8 @@ async def test_video_that_triggered_consent_resumes_to_video_intent(tmp_consent_
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ('📎 Attach', "DOCUSE|attach") in buttons
-    assert ('❌ Remove', "DOCUSE|ignore") in buttons
+    assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
+    assert ('❌ Remove file', "DOCUSE|ignore") in buttons
     assert "_consent_pending_input" not in context.user_data
 
     Path(pending_doc["path"]).unlink(missing_ok=True)
@@ -378,8 +378,8 @@ async def test_video_document_that_triggered_consent_resumes_to_video_intent(tmp
     assert Path(pending_doc["path"]).exists()
     assert context.user_data["_pending_doc_context"] == update.message.caption
     buttons = sim.get_last_buttons()
-    assert ('📎 Attach', "DOCUSE|attach") in buttons
-    assert ('❌ Remove', "DOCUSE|ignore") in buttons
+    assert ('📎 Attach as evidence', "DOCUSE|attach") in buttons
+    assert ('❌ Remove file', "DOCUSE|ignore") in buttons
     assert "Couldn't transcribe voice note" not in _all_visible_text(sim)
     assert "_consent_pending_input" not in context.user_data
 

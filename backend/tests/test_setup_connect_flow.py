@@ -134,7 +134,7 @@ async def test_tapping_sign_in_twice_edits_one_message_and_keeps_one_link(harnes
     assert "I'll confirm here as soon as it works" in text
     assert _buttons(markup) == [
         ("🔒 Open Kaizen sign-in", "https://connect.test/handoff#t1"),
-        ("🔑 Share my login instead", "ACTION|setup_password"),
+        ("🔑 Share my login (recommended)", "ACTION|setup_password"),
         ("❌ Cancel", "ACTION|cancel"),
     ]
     assert len(jobs) == 1
@@ -318,7 +318,7 @@ async def test_portfolio_pick_after_no_password_sign_in_ends_setup_normally(harn
     _, text, markup = harness.outbox[-1]
     assert "Kaizen connected" in text
     assert bot.render_message("welcome_connected") in text
-    assert markup is None or ("🔙 Back", "ACTION|settings") not in _buttons(markup)
+    assert markup is None or ("⚙️ Settings", "ACTION|settings") not in _buttons(markup)
 
 
 @pytest.mark.asyncio

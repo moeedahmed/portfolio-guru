@@ -402,7 +402,7 @@ def test_whatsapp_reply_continues_after_form_recommendation_to_preview():
     recommendation = third[1]["data"]["rendered_reply"]
     assert "recommended WPBA form is" in recommendation
     assert "Case-Based Discussion (CBD)" in recommendation
-    assert "1. 📝 Draft" in recommendation
+    assert "1. 📝 Preview draft" in recommendation
 
     preview = fourth[1]["data"]["rendered_reply"]
     assert "vNext local preview" in preview
@@ -521,7 +521,7 @@ def test_whatsapp_reply_draft_now_uses_accumulated_state_without_kaizen(tmp_path
     assert data["kaizen_writes"] is False
     rendered = data["rendered_reply"]
     assert "recommended WPBA form" in rendered
-    assert "1. 📝 Draft" in rendered
+    assert "1. 📝 Preview draft" in rendered
 
     payload["text"] = "1"
     code, preview_response = _run_cli(

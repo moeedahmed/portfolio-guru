@@ -764,7 +764,7 @@ async def test_missing_essentials_draft_at_once_with_the_gaps_named():
     assert "reflection" in hint and "level of supervision" in hint
     assert "patient presentation" not in hint, "only the gaps are named"
     buttons = sim.get_last_buttons()
-    assert ("💾 Save draft to Kaizen", "APPROVE|draft") in buttons
+    assert ("💾 Save to Kaizen", "APPROVE|draft") in buttons
 
 
 @pytest.mark.asyncio
@@ -1050,5 +1050,7 @@ async def test_draft_arrives_as_a_new_message_below_the_progress_line():
     assert kind == "send", "the draft must be sent, not edited into an older message"
     assert "still needed" in text.lower()
     assert markup is not None
-    closing = [t for k, t, _ in sim.messages_sent[:-1] if k == "edit" and t]
-    assert closing and "draft ready below" in closing[-1]
+    # The progress message is removed after the draft lands, with no
+    # redundant "draft ready below" line (Moeed, 9 Oct 2026).
+    assert len(sim.callback_messages_deleted) == 1
+    assert not any("draft ready below" in (t or "") for _, t, _ in sim.messages_sent)

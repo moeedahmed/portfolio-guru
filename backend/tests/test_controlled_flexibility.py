@@ -189,7 +189,7 @@ async def test_explicit_new_case_with_open_draft_uses_choice_gate():
     assert context.user_data["draft_data"] == _draft_payload()
     assert "current draft is still open" in sim.get_last_text().lower()
     assert ('➕ New case', "CASE|new") in sim.get_last_buttons()
-    assert ('✏️ Add to draft', "CASE|improve") in sim.get_last_buttons()
+    assert ('✏️ Edit draft', "CASE|improve") in sim.get_last_buttons()
 
 
 @pytest.mark.asyncio
