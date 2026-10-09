@@ -297,7 +297,9 @@ async def _generate(prompt, retries: int = 1, tier: str = "", purpose: str = "un
                 ])
                 if is_retryable:
                     if attempt < retries:
-                        await asyncio.sleep(1)
+                        # Vertex 429s are short bursts; back off a little longer.
+                        rate_limited = any(term in error_msg for term in ("429", "rate", "quota", "resource_exhausted"))
+                        await asyncio.sleep(2 * (attempt + 1) if rate_limited else 1)
                         continue
                     logger.warning("%s failed (%s), trying next provider", provider["name"], e)
                     break  # next provider

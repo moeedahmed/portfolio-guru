@@ -786,3 +786,28 @@ async def test_generate_attempt_cap_prevents_retry_and_provider_fallback(monkeyp
         with pytest.raises(RuntimeError, match="503"):
             await extractor._generate("fixture", retries=0, max_attempts=1)
     assert post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_backs_off_longer_on_rate_limit(monkeypatch):
+    import extractor
+    from unittest.mock import MagicMock
+
+    providers = [{"name": "fixture", "type": "openai_compat", "model": "fixture",
+                  "base_url": "https://example.invalid", "env_key": "FIXTURE_KEY"}]
+    monkeypatch.setenv("FIXTURE_KEY", "offline-fixture")
+    ok = MagicMock()
+    ok.raise_for_status = MagicMock()
+    ok.json = MagicMock(return_value={"choices": [{"message": {"content": "{}"}}]})
+    post = AsyncMock(side_effect=[RuntimeError("429 RESOURCE_EXHAUSTED"), ok])
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = post
+    sleep = AsyncMock()
+    with patch("extractor._select_providers", return_value=providers), \
+         patch("extractor.httpx.AsyncClient", return_value=client), \
+         patch("extractor.asyncio.sleep", sleep), \
+         patch("extractor.ai_telemetry.record"):
+        assert await extractor._generate("fixture") == "{}"
+    sleep.assert_awaited_once_with(2)
