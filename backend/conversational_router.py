@@ -398,9 +398,11 @@ def _sentences(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in re.split(
         r"[?!.;]|\b(?:and|but)\s+(?=(?:how|why|what|when|where|can|could)\b)"
         # A comma or colon is narrative punctuation unless a question with an
-        # auxiliary follows ("..., what went well was" stays one clause).
-        r"|[,:]\s+(?=(?:how|why|what|when|where)\s+(?:do|does|did|can|could|should|will|is|are|was|were|has|have)\b"
-        r"|(?:can|could|would)\s+(?:i|you)\b)", text,
+        # auxiliary and the doctor or their account follows ("..., what was
+        # difficult was IV access" stays one clause).
+        r"|[,:]\s+(?=(?:(?:how|why|what|when|where)\s+)?"
+        r"(?:do|does|did|can|could|would|should|will|is|are|was|were|has|have)(?:n?['’]t)?\s+"
+        r"(?:i|you|my|we|our)\b)", text,
     ) if part.strip())
 
 
