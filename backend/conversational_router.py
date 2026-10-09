@@ -387,7 +387,7 @@ _QUESTION_START = re.compile(
     r"^(?:(?:what|which|who)\b|"
     r"how\s+(?:do|does|did|can|could|should|will|is|are|much|many)\b|"
     r"(?:why|when|where)\s+(?:do|does|did|can|could|should|will|is|are|was|were|has|have)\b|"
-    r"(?:can|could|would|do|does|is|are|will|should|has|have)\s+"
+    r"(?:can|could|would|do|does|did|is|are|was|were|will|should|has|have)(?:n?['’]t)?\s+"
     r"(?:i|we|you|my|our|this|that|the|portfolio guru|kaizen)\b)"
 )
 
@@ -400,8 +400,8 @@ def _sentences(text: str) -> tuple[str, ...]:
         # A comma or colon is narrative punctuation unless a question follows:
         # one ending in "?", or one about the doctor or their account
         # ("..., what was difficult was IV access" stays one clause).
-        r"|[,:]\s+(?=(?:how|why|what|when|where|which|who|is|are|do|does|did|can|could|would|should|will|has|have)\b[^,:.;!?]*\?)"
-        r"|[,:]\s+(?=(?:(?:how|why|what|when|where)\s+)?"
+        r"|[,:]\s*(?=(?:how|why|what|when|where|which|who|is|are|do|does|did|can|could|would|should|will|has|have)\b[^.;!?]*\?)"
+        r"|[,:]\s*(?=(?:(?:how|why|what|when|where)\s+)?"
         r"(?:do|does|did|can|could|would|should|will|is|are|was|were|has|have)(?:n?['’]t)?\s+"
         r"(?:i|you|my|we|our)\b)", text,
     ) if part.strip())
