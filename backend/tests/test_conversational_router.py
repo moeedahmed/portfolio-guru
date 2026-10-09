@@ -15,6 +15,7 @@ from conversational_router import ConversationalIntent, RouterResult, route_mess
             ConversationalIntent.PORTFOLIO_QUESTION,
         ),
         ("File this as a CBD in Kaizen", ConversationalIntent.FILE_TO_KAIZEN),
+        ("File this 45F sepsis case as a CBD in Kaizen", ConversationalIntent.FILE_TO_KAIZEN),
         ("Actually make it shorter", ConversationalIntent.EDIT_DRAFT),
         ("Why is this asking me to pay?", ConversationalIntent.ACCOUNT_OR_BILLING),
         ("How much does this cost?", ConversationalIntent.ACCOUNT_OR_BILLING),
@@ -89,6 +90,18 @@ def test_narrative_guard_preserves_standalone_product_questions(question):
     from conversational_router import has_case_narrative
 
     assert not has_case_narrative(question)
+
+
+@pytest.mark.parametrize("filing_request", [
+    "File this 45F sepsis case as a CBD in Kaizen",
+    "Please save this 62M chest pain case as a CBD",
+    "Log this reflection: I taught handover communication",
+])
+def test_narrative_guard_preserves_explicit_filing_requests(filing_request):
+    from conversational_router import has_case_narrative
+
+    assert not has_case_narrative(filing_request)
+    assert route_message(filing_request).intent == ConversationalIntent.FILE_TO_KAIZEN
 
 
 @pytest.mark.asyncio

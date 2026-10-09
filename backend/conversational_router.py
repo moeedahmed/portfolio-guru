@@ -420,6 +420,10 @@ def has_case_narrative(message: str) -> bool:
     'Can you help with a reflection?' remain questions.
     """
     text = _normalise(message)
+    # Filing commands may include demographics, but are instructions about a
+    # draft rather than new evidence. Leave them to the existing filing route.
+    if _contains_any(text, FILE_TERMS):
+        return False
     # A direct product-help question wins even after narrated problem wording.
     # Match the question clause, not incidental login words in activity prose.
     product_question = re.search(

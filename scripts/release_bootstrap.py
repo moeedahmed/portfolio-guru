@@ -136,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         env = dict(os.environ)
         env.update(
+            PYTHONDONTWRITEBYTECODE="1",
             RELEASE_LOOP_BOOTSTRAP="1",
             RELEASE_LOOP_PINNED_SHA=sha,
             RELEASE_LOOP_ROOT=root,

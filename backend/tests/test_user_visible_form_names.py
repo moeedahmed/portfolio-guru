@@ -193,6 +193,7 @@ async def test_answer_question_pricing_copy_is_not_free_hallucination(monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("question,case_context", [
     ("How should I think about portfolio evidence after a messy shift?", ""),
+    ("How should I think about portfolio evidence after a messy shift?", "Adult in ED with chest pain."),
     ("Which form is best and is my login encrypted?", "Adult in ED with chest pain."),
 ])
 async def test_side_question_answers_use_reviewed_copy_even_with_case_context(monkeypatch, question, case_context):
@@ -213,7 +214,6 @@ async def test_side_question_answers_use_reviewed_copy_even_with_case_context(mo
 @pytest.mark.parametrize("question", [
     "Which form is best?",
     "Should I use DOPS instead?",
-    "How should I think about portfolio evidence after a messy shift?",
 ])
 async def test_case_specific_form_question_has_hard_limits_and_plain_text(monkeypatch, question):
     from unittest.mock import AsyncMock
