@@ -142,12 +142,24 @@ def draft_url(value):
 
 def skipped_fields(form_type, skipped):
     import kaizen_form_filer as filer
+    from extractor import schema_form_type
     mapping = {**filer.COMMON_HEADER_FIELD_MAP, **filer.FORM_FIELD_MAP[form_type]}
     handling = filer.SCHEMA_REQUIRED_FIELD_HANDLING.get(filer.filing_form_base(form_type), {})
+    schema_keys = {s["key"] for s in filer.FORM_SCHEMAS.get(schema_form_type(form_type), {}).get("fields", [])}
+    known_keys = set(mapping) | set(handling) | schema_keys
     rows = []
     for item in skipped:
         # Never copy arbitrary text from a provider result into an artefact.
-        key = item if item in mapping or item in handling else None
+        kc = re.fullmatch(r"kc:SLO\s*(\d{1,2})\s+KC\s*(\d{1,2})(?::.*)?", item) if isinstance(item, str) else None
+        if kc:
+            rows.append({"field": f"kc:SLO{int(kc[1])} KC{int(kc[2])}", "classification": "empty",
+                         "reason": "key_capability_not_persisted"})
+            continue
+        if isinstance(item, str) and re.fullmatch(r"key_capabilities \((?:\d+ )?not ticked\)", item):
+            rows.append({"field": "key_capabilities", "classification": "not-mapped",
+                         "reason": "key_capabilities_not_ticked"})
+            continue
+        key = item if isinstance(item, str) and item in known_keys else None
         if key:
             rows.append({"field": key, "classification": "empty" if key in mapping else "not-mapped",
                          "reason": handling.get(key, "filer_skipped")})

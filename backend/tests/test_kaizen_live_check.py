@@ -199,6 +199,46 @@ def test_unmapped_skip_keeps_safe_skip_reason():
     assert "untrusted" not in json.dumps(rows)
 
 
+def test_curriculum_skip_rows_name_the_field_without_copying_provider_text():
+    rows = check.skipped_fields("LAT", ["key_capabilities (1 not ticked)",
+                                       "kc:SLO6 KC1", "untrusted secret text"])
+    assert rows[0] == {"field": "key_capabilities", "classification": "not-mapped",
+                       "reason": "key_capabilities_not_ticked"}
+    assert rows[1] == {"field": "kc:SLO6 KC1", "classification": "empty",
+                       "reason": "key_capability_not_persisted"}
+    assert "untrusted" not in json.dumps(rows)
+
+
+def test_schema_only_skip_names_and_kc_descriptions_are_safely_classified():
+    rows = check.skipped_fields("TEACH", ["key_capabilities (not ticked)",
+        "higher_procedural_skill", "kc:SLO6 KC1: private-provider-text", "key_capabilities (private-provider-text)"])
+    assert [r["field"] for r in rows[:3]] == ["key_capabilities", "higher_procedural_skill", "kc:SLO6 KC1"]
+    assert rows[1]["classification"] == "not-mapped"
+    assert rows[-1]["field"] == "unclassified_filer_skip"
+    assert "private-provider-text" not in json.dumps(rows)
+
+
+def test_named_kc_skip_merges_with_readback_row_and_prevents_clean_pass(monkeypatch, tmp_path):
+    import credentials
+    import kaizen_form_filer as filer
+    monkeypatch.setenv("KAIZEN_LIVE_CHECK_APPROVED", "operator-own-account")
+    monkeypatch.delenv("PG_ENV", raising=False)
+    monkeypatch.delenv("PG_KAIZEN_OFFLINE", raising=False)
+    monkeypatch.setattr(credentials, "get_credentials", lambda uid: ("fake-login", "fake-password"))
+    monkeypatch.setattr(filer, "file_to_kaizen", AsyncMock(return_value={
+        "status": "partial", "saved_url": "https://kaizenep.com/events/fillin/synthetic-draft",
+        "skipped": ["key_capabilities (1 not ticked)", "kc:SLO6 KC1"]}))
+    monkeypatch.setattr(check, "read_back", AsyncMock(return_value=[
+        {"field": "kc:SLO6 KC1", "classification": "empty", "reason": "value_not_persisted"}]))
+    report, code = asyncio.run(check.run_check(("LAT",)))
+    assert code == check.PARTIAL
+    rows = report["forms"][0]["fields"]
+    assert [r["field"] for r in rows] == ["kc:SLO6 KC1", "key_capabilities"]
+    assert rows[0]["filer_skip_reason"] == "key_capability_not_persisted"
+    check.write_report(report, tmp_path)
+    assert "unclassified_filer_skip" not in (tmp_path / "summary.md").read_text()
+
+
 @pytest.mark.parametrize("url", ["http://kaizenep.com/events/fillin/a", "https://evil.invalid/events/fillin/a", "https://name:password@kaizenep.com/events/fillin/a", "https://kaizenep.com/activities"])
 def test_readback_refuses_untrusted_draft_url(url):
     with pytest.raises(check.GuardRefusal):
