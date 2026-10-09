@@ -227,7 +227,7 @@ async def test_routes_abort_non_fake_hosts_and_socket_guard_stays_closed(fake_br
     assert fake.requests == []
 
 
-@pytest.mark.parametrize("form_type", ("CBD", "DOPS_2021", "REFLECT_LOG_2021", "MINI_CEX"))
+@pytest.mark.parametrize("form_type", ("CBD", "DOPS_2021", "REFLECT_LOG", "MINI_CEX"))
 async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, monkeypatch, tmp_path, form_type):
     import credentials
     import kaizen_live_check as check
@@ -243,8 +243,9 @@ async def test_operator_check_reopens_every_field_and_curriculum(fake_browser, m
     assert code == 0, report
     entry = report["forms"][0]
     assert entry["draft_url"] == fake.drafts[0]["url"]
-    assert all(row["classification"] == "landed" for row in entry["fields"])
-    assert any(row["field"] == "kc:SLO6 KC1" for row in entry["fields"])
+    assert all(row["classification"] == "landed" or (row["field"].startswith("tag:") and row["classification"] == "count-only")
+               for row in entry["fields"])
+    assert any(row["field"] in {"kc:SLO6 KC1", "tag:SLO6 KC1"} for row in entry["fields"])
     assert requested == [check.OPERATOR_USER_ID]
     assert fake.submit_clicks == 0
     assert len(fake.drafts) == 1  # Read-back never saves a second draft.
@@ -307,5 +308,155 @@ async def test_draft_save_never_clicks_a_save_button_named_send_by_another_eleme
             saved = await filer._try_save_selectors(page, ['#save'], True)
             assert saved is False
             assert await page.evaluate("window.clicked === true") is False
+        finally:
+            await browser.close()
+
+
+async def test_2021_curriculum_tree_ticks_the_unnumbered_capability_by_position():
+    """2021 trees say "SLO6 Key Capability: ..." with no number and no stage word."""
+    kcs = ("the clinical knowledge to identify when key EM practical emergency skills are indicated",
+           "the knowledge and psychomotor skills to perform EM procedural skills safely",
+           "will be able to supervise and guide colleagues in delivering procedural skills")
+    rows = "".join(
+        f'<li><input type="checkbox" id="kc{i}"><span class="ng-binding">SLO6 Key Capability: {text}</span></li>'
+        for i, text in enumerate(kcs, 1)
+    )
+    html = (
+        '<ul><li><input type="checkbox" id="slo6"><a class="ng-binding" href="#" '
+        'onclick="document.getElementById(\'kcs\').hidden = false; return false">'
+        'SLO6: Proficiently deliver key procedural skills needed in EM</a>'
+        f'<ul id="kcs" hidden>{rows}</ul></li></ul>'
+    )
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(html)
+            ticked, errors = await filer._fill_curriculum_links(
+                page, ["SLO6"], ["SLO6 KC2: the knowledge and psychomotor skills (2025 Update)"], "Higher",
+            )
+            assert errors == []
+            assert len(ticked) == 1
+            states = await page.evaluate("[...document.querySelectorAll('input')].map(c => c.id + ':' + c.checked)")
+            assert states == ["slo6:false", "kc1:false", "kc2:true", "kc3:false"]
+        finally:
+            await browser.close()
+
+
+async def test_unnumbered_capability_is_never_ticked_when_two_slo_branches_are_open():
+    """Position is ambiguous across Intermediate and Higher branches, so nothing is ticked."""
+    branch = lambda stage: (
+        f'<li><span class="ng-binding">{stage}</span><ul>'
+        + "".join(f'<li><input type="checkbox" id="{stage}{i}"><span class="ng-binding">SLO6 Key Capability: skill {i}</span></li>' for i in (1, 2))
+        + "</ul></li>"
+    )
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(f"<ul>{branch('Intermediate')}{branch('Higher')}</ul>")
+            result = await page.evaluate(filer.TICK_KC_FALLBACK_JS, "SLO6 KC2")
+            assert not result.get("checked")
+            assert await page.evaluate("[...document.querySelectorAll('input')].every(c => !c.checked)")
+        finally:
+            await browser.close()
+
+
+async def test_unnumbered_capability_is_never_ticked_when_two_stages_offer_the_slo():
+    """Intermediate and Higher both show "SLO6:"; only one branch's rows are rendered."""
+    rows = "".join(
+        f'<li><input type="checkbox" id="kc{i}"><span class="ng-binding">SLO6 Key Capability: skill {i}</span></li>'
+        for i in (1, 2)
+    )
+    html = (
+        '<ul><li><a class="ng-binding" href="#" id="inter">SLO6: procedures</a>'
+        f'<ul>{rows}</ul></li>'
+        '<li><a class="ng-binding" href="#" id="higher">SLO6: procedures</a></li></ul>'
+    )
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(html)
+            result = await page.evaluate(filer.TICK_KC_FALLBACK_JS, "SLO6 KC2")
+            assert not result.get("checked")
+            assert await page.evaluate("[...document.querySelectorAll('input')].every(c => !c.checked)")
+        finally:
+            await browser.close()
+
+
+async def test_post_save_qa_reads_a_saved_draft_as_kaizen_renders_it():
+    """Saved drafts drop the blank select option and collapse the curriculum tree."""
+    html = """
+      <select id="placement"><option value="string:a" selected>Emergency Medicine</option><option value="string:b">Anaesthetics</option></select>
+      <select id="procedure"><option value="?" selected></option><option value="string:c">Paediatric sedation (ST3-ST6 2021)</option></select>
+      <div kz-tree id="tree"></div>
+      <script>
+        const scope = {selected: ["kc2"], nodes: [{_id: "root", name: "Specialty Learning Outcomes - Higher (2021)", categories: [
+          {_id: "slo6", name: "SLO6: Proficiently deliver key procedural skills needed in EM", categories: [
+            {_id: "kc1", name: "SLO6 Key Capability: the clinical knowledge"},
+            {_id: "kc2", name: "SLO6 Key Capability: the knowledge and psychomotor skills"},
+            {_id: "kc3", name: "SLO6 Key Capability: will be able to supervise"}]}]}]};
+        window.angular = {element: () => ({isolateScope: () => scope})};
+      </script>"""
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(html)
+            qa = await filer._verify_filing_qa(
+                page, "DOPS_2021",
+                {"placement": "Emergency Department", "procedure_name": "Paediatric sedation", "key_capabilities": ["SLO6 KC2"]},
+                {"placement": "placement", "procedure_name": "procedure"},
+            )
+            assert "placement" in qa["filled"]
+            assert "procedure_name" in qa["empty_expected"]
+            assert "kc:SLO6 KC2" in qa["filled"]
+            assert await page.evaluate(filer._QA_READ_KC_JS, "SLO6 KC1") is False
+        finally:
+            await browser.close()
+
+
+async def test_post_save_qa_never_confirms_a_capability_ticked_in_the_other_stage():
+    """Two stages both list unnumbered SLO6 capabilities; a tick in one proves nothing."""
+    html = """
+      <div kz-tree id="tree"></div>
+      <script>
+        const branch = (stage, picked) => ({_id: stage, name: stage, categories: [{_id: stage + "slo6", name: "SLO6: procedures", categories: [
+          {_id: stage + "kc1", name: "SLO6 Key Capability: the clinical knowledge"},
+          {_id: stage + "kc2", name: "SLO6 Key Capability: the psychomotor skills"}]}]});
+        const scope = {selected: ["Intermediatekc2"], nodes: [branch("Intermediate"), branch("Higher")]};
+        window.angular = {element: () => ({isolateScope: () => scope})};
+      </script>"""
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(html)
+            assert await page.evaluate(filer._QA_READ_KC_JS, "SLO6 KC2: the psychomotor skills") is False
+        finally:
+            await browser.close()
+
+
+async def test_post_save_qa_never_confirms_a_capability_ticked_in_another_tree():
+    """Same as above, but each stage is its own kz-tree."""
+    html = """
+      <div kz-tree class="t" data-stage="Intermediate"></div><div kz-tree class="t" data-stage="Higher"></div>
+      <script>
+        const branch = stage => [{_id: stage + "slo6", name: "SLO6: procedures", categories: [
+          {_id: stage + "kc1", name: "SLO6 Key Capability: the clinical knowledge"},
+          {_id: stage + "kc2", name: "SLO6 Key Capability: the psychomotor skills"}]}];
+        const scopes = {Intermediate: {selected: ["Intermediatekc2"], nodes: branch("Intermediate")},
+                        Higher: {selected: [], nodes: branch("Higher")}};
+        window.angular = {element: el => ({isolateScope: () => scopes[el.dataset.stage]})};
+      </script>"""
+    import kaizen_live_check as check
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content(html)
+            assert await page.evaluate(filer._QA_READ_KC_JS, "SLO6 KC2: the psychomotor skills") is False
+            assert (await page.evaluate(check.READ_KC_JS, "SLO6 KC2")).get("value") is not True
         finally:
             await browser.close()

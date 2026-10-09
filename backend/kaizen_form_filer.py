@@ -1625,6 +1625,14 @@ _FORM_FIELD_MAP_VARIANT_BASES = {
     "AUDIT_2021": "AUDIT",
 }
 
+# The 2021 DOPS renders its own procedure list in place of the 2025 Higher one
+# (read live on 9 Oct 2026); every other control is the same as DOPS.
+FORM_FIELD_MAP["DOPS_2021"] = {
+    **FORM_FIELD_MAP["DOPS"],
+    "procedure_name": "9384be94-f038-4c3f-897c-52b7876a8cc0",
+    "procedural_skill": "9384be94-f038-4c3f-897c-52b7876a8cc0",
+}
+
 for _variant, _base in _FORM_FIELD_MAP_VARIANT_BASES.items():
     if _base in FORM_FIELD_MAP:
         FORM_FIELD_MAP.setdefault(_variant, FORM_FIELD_MAP[_base])
@@ -1739,6 +1747,22 @@ EXPAND_SLO_FALLBACK_JS = """(sloText) => {
             return true;
         }
     }
+    // The 2021 trees drop the stage word ("SLO6: ..." not "Higher SLO6: ..."),
+    // so accept a title that starts with the bare SLO code before guessing.
+    // Only when exactly one branch offers that SLO: with two stages open, the
+    // bare code cannot say which one was asked for.
+    var bare = sloText.match(/SLO\\s*\\d+\\s*:/);
+    if (bare) {
+        var anchors = document.querySelectorAll('a.ng-binding');
+        var bareHits = [];
+        for (var b = 0; b < anchors.length; b++) {
+            if ((anchors[b].textContent || '').trim().indexOf(bare[0]) === 0) bareHits.push(anchors[b]);
+        }
+        if (bareHits.length === 1) {
+            bareHits[0].click();
+            return true;
+        }
+    }
     var m = sloText.match(/SLO\\s*\\d+/);
     if (m) {
         var sloOnly = m[0].replace(/\\s+/g, '');
@@ -1841,6 +1865,35 @@ TICK_KC_FALLBACK_JS = """(prefix) => {
             lbl.click();
             return { found: true, checked: true, text: t.slice(0, 70) };
         }
+    }
+    // The 2021 trees name every capability "SLO6 Key Capability: ..." with no
+    // number, listed in curriculum order, so the nth such row is KCn.
+    var stem = 'slo' + sloNum + ' key capability ';
+    var rows = [];
+    var spans = document.querySelectorAll('span.ng-binding');
+    for (var r = 0; r < spans.length; r++) {
+        var rt = normalise(spans[r].textContent);
+        if (rt.indexOf(stem) !== 0 || /^\\d/.test(rt.slice(stem.length))) continue;
+        var row = spans[r].closest('li');
+        if (row && rows.indexOf(row) === -1) rows.push(row);
+    }
+    // Position only means something inside one SLO branch. If two branches
+    // (say Intermediate and Higher) are both open, refuse rather than guess.
+    var branches = [];
+    for (var g = 0; g < rows.length; g++) {
+        if (branches.indexOf(rows[g].parentElement) === -1) branches.push(rows[g].parentElement);
+    }
+    var sloAnchors = 0;
+    var links = document.querySelectorAll('a.ng-binding');
+    for (var a = 0; a < links.length; a++) {
+        if (new RegExp('^SLO\\\\s*' + sloNum + '\\\\s*:', 'i').test((links[a].textContent || '').trim())) sloAnchors++;
+    }
+    if (branches.length > 1 || sloAnchors > 1) return { found: false, ambiguous: true };
+    var pick = rows[parseInt(kcNum, 10) - 1];
+    var box = pick && pick.querySelector('input[type="checkbox"]');
+    if (box) {
+        if (!box.checked) box.click();
+        return { found: true, checked: box.checked, text: 'ordinal ' + stem + kcNum };
     }
     return { found: false };
 }"""
@@ -2802,20 +2855,30 @@ async def _resolve_procedural_skill_selects(
     return answered, unresolved
 
 
+_DOPS_PROCEDURE_KEYS = frozenset({"procedure_name", "procedural_skill", "accs_procedural_skill"})
+
+
 async def _normalise_dops_select_value(page: Page, field_key: str, dom_id: str, value: Any) -> str:
     """Map DOPS select aliases to exact rendered Kaizen option labels."""
-    if field_key != "placement":
+    if field_key != "placement" and field_key not in _DOPS_PROCEDURE_KEYS:
         return str(value)
     try:
         options = await page.evaluate(
             "(domId) => { var s = document.getElementById(domId); return s ? Array.from(s.options).map(o => o.text) : []; }",
             dom_id,
         )
-        from dops_filing import normalise_dops_placement
-        return normalise_dops_placement(str(value), options)
+        from dops_filing import normalise_dops_placement, normalise_dops_procedure
+        if field_key == "placement":
+            return normalise_dops_placement(str(value), options)
+        return normalise_dops_procedure(str(value), options)
     except Exception as e:
-        logger.warning(f"DOPS placement option normalisation failed for {dom_id}: {e}")
+        logger.warning(f"DOPS {field_key} option normalisation failed for {dom_id}: {e}")
         return str(value)
+
+
+def _is_dops_form(form_type: str) -> bool:
+    """Every DOPS form, 2021 variant included, takes the DOPS field and option matching."""
+    return filing_form_base(form_type) in {"DOPS", "DOPS_ACCS", "DOPS_ACCS_2021"}
 
 
 async def _fill_assessor_invite(page: Page, query: str, expected_name: str = "") -> bool:
@@ -3509,6 +3572,40 @@ _QA_READ_KC_JS = """(prefix) => {
         return out.map(normalise).filter(Boolean);
     }
     var wanted = variants(prefix);
+    // A saved draft re-renders the tree collapsed, so ticked capabilities are
+    // not in the DOM. Read the tree's own selection model first. 2021 trees
+    // name capabilities "SLO6 Key Capability: ..." with no number; their
+    // position under the SLO is the number.
+    var code = prefix.match(/SLO\\s*(\\d+)[\\s\\S]*?(?:KC|Key Capability)\\s*(\\d+)\\b/i);
+    var trees = window.angular ? document.querySelectorAll('[kz-tree]') : [];
+    // Counted across every tree: two stages may sit in separate trees.
+    var hit = false, plainHit = false, plainGroups = 0;
+    for (var t = 0; code && t < trees.length; t++) {
+        var scope = angular.element(trees[t]).isolateScope();
+        if (!scope || !Array.isArray(scope.nodes)) continue;
+        var chosen = (scope.selected || []).map(String);
+        var walk = function(nodes) {
+            var position = 0, groupHasPlain = false;
+            (nodes || []).forEach(function(node) {
+                var name = node.name || '';
+                var numbered = name.match(/SLO\\s*(\\d+)[\\s\\S]*?(?:KC|Key Capability)\\s*(\\d+)\\b/i);
+                var plain = name.match(/^SLO\\s*(\\d+)\\s+Key Capability\\s*:/i);
+                if (plain && plain[1] === code[1]) { position += 1; groupHasPlain = true; }
+                if (numbered && numbered[1] === code[1] && numbered[2] === code[2]
+                        && chosen.indexOf(String(node._id)) !== -1) hit = true;
+                if (plain && plain[1] === code[1] && String(position) === code[2]
+                        && chosen.indexOf(String(node._id)) !== -1) plainHit = true;
+                walk(node.categories);
+            });
+            if (groupHasPlain) plainGroups += 1;
+        };
+        walk(scope.nodes);
+    }
+    // Unnumbered capabilities are identified by position, which is only
+    // unambiguous when this SLO appears in one branch across the trees.
+    if (hit || (plainHit && plainGroups === 1)) return true;
+    // Ambiguous by position: never let the text match below confirm it.
+    if (plainGroups > 1) return false;
     var spans = document.querySelectorAll('span.ng-binding');
     for (var i = 0; i < spans.length; i++) {
         var txt = spans[i].textContent.trim();
@@ -3662,7 +3759,10 @@ async def _verify_filing_qa(
         elif state.get("error"):
             pass
         elif state.get("tag") == "SELECT":
-            is_filled = int(state.get("selectedIndex") or 0) > 0
+            # A saved draft drops Angular's blank "?" option, so the chosen
+            # answer can sit at index 0; the value says whether one is chosen.
+            value = str(state.get("value") or "")
+            is_filled = int(state.get("selectedIndex", -1)) >= 0 and bool(value) and not value.startswith("?")
         elif state.get("type") == "checkbox":
             is_filled = bool(state.get("checked"))
         else:
@@ -3969,7 +4069,7 @@ async def fill_kaizen_form(
             return {"status": "failed", "filled": [], "skipped": [], "errors": [f"No field map for: {form_type}"], "screenshot": None}
         field_map = {**COMMON_HEADER_FIELD_MAP, **base_field_map}
 
-        if form_type == "DOPS":
+        if _is_dops_form(form_type):
             from dops_filing import normalise_dops_fields
             fields = normalise_dops_fields(fields)
         fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
@@ -4044,7 +4144,7 @@ async def fill_kaizen_form(
             tag = await _field_tag(page, dom_id, field_key=key)
 
             if tag == "SELECT":
-                if form_type == "DOPS":
+                if _is_dops_form(form_type):
                     value = await _normalise_dops_select_value(page, key, dom_id, value)
                 ok = await _fill_select(page, dom_id, str(value))
             elif tag in ("TEXTAREA", "INPUT"):
@@ -4351,7 +4451,7 @@ async def _fill_field_legacy(page: Page, dom_id: Any, value: Any, field_key: str
 
         # Select dropdowns
         if tag == "SELECT":
-            if form_type == "DOPS" and field_key == "placement":
+            if _is_dops_form(form_type):
                 value = await _normalise_dops_select_value(page, field_key, dom_id, value)
             return await _fill_select(page, field_target, str(value))
 
@@ -4927,7 +5027,7 @@ async def file_to_kaizen(
     if form_type == "PROC_LOG" and fields.get("date_of_activity") and not fields.get("date_occurred_on"):
         fields = dict(fields)
         fields["date_occurred_on"] = fields["date_of_activity"]
-    normaliser = FORM_FIELD_NORMALISERS.get(form_type)
+    normaliser = FORM_FIELD_NORMALISERS.get(form_type) or FORM_FIELD_NORMALISERS.get(filing_form_base(form_type))
     if normaliser:
         fields = normaliser(fields)
     fields, header_meta = apply_common_header_defaults(form_type, fields, field_map)
