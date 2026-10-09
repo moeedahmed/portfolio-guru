@@ -54,7 +54,7 @@ def producer_digest():
 # or callback payload added, removed or reworded.
 # Login onboarding: case retention, validation, stale acknowledgements and structural
 # telemetry only. Existing copy/payloads are unchanged; FORM re-entry is dispatch-tested.
-PRODUCER_DIGEST = '8b1a877e4e6bd716bd6dd401b2907deefbd8fd683f13fdd2f53d71f1580bb23c'
+PRODUCER_DIGEST = '62835dcfa91dd3e3c0957f8e8088a939985c58db1631fa03b9e27377e0b7562e'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
