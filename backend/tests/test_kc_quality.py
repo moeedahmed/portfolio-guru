@@ -811,3 +811,169 @@ async def test_generate_backs_off_longer_on_rate_limit(monkeypatch):
          patch("extractor.ai_telemetry.record"):
         assert await extractor._generate("fixture") == "{}"
     sleep.assert_awaited_once_with(2)
+
+
+POSSIBLE_CASE = "I assessed an ankle injury and discussed imaging with my supervisor."
+
+
+def _possible_kc():
+    return {"capability": "SLO2 KC1", "reason": "You discussed the imaging decision with your supervisor.",
+            "evidence": "discussed imaging with my supervisor"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+@pytest.mark.parametrize("candidate,valid", [
+    (_possible_kc(), True),
+    ({**_possible_kc(), "capability": "SLO99 KC1: invented"}, False),
+    ({**_possible_kc(), "capability": "SLO2 KC99: invented"}, False),
+    ({**_possible_kc(), "reason": ""}, False),
+    ({**_possible_kc(), "evidence": "I taught a medical student"}, False),
+    ({**_possible_kc(), "capability": "SLO4 KC1"}, False),
+    ([_possible_kc(), _possible_kc()], False),
+])
+async def test_possible_kc_is_separate_validated_case_grounded_and_optional(form_type, candidate, valid):
+    from extractor import KC_FULL_TEXT, extract_cbd_data, extract_form_data
+    payload = {"key_capabilities": ["SLO4 KC1"], "curriculum_links": ["SLO4"],
+               "possible_key_capability": candidate}
+    generate = AsyncMock(return_value=json.dumps(payload))
+    with patch("extractor._generate", generate):
+        draft = (await extract_cbd_data(POSSIBLE_CASE) if form_type == "CBD"
+                 else await extract_form_data(POSSIBLE_CASE, form_type))
+    selected = draft.key_capabilities if form_type == "CBD" else draft.fields["key_capabilities"]
+    assert 1 <= len(selected) <= 3
+    assert "SLO2 KC1" not in {kc.split(":", 1)[0] for kc in selected}
+    assert (draft.possible_key_capability is not None) is valid
+    if valid:
+        assert draft.possible_key_capability["capability"] == KC_FULL_TEXT["SLO2 KC1"]
+        assert "possible_key_capability" in generate.call_args.args[0]
+    if form_type == "CBD":
+        assert generate.await_count == 2  # same bounded review, no extra model call
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("generic", [False, True])
+async def test_possible_kc_tap_updates_preview_and_filing_payload_only_after_confirmation(generic):
+    import bot
+    from extractor import KC_FULL_TEXT
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    possible = {**_possible_kc(), "capability": KC_FULL_TEXT["SLO2 KC1"]}
+    selected = [KC_FULL_TEXT["SLO4 KC1"]]
+    draft = (FormDraft(form_type="TEACH", fields={"key_capabilities": selected, "curriculum_links": ["SLO4"]},
+                       possible_key_capability=possible) if generic else
+             CBDData(key_capabilities=selected, curriculum_links=["SLO4"], possible_key_capability=possible))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data["case_text"] = POSSIBLE_CASE
+    bot._store_draft(context, draft)
+    loaded = bot._load_draft(context)
+    payload = loaded.fields if generic else bot._cbd_filing_fields(loaded)
+    assert payload["key_capabilities"] == selected
+    assert "possible_key_capability" not in payload
+    before = bot._format_draft_preview_for_context(loaded, context)
+    assert "Possible extra: SLO2 KC1" in before
+    markup = bot._active_draft_keyboard(context)
+    callback = next(b.callback_data for row in markup.inline_keyboard for b in row if "add_possible_kc" in b.callback_data)
+    assert len(callback.encode("utf-8")) <= 64
+    update = sim._make_callback_update(callback)
+    with patch("bot._audit_event"), patch("bot._safe_edit_text", new=AsyncMock()) as edit:
+        state = await bot.handle_callback(update, context)
+        assert state == bot.AWAIT_APPROVAL
+        after = bot._load_draft(context)
+        payload = after.fields if generic else bot._cbd_filing_fields(after)
+        assert payload["key_capabilities"] == [*selected, KC_FULL_TEXT["SLO2 KC1"]]
+        assert payload["curriculum_links"] == ["SLO4", "SLO2"]
+        assert after.possible_key_capability is None
+        text = edit.call_args.args[1]
+        assert "Possible extra:" not in text
+        assert "SLO2" in text
+        assert "↳ KC1" in text
+        assert edit.call_args.args[0] is update.callback_query.message
+        assert not any("add_possible_kc" in b.callback_data for row in edit.call_args.kwargs["reply_markup"].inline_keyboard for b in row)
+        # The old tap cannot append again or re-render.
+        assert await bot.handle_callback(update, context) is None
+        assert edit.await_count == 1
+
+
+def test_possible_kc_has_no_button_or_preview_line_with_three_supported_links():
+    import bot
+    from extractor import KC_FULL_TEXT
+    from models import CBDData
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    draft = CBDData(key_capabilities=[KC_FULL_TEXT[k] for k in ("SLO1 KC1", "SLO3 KC3", "SLO4 KC1")],
+                    possible_key_capability=_possible_kc())
+    bot._store_draft(context, draft)
+    assert "Possible extra:" not in bot._format_draft_preview(draft)
+    assert not any("add_possible_kc" in b.callback_data for row in bot._build_approval_keyboard(context=context).inline_keyboard for b in row)
+
+
+@pytest.mark.asyncio
+async def test_possible_generic_kc_cannot_be_silently_promoted_by_existing_breadth_heuristic():
+    from extractor import extract_form_data
+    payload = {"key_capabilities": ["SLO4 KC1"],
+               "possible_key_capability": {**_possible_kc(), "capability": "SLO1 KC1"}}
+    with patch("extractor._generate", AsyncMock(return_value=json.dumps(payload))):
+        draft = await extract_form_data(POSSIBLE_CASE, "TEACH")
+    assert draft.fields["key_capabilities"] == ["SLO4 KC1"]
+    assert draft.possible_key_capability["capability"].startswith("SLO1 KC1:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale,filing", [(True, False), (False, True)])
+async def test_possible_kc_tap_cannot_mutate_a_newer_or_filing_draft(stale, filing):
+    import bot
+    from models import CBDData
+    from tests.bot_simulator import BotSimulator
+    sim = BotSimulator()
+    context = sim._make_context()
+    draft = CBDData(key_capabilities=["SLO4 KC1"], possible_key_capability=_possible_kc())
+    bot._store_draft(context, draft)
+    callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if "add_possible_kc" in b.callback_data)
+    if stale:
+        bot._store_draft(context, draft.model_copy(update={"clinical_reasoning": "Newer draft"}))
+    context.user_data["filing_in_progress"] = filing
+    before = bot._load_draft(context)
+    with patch("bot._audit_event"), patch("bot._safe_edit_text", new=AsyncMock()) as edit:
+        assert await bot.handle_callback(sim._make_callback_update(callback), context) is None
+    assert bot._load_draft(context) == before
+    edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form_type", ["CBD", "TEACH"])
+@pytest.mark.parametrize("add_extra", [False, True])
+async def test_approval_filer_receives_possible_kc_only_after_add_tap(form_type, add_extra):
+    import bot
+    from extractor import KC_FULL_TEXT
+    from models import CBDData, FormDraft
+    from tests.bot_simulator import BotSimulator
+    selected = [KC_FULL_TEXT["SLO4 KC1"]]
+    possible = {**_possible_kc(), "capability": KC_FULL_TEXT["SLO2 KC1"]}
+    draft = (CBDData(key_capabilities=selected, curriculum_links=["SLO4"], possible_key_capability=possible)
+             if form_type == "CBD" else
+             FormDraft(form_type="TEACH", fields={"key_capabilities": selected, "curriculum_links": ["SLO4"]},
+                       possible_key_capability=possible))
+    sim = BotSimulator()
+    context = sim._make_context()
+    context.user_data.update(case_text=POSSIBLE_CASE, chosen_form=form_type)
+    bot._store_draft(context, draft)
+    if add_extra:
+        callback = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if "add_possible_kc" in b.callback_data)
+        assert await bot.handle_callback(sim._make_callback_update(callback), context) == bot.AWAIT_APPROVAL
+    save = next(b.callback_data for row in bot._active_draft_keyboard(context).inline_keyboard for b in row if b.callback_data.startswith("APPROVE|"))
+    route = AsyncMock(return_value={"status": "failed", "filled": [], "skipped": [],
+                                   "error": "offline payload capture", "method": "deterministic"})
+    with patch("bot.get_credentials", return_value=("fixture-user", "fixture-pass")), \
+         patch("bot.route_filing", new=route), \
+         patch("bot.compose_filing_recovery_copy", new=AsyncMock(return_value="")), \
+         patch("bot._alert_filing_failure", new=AsyncMock()):
+        assert await bot.handle_approval_approve(sim._make_callback_update(save), context) == bot.AWAIT_APPROVAL
+    route.assert_awaited_once()
+    fields = route.await_args.kwargs["fields"]
+    assert fields["key_capabilities"] == (selected + [KC_FULL_TEXT["SLO2 KC1"]] if add_extra else selected)
+    assert "possible_key_capability" not in fields
+    assert "evidence" not in fields
+    assert route.await_args.kwargs["curriculum_links"] == (["SLO4", "SLO2"] if add_extra else ["SLO4"])

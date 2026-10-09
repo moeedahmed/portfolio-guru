@@ -16,6 +16,7 @@ class CBDData(BaseModel):
     supervisor_name: Optional[str] = None   # name or email
     curriculum_links: List[str] = []        # SLO labels e.g. ["SLO3", "SLO6"]
     key_capabilities: List[str] = []        # KC strings e.g. ["SLO1 KC1", "SLO6 KC2"]
+    possible_key_capability: Optional[dict] = None  # preview only until the doctor taps Add
 
 
 class FormDraft(BaseModel):
@@ -23,6 +24,7 @@ class FormDraft(BaseModel):
     form_type: str
     fields: dict        # key → extracted value, keyed by schema field key
     uuid: Optional[str] = None
+    possible_key_capability: Optional[dict] = None  # never part of the filing fields
 
 
 class DraftPreviewField(BaseModel):

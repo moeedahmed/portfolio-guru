@@ -401,6 +401,28 @@ def test_no_coach_note_repeats_the_still_needed_line_for_a_required_reflection()
     assert _draft_coach_note(CBDData(reflection="")) == ""
 
 
+@pytest.mark.parametrize("form_type,fields", [
+    ("TEACH", {"learning_outcomes": "Recognise sepsis early.", "reflection": "Injected text."}),
+    ("STAT", {"learning_outcomes": "Recognise sepsis early."}),
+    ("JCF", {"learning_points": "Check the evidence."}),
+    ("US_CASE", {"case_reflection_title": "AAA scan", "learning_points": "Check the aorta."}),
+])
+def test_brief_footer_never_appears_without_a_schema_reflection_field(form_type, fields):
+    draft = FormDraft(form_type=form_type, fields=fields)
+    assert bot._draft_coach_note(draft) == ""
+    assert "This reflection is brief" not in bot._format_draft_preview(draft, include_safety_layer=False)
+
+
+@pytest.mark.parametrize("reflection,shows_note", [
+    ("I learned to escalate sooner.", True),
+    ("I learned to escalate sooner when observations change. Next time I will review the trend and discuss my concerns with the senior clinician early.", False),
+])
+def test_brief_footer_uses_actual_reflection_length(reflection, shows_note):
+    draft = FormDraft(form_type="DOPS", fields={"reflection": reflection})
+    preview = bot._format_draft_preview(draft, include_safety_layer=False)
+    assert ("This reflection is brief" in preview) is shows_note
+
+
 @pytest.mark.asyncio
 async def test_stale_improve_callback_without_draft_cannot_extract():
     from bot import AWAIT_CASE_INPUT, handle_quick_improve

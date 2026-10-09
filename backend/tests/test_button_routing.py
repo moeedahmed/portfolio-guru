@@ -243,3 +243,8 @@ async def test_edit_invalidates_pending_save_continuations(callback):
     curriculum.assert_not_called()
     assert context.user_data["attachment_path"] == "/synthetic/report.pdf"
     assert not context.user_data.get("attachment_upload_confirmed")
+
+
+def test_possible_kc_button_routes_in_approval_state(app):
+    assert _route(app, make_callback_update("ACTION|add_possible_kc|abcdef"), case_state=bot.AWAIT_APPROVAL) == (
+        "case_conv", "handle_callback")

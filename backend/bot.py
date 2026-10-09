@@ -1863,7 +1863,7 @@ def _serialise_draft(draft):
     if isinstance(draft, CBDData):
         return {"_type": "CBD", **draft.model_dump()}
     if isinstance(draft, FormDraft):
-        return {"_type": "FORM", "form_type": draft.form_type, "fields": draft.fields, "uuid": draft.uuid}
+        return {"_type": "FORM", **draft.model_dump()}
     return None
 
 
@@ -1963,7 +1963,7 @@ def _deserialise_draft(raw):
         d = {k: v for k, v in raw.items() if k != "_type"}
         return CBDData(**d)
     if t == "FORM":
-        return FormDraft(form_type=raw["form_type"], fields=raw["fields"], uuid=raw.get("uuid"))
+        return FormDraft(**{k: v for k, v in raw.items() if k != "_type"})
     return None
 
 
@@ -5568,12 +5568,65 @@ def _is_stale_case_button(context, data: str | None) -> bool:
     return parts[2] != context.user_data.get("case_token")
 
 
+def _draft_possible_kc(draft):
+    from extractor import _validated_possible_key_capability
+    if isinstance(draft, CBDData):
+        selected = draft.key_capabilities
+    elif isinstance(draft, FormDraft):
+        schema = FORM_SCHEMAS.get(schema_form_type(draft.form_type), {})
+        if not any(field.get("type") == "kc_tick" for field in schema.get("fields", [])):
+            return None
+        selected = draft.fields.get("key_capabilities") or []
+    else:
+        return None
+    return _validated_possible_key_capability(draft.possible_key_capability, selected)
+
+
+def _possible_kc_button_row(context):
+    if context is None:
+        return []
+    possible = _draft_possible_kc(_load_draft(context))
+    if not possible:
+        return []
+    code = possible["capability"].split(":", 1)[0]
+    return [InlineKeyboardButton(f"➕ Add {code}", callback_data=_case_button("ACTION|add_possible_kc", context))]
+
+
+async def _add_possible_key_capability(query, context):
+    """Claim and update the current draft before awaiting, so repeated taps lose."""
+    draft = _load_draft(context)
+    possible = _draft_possible_kc(draft)
+    if (not possible or context.user_data.get("filing_in_progress") or
+            query.data != f"ACTION|add_possible_kc|{context.user_data.get('case_token')}"):
+        await query.answer("That button is from an earlier step. Use the latest message.", show_alert=True)
+        return None
+    from extractor import _derive_curriculum_links_from_kcs
+    if isinstance(draft, CBDData):
+        kcs = [*draft.key_capabilities, possible["capability"]]
+        updated = draft.model_copy(update={"key_capabilities": kcs,
+            "curriculum_links": _derive_curriculum_links_from_kcs(kcs), "possible_key_capability": None})
+    else:
+        fields = dict(draft.fields)
+        kcs = [*(fields.get("key_capabilities") or []), possible["capability"]]
+        fields["key_capabilities"] = kcs
+        fields["curriculum_links"] = _derive_curriculum_links_from_kcs(kcs)
+        updated = draft.model_copy(update={"fields": fields, "possible_key_capability": None})
+    _store_draft(context, updated)
+    await query.answer()
+    await _safe_edit_text(query.message, _format_draft_preview_for_context(updated, context) + _draft_reply_hint(context),
+                          parse_mode="Markdown", reply_markup=_active_draft_keyboard(context))
+    return AWAIT_APPROVAL
+
+
 def _build_approval_keyboard(
     improved_once: bool = False,
     can_back_to_missing: bool = False,
     context=None,
 ):
     rows = []
+    possible_row = _possible_kc_button_row(context)
+    if possible_row:
+        rows.append(possible_row)
     save, cancel = _case_button("APPROVE|draft", context), _case_button("CANCEL|draft", context)
     gaps = _draft_gaps(context) if context is not None else []
     # Save is always offered: it only ever makes a Kaizen draft, which the
@@ -5590,7 +5643,8 @@ def _build_approval_keyboard(
 
 
 def _build_amend_keyboard(improved_once: bool = False, context=None) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    possible_row = _possible_kc_button_row(context)
+    return InlineKeyboardMarkup(([possible_row] if possible_row else []) + [
         [InlineKeyboardButton("💾 Save to Kaizen", callback_data=_case_button("APPROVE|draft", context))],
         [InlineKeyboardButton("❌ Cancel", callback_data="AMEND|cancel")],
     ])
@@ -6193,13 +6247,22 @@ def _with_rcem_ai_declaration(draft):
     if declared == str(current or "").strip():
         return draft
     fields[declaration_key] = declared
-    return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
+    return draft.model_copy(update={"fields": fields})
 
 
 def _draft_coach_note(draft) -> str:
     """Return a coach note only when the reflection genuinely needs help.
     Returns "" for solid reflections so the preview isn't padded with noise."""
-    reflection = _draft_reflection_text(draft).strip()
+    # Learning outcomes and reflection titles are not reflection fields.
+    # Read the chosen form's schema, never keys the model happened to return.
+    schema = FORM_SCHEMAS.get(schema_form_type(_draft_form_type(draft)), {})
+    reflection_keys = [field["key"] for field in schema.get("fields", [])
+                       if "title" not in (field["key"] + " " + field.get("label", "")).lower()
+                       and "reflect" in (field["key"] + " " + field.get("label", "")).lower()]
+    if not reflection_keys:
+        return ""
+    fields = _draft_fields_for_review(draft)
+    reflection = " ".join(str(fields.get(key) or "").strip() for key in reflection_keys).strip()
     if not reflection:
         # A required reflection is already named in the closing "Still
         # needed" line; only an optional one needs this nudge.
@@ -6409,11 +6472,7 @@ def _without_reflection_text(draft):
     if not keys:
         return draft
     if isinstance(draft, FormDraft):
-        return FormDraft(
-            form_type=draft.form_type,
-            fields={**draft.fields, **{key: "" for key in keys}},
-            uuid=draft.uuid,
-        )
+        return draft.model_copy(update={"fields": {**draft.fields, **{key: "" for key in keys}}})
     return draft.model_copy(update={key: "" for key in keys if key in type(draft).model_fields})
 
 
@@ -6474,7 +6533,13 @@ def _format_draft_preview(
     # The declaration is already inside preview_draft's reflection field via
     # _with_rcem_ai_declaration, exactly as it will be saved. Appending a
     # separate note here as well showed the doctor the same sentence twice.
-    return preview + layer + coach + degraded
+    possible = _draft_possible_kc(draft)
+    extra = ""
+    if possible:
+        code = possible["capability"].split(":", 1)[0]
+        title = _kc_preview_summary(possible["capability"])
+        extra = f"\n\nPossible extra: {code}: {title} - {_safe_markdown_text(possible['reason'])}"
+    return preview + extra + layer + coach + degraded
 
 
 def _draft_coach_note_suffix(draft) -> str:
@@ -7176,7 +7241,7 @@ def _blank_judged_missing_essentials(context, draft, case_text: str, form_type: 
             if key in fields and not _is_missing_field_value(fields[key]):
                 fields[key] = ""
                 changed = True
-        return FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid) if changed else draft
+        return draft.model_copy(update={"fields": fields}) if changed else draft
     blanks = {
         key: type(draft).model_fields[key].default
         for key in missing
@@ -12605,6 +12670,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _case_review_state_snapshot(context),
     )
 
+    if data.startswith("ACTION|add_possible_kc|"):
+        return await _add_possible_key_capability(query, context)
+
     if data.startswith("INFO|privacy_"):
         await query.answer()
         await _show_privacy_layer(query, update.effective_user.id, context)
@@ -16921,7 +16989,7 @@ async def handle_quick_improve(update: Update, context: ContextTypes.DEFAULT_TYP
                     improved_any = True
             if not improved_any:
                 raise ValueError("Improved reflection was empty")
-            updated = FormDraft(form_type=draft.form_type, fields=fields, uuid=draft.uuid)
+            updated = draft.model_copy(update={"fields": fields})
         _store_draft(context, updated)
         context.user_data["quick_improve_used"] = True
     except asyncio.TimeoutError:
@@ -18357,7 +18425,7 @@ def build_application() -> Application:
                     handle_callback,
                     pattern=r"^FILING_CURRICULUM\|(?:select|retry)\|(?:2021|2025)$",
                 ),
-                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:add_reflection_detail|retry_filing|back_to_missing)$"),
+                CallbackQueryHandler(handle_callback, pattern=r"^ACTION\|(?:(?:add_reflection_detail|retry_filing|back_to_missing)$|add_possible_kc\|[0-9a-f]+$)"),
                 CallbackQueryHandler(handle_callback, pattern=r"^CANCEL\|"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mid_conversation_text),
                 MessageHandler(filters.VOICE, handle_approval_media_feedback),
@@ -18495,7 +18563,7 @@ def build_application() -> Application:
             handle_action_button,
             # Buttons that move the case conversation must reach case_conv, or
             # the state they return is thrown away (Retry left the case stuck).
-            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$).+",
+            pattern=r"^ACTION\|(?!file$|reset$|cancel$|continue_thin$|setup$|voice$|same_case_another$|retry_recommend$|retry_template$|back_to_missing$|retry_setup_login$|connect_passwordless$|setup_password$|passwordless_done$|passwordless_link$|retry_filing$|pwl_reconnected$|add_reflection_detail$|add_possible_kc\|).+",
         )
     )
     application.add_handler(CallbackQueryHandler(handle_feedback, pattern=r"^FEEDBACK\|"))

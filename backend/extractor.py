@@ -3223,6 +3223,47 @@ def _canonical_kcs(capabilities, *, strict=False):
     return result
 
 
+_POSSIBLE_KC_INSTRUCTION = """
+If fewer than 3 distinct KCs are genuinely supported, you may return ONE separate
+top-level "possible_key_capability": {"capability": "<exact KC from the curriculum>",
+"reason": "<one line, at most 140 characters, tied to the case>",
+"evidence": "<exact quote from the doctor's case or feedback>"}.
+This is a POSSIBLE extra for the doctor to confirm, NOT a supported link: never
+put it in key_capabilities or curriculum_links. It must be a distinct, plausible
+link grounded in something actually described, requiring the doctor's judgement,
+not invented activity or a generic filler to reach three. Never suggest a KC
+the doctor has explicitly excluded. Return null if there is no such candidate,
+or if 3 KCs are already supported. Do not return a list of possible KCs.
+"""
+
+
+def _validated_possible_key_capability(candidate, selected, source_text=None, *, excluded=()):
+    """Canonical curriculum identity and source anchor; never supplement selection.
+
+    Extraction requires an exact source quote. Store only the de-identified
+    reason, not another copy of that potentially sensitive quote. Subsequent
+    preview/tap validation reads this already-validated draft metadata.
+    """
+    if not isinstance(candidate, dict):
+        return None
+    canonical = _canonical_kc(candidate.get("capability"))
+    selected_ids = {_kc_identity(kc) for kc in selected}
+    if (not canonical or len(selected_ids) >= 3 or
+            _kc_identity(canonical) in selected_ids or _kc_identity(canonical) in excluded):
+        return None
+    reason = candidate.get("reason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 140 or "\n" in reason or "\r" in reason:
+        return None
+    if source_text is not None:
+        evidence = candidate.get("evidence")
+        if not isinstance(evidence, str) or not evidence.strip():
+            return None
+        if " ".join(evidence.split()).casefold() not in " ".join(source_text.split()).casefold():
+            return None
+    safe, _ = deidentify_draft_fields({"reason": reason.strip()})
+    return {"capability": canonical, "reason": safe["reason"]}
+
+
 def _validated_kc_drop_claims(claims):
     if not isinstance(claims, list):
         return []
@@ -3381,6 +3422,8 @@ INSTRUCTIONS:
 5. Use the FULL KC text exactly as written above (including the "(2025 Update)" suffix).
 6. Format each as: "SLO_CODE KC_NUM: full description text (2025 Update)"
 
+{_POSSIBLE_KC_INSTRUCTION}
+
 KC1 RULE (critical): KC1 for most SLOs is written so broadly it technically fits any clinical case.
 Do NOT select KC1 just because it "could apply". Only select KC1 if:
 - The case specifically demonstrates something unique to KC1 that KC2+ does not cover, OR
@@ -3525,6 +3568,7 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
             # Adopt atomically, and only curriculum fields, after validation.
             data["key_capabilities"] = reviewed_kcs
             data[_KC_EDIT_DROP_FIELD] = merged_claims
+            data["possible_key_capability"] = reviewed.get("possible_key_capability")
 
     normalised = {
         "form_type": "CBD",
@@ -3589,6 +3633,12 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     if phi_labels:
         logger.warning("De-identified CBD draft fields: %s", phi_labels)
 
+    normalised["possible_key_capability"] = _validated_possible_key_capability(
+        data.get("possible_key_capability"), normalised["key_capabilities"],
+        f"{case_description}\n{edit_feedback}",
+        excluded={_kc_identity(claim["capability"])
+                  for claim in _validated_kc_drop_claims(data.get(_KC_EDIT_DROP_FIELD))},
+    )
     return CBDData(**normalised)
 
 
@@ -3754,6 +3804,8 @@ Rules:
   If the form has a kc_tick field, always include "key_capabilities" in the JSON too.
 - For date fields: return YYYY-MM-DD format. Resolve relative references using today's date above: "today" → {today_str}, "yesterday" → {yesterday_str}, "this morning/afternoon/evening" → {today_str}, "last [weekday]" → calculate from today. Only return empty string if no date at all can be inferred.
 - For text fields: extract directly from the case and keep the doctor's original wording where possible
+
+{_POSSIBLE_KC_INSTRUCTION}
 - Write in direct, first-person clinical language ("I assessed...", "I managed...")
 - NEVER use: em dashes, "delve", "navigate", "crucial", "importantly", "comprehensive", "moreover", "furthermore", "holistic", "robust", "multifaceted", "pivotal", "seamless", "facilitate", "leverage", "unlock", "embark", "meticulous", "overarching", "in summary", "it's worth noting", "this case highlights", "moving forward"
 
@@ -3845,6 +3897,10 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
 
     if has_kc_tick:
         normalised["key_capabilities"] = _normalise_list_field(data.get("key_capabilities"))
+    possible = (_validated_possible_key_capability(
+        data.get("possible_key_capability"), normalised.get("key_capabilities", []),
+        f"{case_description}\n{edit_feedback}",
+    ) if has_kc_tick else None)
 
     normalised = _fill_blank_date_fields_from_source(
         normalised,
@@ -3878,6 +3934,13 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
         schema_key=schema_key,
         has_kc_tick=has_kc_tick,
     )
+    if possible:
+        # Existing breadth heuristics must not silently promote something the
+        # model explicitly left for the doctor's confirmation.
+        proposed_id = _kc_identity(possible["capability"])
+        normalised["key_capabilities"] = [kc for kc in normalised.get("key_capabilities", [])
+                                          if _kc_identity(kc) != proposed_id]
+        normalised["curriculum_links"] = _derive_curriculum_links_from_kcs(normalised["key_capabilities"])
     if schema_key == "QIAT":
         normalised = _polish_qiat_fields(normalised, case_description)
     if schema_key == "ACAF":
@@ -3910,7 +3973,8 @@ Write as an experienced UK EM trainee would write their own portfolio entry:
     return FormDraft(
         form_type=form_type,
         fields=normalised,
-        uuid=FORM_UUIDS.get(form_type)
+        uuid=FORM_UUIDS.get(form_type),
+        possible_key_capability=_validated_possible_key_capability(possible, normalised.get("key_capabilities", [])),
     )
 
 

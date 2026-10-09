@@ -29,7 +29,7 @@ def payload_branch(payload):
     if family == "ACTION" and len(parts) > 2:
         if parts[1] == "health_queue":
             return "|".join(parts[:3]) + "|*"
-        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more"}:
+        if parts[1] in {"health_page", "health_review_select", "health_review_confirm", "health_route_set", "post_file_more", "add_possible_kc"}:
             return "|".join(parts[:2]) + "|*"
     return payload
 
@@ -57,9 +57,12 @@ def producer_digest():
 # 9 Oct 2026: reviewed case/reflection priority before question/menu routing;
 # account replies use fixed copy. Existing keyboard/payload branches unchanged.
 # 9 Oct 2026: non-string input is never treated as case evidence; no branch change.
-PRODUCER_DIGEST = 'f744c4b27fb3d141288185d012c3fb36abbb3131e27884351238095f745039c8'
+# 9 Oct 2026: reviewed schema-only reflection footer and draft-stamped possible-KC Add.
+# Add updates KCs only after the tap; stale/save-in-progress taps are inert.
+PRODUCER_DIGEST = '9922a6bc54f977ea41e85cf8151f365323a1916c66b914a5d957b9351e7a6339'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
+ACTION|add_possible_kc|*
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
 ACTION|change_pathway ACTION|confirm_refresh_for_health ACTION|confirm_refresh_portfolio ACTION|continue_thin
 ACTION|delete ACTION|file ACTION|health ACTION|health_limited ACTION|health_page|*
@@ -202,7 +205,8 @@ def reviewed_units(slots):
 
 
 # Registration candidate paths shift when consent moves into case_conv.
-CATALOGUE_DIGEST = '8dfe777d7134852697a45ce8a4d9deca3d7662e22ba0c0083082838df70bf264'
+# 9 Oct 2026: reviewed ACTION|add_possible_kc|* and its approval-state owner.
+CATALOGUE_DIGEST = '933692d10a3f94aba96b3b951e22bd87222bf906f8e51dd235bc31168d271e4d'
 
 
 def requirements_digest(units):
@@ -288,7 +292,7 @@ AUDIT_TESTS = """test_reset_command test_funnel_metrics test_flow_walker test_e2
  test_consent_gate test_missing_essentials_replay_guard test_concurrent_user_isolation
  test_modality_clause_coverage test_setup_manual_profile_fallback test_attachment_upload_consent
  test_curriculum_filing_recovery test_channel_contract test_forms test_kc_edit_retention
- test_filing_reliability test_filing_reliability_matrix""".split()
+ test_filing_reliability test_filing_reliability_matrix test_kc_quality test_rcem_ai_policy test_button_routing""".split()
 
 if __name__ == "__main__":
     print(" ".join("tests/" + name + ".py" for name in AUDIT_TESTS))
