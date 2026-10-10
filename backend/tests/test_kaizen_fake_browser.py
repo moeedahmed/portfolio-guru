@@ -295,9 +295,14 @@ def local_response(fake, request, headers):
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def chromium_path():
-    # Query the installed executable once, without launching a browser.
+    # Locate the headless-only shell without launching a browser. The full
+    # "Chrome for Testing" binary makes macOS raise camera/microphone/screen
+    # permission prompts, so tests must never start it.
     async with async_playwright() as pw:
-        return Path(pw.chromium.executable_path)
+        full = Path(pw.chromium.executable_path)
+    root = next((p.parent for p in full.parents if p.name.startswith("chromium-")), full.parent)
+    shells = sorted(root.glob("chromium_headless_shell-*/*/chrome-headless-shell"))
+    return shells[-1] if shells else root / "chromium_headless_shell-missing"
 
 
 @pytest_asyncio.fixture
@@ -390,12 +395,18 @@ async def fake_browser(monkeypatch, tmp_path, chromium_path):
         real_launch = BrowserType.launch
         async def isolated_launch(self, **kwargs):
             # An unrouted Chromium background request cannot escape either.
-            kwargs["channel"] = "chromium"  # Use the executable checked above.
-            kwargs["args"] = ["--disable-background-networking", "--host-resolver-rules=MAP * ~NOTFOUND"]
+            # No channel: Playwright's headless shell, never the full Chrome for Testing.
+            kwargs.pop("channel", None)
+            kwargs["args"] = [
+                "--disable-background-networking",
+                "--host-resolver-rules=MAP * ~NOTFOUND",
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+            ]
             return await real_launch(self, **kwargs)
         monkeypatch.setattr(BrowserType, "launch", isolated_launch)
         if not chromium_path.is_file():
-            message = "Chromium missing; run python -m playwright install chromium"
+            message = "Headless shell missing; run python -m playwright install chromium-headless-shell"
             if os.environ.get("PG_REQUIRE_BROWSER") == "1":
                 pytest.fail(message)
             pytest.skip(message)
