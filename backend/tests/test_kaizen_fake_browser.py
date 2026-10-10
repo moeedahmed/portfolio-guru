@@ -227,7 +227,7 @@ async def test_each_mapped_form_bot_save_persists_every_field_without_submission
         assert filing["skipped"] == [], (form_type, filing)
     assert len(fake.drafts) == 1
     assert filer.canonical_form_type(fake.drafts[0]["form_type"]) == filer.canonical_form_type(form_type)
-    assert fake.drafts[0]["values"] == expected_values(form_type, fields)
+    assert fake.drafts[0]["values"] == expected_values(form_type, fields, bot_save=True)
     assert fake.submit_clicks == 0, f"{form_type}: forbidden Submit/Send/Sign click"
     assert fake.forbidden_clicks == [], f"{form_type}: forbidden clicks {fake.forbidden_clicks}"
 
@@ -258,9 +258,14 @@ def synthetic_fields(form_type):
     return fields
 
 
-def expected_values(form_type, fields):
+def expected_values(form_type, fields, bot_save=False):
     """Oracle from submitted fixture values, without calling filer transforms."""
     declared = next((key for key in DECLARATION_FIELD_PRIORITY if key in fields), None)
+    if bot_save:
+        # 10 Oct 2026: the bot puts RCEM's AI line on the first populated
+        # reflective field only (REFLECT_LOG's Description is narrative).
+        declared = next((key for key in bot._find_reflection_keys(fields, form_type)
+                         if fields.get(key)), declared)
     expected = {}
     for dom_id, spec in controls(form_type).items():
         key = spec["key"]
