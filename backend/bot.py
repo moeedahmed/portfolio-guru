@@ -6585,7 +6585,7 @@ def _is_reflection_reply(context, text, turn) -> bool:
         and not is_reuse_request(text)
         and not (extract_explicit_form_type(text, require_intent=False)
                  and not has_personal_reflective_input(text))
-        and text.lower().rstrip(".!?") != "cancel"
+        and not re.match(r"^\s*(?:please\s+)?cancel\b", text, re.IGNORECASE)
     )
 
 # Visual divider separating portfolio content from bot guidance/rationale in
@@ -17626,7 +17626,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 update, context, raw_text,
                 case_text=case_text, has_draft=has_draft, has_pending=has_pending,
             )
-        if raw_text.lower().rstrip(".!?") == "cancel":
+        if re.match(r"^\s*(?:please\s+)?cancel[.!?]*\s*$", raw_text, re.IGNORECASE):
             return await cancel_command(update, context)
         if _is_reflection_reply(context, raw_text, turn):
             context.user_data.pop("awaiting_reflection_detail", None)

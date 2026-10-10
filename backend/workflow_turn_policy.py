@@ -66,7 +66,7 @@ _EXPLICIT_NEW_CASE_RE = re.compile(
 )
 
 _EXPLICIT_EDIT_RE = re.compile(
-    r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:actually\s+)?"
+    r"^\s*(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:actually\s+)?"
     r"(?:change|set|replace|rewrite|revise|make|add|remove|tweak|update)\b",
     re.IGNORECASE,
 )

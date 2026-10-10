@@ -812,7 +812,8 @@ async def test_reply_to_missing_photo_reflection_is_retained_as_doctor_words(ref
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["gap", "awaiting", "edit", "amend"])
 @pytest.mark.parametrize("input_source", ["text", "voice", "audio"])
-async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(route, input_source):
+@pytest.mark.parametrize("feedback", ["change the date to 3 Oct", "Please change the date to 3 Oct."])
+async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(route, input_source, feedback):
     sim = BotSimulator()
     context = sim._make_context()
     source = "Synthetic ED chest pain assessed with senior review."
@@ -831,7 +832,6 @@ async def test_date_edit_with_only_reflection_gap_never_becomes_reflection(route
     elif route == "edit":
         # Exercise the doctor's Edit button and its actual text handler.
         assert await bot.handle_approval_edit(sim._make_callback_update("EDIT|draft"), context) == bot.AWAIT_EDIT_VALUE
-    feedback = "change the date to 3 Oct"
     regenerated = draft.model_copy(update={
         "date_of_encounter": "2026-10-03", "reflection": "I learned to escalate earlier.",
     })
@@ -1331,3 +1331,22 @@ def test_labelled_multiline_reflection_fallback_keeps_the_whole_authored_turn(la
     filtered = bot._without_unsupported_reflection(context, draft)
     assert filtered.reflection == reflection
     assert bot._without_unsupported_reflection(context, filtered) == filtered
+
+
+@pytest.mark.asyncio
+async def test_polite_cancel_while_awaiting_reflection_cancels_not_reflection():
+    sim = BotSimulator()
+    context = sim._make_context()
+    source = "Synthetic ED chest pain assessed with senior review."
+    context.user_data.update(_context(source).user_data)
+    context.user_data["chosen_form"] = "CBD"
+    bot._store_draft(context, CBDData(patient_presentation=source, reflection=""))
+    await bot.handle_callback(sim._make_callback_update("ACTION|add_reflection_detail"), context)
+    regenerate = AsyncMock(return_value=bot.AWAIT_APPROVAL)
+    cancel = AsyncMock(return_value=bot.ConversationHandler.END)
+    with patch("bot._regenerate_active_draft_with_feedback", new=regenerate), \
+         patch("bot.cancel_command", new=cancel), \
+         patch("bot.classify_intent", new=AsyncMock(return_value="edit_detail")):
+        await bot.handle_mid_conversation_text(sim._make_text_update("Please cancel."), context)
+    regenerate.assert_not_awaited()
+    cancel.assert_awaited_once()

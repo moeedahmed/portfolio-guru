@@ -91,7 +91,8 @@ def producer_digest():
 # form, cancel and edit controls retain their handlers and pending reflection.
 # 10 Oct 2026: standard reflection gaps and voice/audio replies retain authored
 # wording; edit/control exclusions and case-lifecycle cleanup are unchanged in scope.
-PRODUCER_DIGEST = '7bb75d0c8241e3502ef20b8e1ee9b7ef5806b3eb170bbef71ef2e7e3ff7ea4a9'
+# 10 Oct 2026: polite edit and cancel instructions keep their control routes.
+PRODUCER_DIGEST = '9457ec892befd1cc6585782791b18a7ffa667db55aee8b3e035531de8eee24b1'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
