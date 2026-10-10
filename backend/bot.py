@@ -84,6 +84,7 @@ from channel_actions import to_telegram_keyboard
 from channel_reply_policy import select_deterministic_reply
 from conversation_supervisor import GatheringTurnKind, decide_gathering_turn
 from workflow_turn_policy import (
+    _EXPLICIT_EDIT_RE,
     WorkflowPhase,
     WorkflowTurnKind,
     decide_workflow_turn,
@@ -6370,20 +6371,26 @@ def _without_unsupported_reflection(context, draft, *, reflection_reply: str = "
     # Retain the doctor's reflective sentences when generated wording fails.
     words = _case_user_words(context)
     sources = [part.strip() for text in words
-               for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+               for part in re.split(r"(?<=[.!?])\s+|\n+", text)
+               if part.strip() and not _is_reflection_control(part)]
     reflection_markers = _SOURCE_OUTCOME_OR_REFLECTION_MARKERS[_SOURCE_OUTCOME_OR_REFLECTION_MARKERS.index("learned"):]
     reflective_sources = []
     for text in words:
+        parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+        eligible = [part for part in parts if not _is_reflection_control(part)]
         if re.match(r"^(?:(?:my )?reflection|(?:my |key |main )?learning points?|"
                     r"(?:what )?I (?:learned|learnt))\s*:", text.strip(), re.IGNORECASE):
-            reflective_sources.append(text.strip())
+            reflective_sources.append(text.strip() if len(eligible) == len(parts) else "\n\n".join(eligible))
         else:
-            reflective_sources.extend(source for source in re.split(r"(?<=[.!?])\s+|\n+", text)
-                                      if source.strip() and (has_personal_reflective_input(source)
-                                      or any(marker in source.lower() for marker in reflection_markers)))
+            reflective_sources.extend(source for source in eligible
+                                      if has_personal_reflective_input(source)
+                                      or any(marker in source.lower() for marker in reflection_markers))
     # A reply to the reflection prompt is itself reflective input. Use its
     # complete authored wording if extraction adds unsupported words.
-    fallback = reflection_reply.strip() or "\n\n".join(source.strip() for source in reflective_sources)
+    reply = reflection_reply.strip()
+    if any(_is_reflection_control(part) for part in re.split(r"(?<=[.!?])\s+|\n+", reply)):
+        reply = ""
+    fallback = reply or "\n\n".join(source.strip() for source in reflective_sources)
     # A small explicit vocabulary avoids aggressive stemming conflating
     # content words. Unsupported broader rewordings safely use the fallback.
     inflections = {"learned": "learn", "learnt": "learn", "learning": "learn",
@@ -6409,6 +6416,8 @@ def _without_unsupported_reflection(context, draft, *, reflection_reply: str = "
     for key in _find_reflection_keys(fields, _draft_form_type(draft)):
         value = str(fields.get(key) or "").strip()
         if not value:
+            if reply:
+                updates[key] = reply
             continue
         sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", value) if part.strip()]
         if not all(any(supported(sentence, source) for source in sources)
@@ -6575,17 +6584,25 @@ def _reflection_reply_requested(context) -> bool:
     )
 
 
+def _is_reflection_control(text: str) -> bool:
+    """Authored workflow instructions never supply reflective source content."""
+    return bool(
+        _EXPLICIT_EDIT_RE.search(text)
+        or _is_recent_filing_status_question(text)
+        or is_reuse_request(text)
+        or (extract_explicit_form_type(text, require_intent=False)
+            and not has_personal_reflective_input(text))
+        or re.match(r"^\s*(?:please\s+)?/?cancel\b", text, re.IGNORECASE)
+    )
+
+
 def _is_reflection_reply(context, text, turn) -> bool:
     """Only enrichment replies, never edit/control messages, supply a reflection."""
     return (
         _reflection_reply_requested(context)
         and not context.user_data.get("amend_mode")
         and turn.kind is WorkflowTurnKind.ENRICH
-        and not _is_recent_filing_status_question(text)
-        and not is_reuse_request(text)
-        and not (extract_explicit_form_type(text, require_intent=False)
-                 and not has_personal_reflective_input(text))
-        and not re.match(r"^\s*(?:please\s+)?cancel\b", text, re.IGNORECASE)
+        and not _is_reflection_control(text)
     )
 
 # Visual divider separating portfolio content from bot guidance/rationale in
@@ -13956,29 +13973,20 @@ async def handle_approval_media_feedback(update: Update, context: ContextTypes.D
             user_words=user_words,
         )
 
+    # 10 Oct 2026: transcribed replies share typed control ownership before
+    # recording authored words or regenerating a draft.
+    if voice_media and _reflection_reply_requested(context):
+        return await handle_mid_conversation_text(
+            update, context, feedback_text=extracted_text or "", input_source=input_source,
+        )
     _remember_case_context_source(context, input_source,
                                   user_text=extracted_text if voice_media else caption)
-    reflection_reply = False
-    if voice_media and _reflection_reply_requested(context):
-        try:
-            intent = await classify_intent(extracted_text, case_context=context.user_data.get("case_text", ""))
-        except Exception:
-            intent = None
-        turn = decide_workflow_turn(
-            extracted_text or "", phase=WorkflowPhase.DRAFT_OPEN,
-            legacy_intent=intent, classifier_failed=intent is None,
-            draft_has_gaps=bool(_draft_gaps(context)),
-        )
-        reflection_reply = _is_reflection_reply(context, extracted_text or "", turn)
-        if reflection_reply:
-            context.user_data.pop("awaiting_reflection_detail", None)
     return await _regenerate_active_draft_with_feedback(
         update,
         context,
         extracted_text or "",
         append_to_case=True,
         input_source=input_source,
-        reflection_reply=reflection_reply,
     )
 
 
@@ -17465,7 +17473,10 @@ async def _answer_mid_flow_question(
     return next_state
 
 
-async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_mid_conversation_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+    *, feedback_text: str | None = None, input_source: str = "text",
+) -> int:
     """Handle unexpected text messages mid-conversation (AWAIT_APPROVAL, AWAIT_EDIT_FIELD, AWAIT_FORM_CHOICE)."""
     # After a reset, treat ANY incoming message as a fresh case
     if context.user_data.pop("post_reset", False):
@@ -17474,7 +17485,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
 
     _start_conversational_router_shadow(update, "handle_mid_conversation_text")
 
-    raw_text = update.message.text.strip()
+    raw_text = (feedback_text if feedback_text is not None else update.message.text).strip()
     case_text = context.user_data.get("case_text", "")
     has_draft = bool(_load_draft(context))
     has_pending = bool(context.user_data.get("pending_draft_data"))
@@ -17632,7 +17643,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             context.user_data.pop("awaiting_reflection_detail", None)
             return await _regenerate_active_draft_with_feedback(
                 update, context, raw_text,
-                append_to_case=True, input_source="text", reflection_reply=True,
+                append_to_case=True, input_source=input_source, reflection_reply=True,
             )
 
     if amend_mode:
@@ -17669,7 +17680,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             context,
             raw_text,
             append_to_case=True,
-            input_source="text",
+            input_source=input_source,
         )
 
     if turn.kind is WorkflowTurnKind.CHAT:
@@ -17714,7 +17725,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
             return await _accumulate_and_refresh(update, context, added_detail)
         context.user_data["case_text"] = f"{case_text.strip()}\n\n{added_detail}".strip()
-        _remember_case_context_source(context, "text", user_text=added_detail)
+        _remember_case_context_source(context, input_source, user_text=added_detail)
         return await _answer_mid_flow_question(
             update,
             context,
@@ -17803,9 +17814,9 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
                 # edits, and reassess it before accepting doctor-owned facts.
                 case_text = combine_case_inputs(case_text, [raw_text])
                 context.user_data["case_text"] = case_text
-                _remember_case_context_source(context, "text", user_text=raw_text)
+                _remember_case_context_source(context, input_source, user_text=raw_text)
                 previous_source = context.user_data.get("case_input_source", "text")
-                context.user_data["case_input_source"] = "text" if previous_source == "text" else "mixed"
+                context.user_data["case_input_source"] = input_source if previous_source == input_source else "mixed"
                 gate = await _essentials_gate_before_draft(
                     update.message, context, case_text, chosen_form or "CBD", edit=False,
                 )
@@ -17865,7 +17876,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
         # (Explicit "new_case" intent still routes to the warning path below.)
         if has_draft and turn.kind in {WorkflowTurnKind.ENRICH, WorkflowTurnKind.EXPLICIT_EDIT} and case_text:
             return await _regenerate_active_draft_with_feedback(
-                update, context, raw_text, append_to_case=True,
+                update, context, raw_text, append_to_case=True, input_source=input_source,
             )
 
         if has_pending and context.user_data.get("chosen_form") and turn.kind is WorkflowTurnKind.ENRICH:
@@ -17886,7 +17897,7 @@ async def handle_mid_conversation_text(update: Update, context: ContextTypes.DEF
             )
         ):
             combined_case = f"{case_text.strip()}\n\n{raw_text}".strip()
-            _remember_case_context_source(context, "text", user_text=raw_text)
+            _remember_case_context_source(context, input_source, user_text=raw_text)
             return await _process_case_text(
                 update.message,
                 context,

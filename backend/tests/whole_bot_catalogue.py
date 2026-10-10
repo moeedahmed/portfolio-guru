@@ -92,7 +92,9 @@ def producer_digest():
 # 10 Oct 2026: standard reflection gaps and voice/audio replies retain authored
 # wording; edit/control exclusions and case-lifecycle cleanup are unchanged in scope.
 # 10 Oct 2026: polite edit and cancel instructions keep their control routes.
-PRODUCER_DIGEST = '9457ec892befd1cc6585782791b18a7ffa667db55aee8b3e035531de8eee24b1'
+# 10 Oct 2026: reflection sources exclude controls; voice/audio share typed routing;
+# prompted replies fill blank reflections. Existing payloads and ownership unchanged.
+PRODUCER_DIGEST = '047e6d7d390a9f33607391d126d547c549f72808e63000fb93e97188b1d5e154'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level
