@@ -95,7 +95,10 @@ def producer_digest():
 # 10 Oct 2026: reflection sources exclude controls; voice/audio share typed routing;
 # prompted replies fill blank reflections. Existing payloads and ownership unchanged.
 # 10 Oct 2026: an edit verb counts as a control only when it names part of the draft.
-PRODUCER_DIGEST = '96522dc993f31a54335dad903d1d025758e57dd4ada26c17eb665475851da95a'
+# 10 Oct 2026: schema labels separate personal reflection from factual media
+# content and gap labels; genuine reflective fields retain provenance checks.
+# Existing controls, callback payloads and approval ownership unchanged.
+PRODUCER_DIGEST = '171df11cbbb581443cc27dee3ce8f93e5b0f81d968653961a340c90c6e73bc2a'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

@@ -6128,42 +6128,35 @@ def _build_form_recommendation_text(
 
 
 def _find_reflection_keys(fields: dict, form_type: str | None = None) -> list[str]:
+    """Personal reflective acts, as labelled by the chosen form's schema.
+
+    Key names alone are misleading: REFLECT_LOG.reflection is its narrative,
+    TEACH.learning_outcomes is session content, and ABSENCE/OOP.reflection is
+    factual Details. Titles and learning-resource selectors are also factual.
+    """
     if not isinstance(fields, dict):
         return []
-    if schema_form_type(form_type or "") == "FORMAL_COURSE":
-        # Resources are factual evidence, not the doctor's reflective act.
-        return [key for key in ("reflective_notes", "lessons_learned") if key in fields]
-
+    # 10 Oct 2026: reviewed all form labels. These describe reflective acts
+    # without using "reflection"; "Why" belongs to the reflective-log replay.
+    reflective_labels = {
+        "what did you learn from this case?",
+        "what are the learning points from this case?",
+        "main learning points",
+        "lessons learned",
+        "what would you do differently",
+        "why",
+        "would the outcome be different",
+        "what are you focussing on",
+        "what have you learned",
+    }
+    schema = FORM_SCHEMAS.get(schema_form_type(form_type or ""), {})
     keys: list[str] = []
-    if "reflection" in fields:
-        keys.append("reflection")
-    preferred = (
-        "reflective_notes",
-        "lessons_learned",
-        "learning_points",
-        "learning_outcomes",
-        "learned",
-    )
-    for key in preferred:
-        if key in fields and key not in keys:
-            keys.append(key)
-    if schema_form_type(form_type or "") == "REFLECT_LOG":
-        keys += [key for key in ("replay_differently", "focussing_on", "different_outcome", "why")
-                 if key in fields and key not in keys]
-    for key in fields:
-        normalised = str(key).lower()
-        # A reflection *title* (US_CASE, SDL, ...) names the entry; it is not
-        # the doctor's reflection and must never be judged or gated as one.
-        if "title" in normalised:
+    for field in schema.get("fields", []):
+        label = field.get("label", "").strip().lower()
+        if field["key"] not in fields or field.get("type") != "text" or "title" in label:
             continue
-        if (
-            "reflection" in normalised
-            or "reflective" in normalised
-            or "lesson" in normalised
-            or "learned" in normalised
-            or "learning" in normalised
-        ) and key not in keys:
-            keys.append(key)
+        if "reflect" in label or label in reflective_labels:
+            keys.append(field["key"])
     return keys
 
 
@@ -6215,9 +6208,10 @@ def _draft_coach_note(draft) -> str:
     # Learning outcomes and reflection titles are not reflection fields.
     # Read the chosen form's schema, never keys the model happened to return.
     schema = FORM_SCHEMAS.get(schema_form_type(_draft_form_type(draft)), {})
+    personal_keys = set(_find_reflection_keys(_draft_fields_for_review(draft), _draft_form_type(draft)))
     reflection_keys = [field["key"] for field in schema.get("fields", [])
-                       if "title" not in (field["key"] + " " + field.get("label", "")).lower()
-                       and "reflect" in (field["key"] + " " + field.get("label", "")).lower()]
+                       if field["key"] in personal_keys
+                       and "reflect" in field.get("label", "").lower()]
     if not reflection_keys:
         return ""
     fields = _draft_fields_for_review(draft)
@@ -6413,7 +6407,13 @@ def _without_unsupported_reflection(context, draft, *, reflection_reply: str = "
 
     fields = _draft_fields_for_review(draft)
     updates = {}
-    for key in _find_reflection_keys(fields, _draft_form_type(draft)):
+    reflection_keys = _find_reflection_keys(fields, _draft_form_type(draft))
+    if reply and not reflection_keys:
+        # Extraction can omit optional answers entirely. An explicit prompted
+        # reply may supply those schema-labelled reflections, never narrative.
+        schema_fields = FORM_SCHEMAS.get(schema_form_type(_draft_form_type(draft)), {}).get("fields", [])
+        reflection_keys = _find_reflection_keys({field["key"]: None for field in schema_fields}, _draft_form_type(draft))
+    for key in reflection_keys:
         value = str(fields.get(key) or "").strip()
         if not value:
             if reply:
@@ -6456,9 +6456,6 @@ def _without_reflection_text(draft):
     doctor's own reflection."""
     fields = _draft_fields_for_review(draft)
     keys = _find_reflection_keys(fields, _draft_form_type(draft))
-    if schema_form_type(_draft_form_type(draft)) == "REFLECT_LOG":
-        keys += [key for key in ("replay_differently", "focussing_on", "different_outcome", "why")
-                 if key in fields and key not in keys]
     if not keys:
         return draft
     if isinstance(draft, FormDraft):
@@ -6578,7 +6575,8 @@ def _reflection_reply_requested(context) -> bool:
     draft = _load_draft(context)
     if draft is None or not context.user_data.get("case_text"):
         return False
-    reflection_keys = _find_reflection_keys(_draft_fields_for_review(draft), _draft_form_type(draft))
+    schema_fields = FORM_SCHEMAS.get(schema_form_type(_draft_form_type(draft)), {}).get("fields", [])
+    reflection_keys = _find_reflection_keys({field["key"]: None for field in schema_fields}, _draft_form_type(draft))
     return bool(context.user_data.get("awaiting_reflection_detail")) or any(
         gap["key"] in reflection_keys for gap in _draft_gaps(context)
     )
@@ -6898,14 +6896,14 @@ def _pre_draft_completeness_gaps(context, draft, form_type: str) -> list[dict]:
     reflection_keys = set()
     if is_reflective_log:
         # Description is the clinical narrative; reflective answers are separate.
-        personal_keys = ["learned", "replay_differently", "focussing_on", "different_outcome", "why"]
+        personal_keys = _find_reflection_keys(fields, form_type)
         if (_form_requires_reflection(form_type, draft)
                 and not any(not _is_missing_field_value(fields.get(key)) for key in personal_keys)):
             gaps.append({
-                "key": "reflection",
+                "key": "learned",
                 "label": "your reflection (what you learned or would do differently)",
             })
-        reflection_keys = set(_find_reflection_keys(fields, _draft_form_type(draft)))
+        reflection_keys = set(personal_keys)
 
     duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_form_type(form_type or ""), set())
     essential_labels = {
@@ -6985,12 +6983,15 @@ def _form_essential_requirements(form_type: str) -> list[dict]:
     schema_key = schema_form_type(form_type or "")
     duplicates = _DUPLICATE_ESSENTIAL_KEYS.get(schema_key, set())
     required, _ = _template_requirements(form_type)
+    reflective_keys = set(_find_reflection_keys({field["key"]: field for field in required}, form_type))
     essentials: list[dict] = []
     for field in required:
         key = field["key"]
         if field.get("type") == "date" or key in _SELF_FILLED_ESSENTIAL_KEYS or key in duplicates:
             continue
         guidance = _ESSENTIAL_FIELD_GUIDANCE.get(key, {})
+        if key == "reflection" and key not in reflective_keys:
+            guidance = {}
         essentials.append({
             "key": key,
             "label": guidance.get("label") or field.get("label") or key,
@@ -7081,6 +7082,11 @@ def _form_requires_reflection(form_type: str, draft=None) -> bool:
         # own shape rather than assuming a requirement either way.
         return _draft_has_reflection_fields(draft) if draft is not None else False
     fields_by_key = {field["key"]: field for field in schema_fields}
+    if schema_form_type(form_type or "") == "REFLECT_LOG":
+        # Keep the existing own-reflection prompt for a reflective practice log.
+        # Its mandatory Description is narrative, and its reflective responses
+        # are individually optional in Kaizen; saving them blank stays allowed.
+        return bool(_find_reflection_keys(fields_by_key, form_type))
     return any(
         fields_by_key[key].get("required")
         for key in _find_reflection_keys(fields_by_key, form_type)

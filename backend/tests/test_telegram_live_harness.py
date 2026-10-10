@@ -1151,10 +1151,17 @@ async def test_wait_for_matching_message_reraises_non_transient_errors():
         )
 
 
-def test_draft_first_gap_preview_is_a_bounded_live_state():
+@pytest.mark.parametrize("save,cancel", [
+    ("💾 Save to Kaizen", "❌ Cancel"),
+    ("Save to Kaizen", "Cancel"),
+    ("💾 Save to Kaizen", "Cancel"),
+    ("Save draft to Kaizen", "Cancel"),
+    ("💾 Save draft to Kaizen", "❌ Cancel"),
+])
+def test_draft_first_gap_preview_is_a_bounded_live_state(save, cancel):
     message = _FakeMessage(
         "Here is your Case-Based Discussion draft:\nCase narrative.\nStill needed: Level of Supervision. Reply with it.",
-        (("Save draft to Kaizen", "Cancel"),),
+        ((save, cancel),),
     )
     assert harness.classify_post_click_draft_state(message) == "draft_with_gaps"
 
@@ -1163,6 +1170,15 @@ def test_draft_first_gap_preview_is_a_bounded_live_state():
     ("Case narrative without a gap list", (("Save draft to Kaizen", "Cancel"),)),
     ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "Save to Kaizen", "Cancel"),)),
     ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "Retry"),)),
+    ("Still needed: Level of Supervision.", (("💾 Save to Kaizen", "❌ Cancel", "Retry"),)),
+    ("Still needed: Level of Supervision.", (("💾 Save to Kaizen", "💾 Save to Kaizen"),)),
+    ("Still needed: Level of Supervision.", (("❌ Cancel", "❌ Cancel"),)),
+    ("Still needed: Level of Supervision.", (("💾 Save to Kaizen",),)),
+    ("Still needed: Level of Supervision.", (("Do not save to Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft to Kaizen now", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "Cancel and delete"),)),
+    ("Still needed: Level of Supervision.", (("🔁 Save to Kaizen", "Cancel"),)),
+    ("Still needed: Level of Supervision.", (("Save draft to Kaizen", "🔁 Cancel"),)),
 ])
 def test_gap_preview_classifier_rejects_incomplete_or_conflicting_controls(text, buttons):
     with pytest.raises(AssertionError):

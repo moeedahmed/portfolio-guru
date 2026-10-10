@@ -161,14 +161,16 @@ def parse_visible_kc_selections(text: str) -> list[tuple[int, int]]:
 
 READY_DRAFT_BUTTON_TOKEN = "save to kaizen"
 GAP_DRAFT_BUTTON_TEXT = "save draft to kaizen"
+_GAP_SAVE_BUTTON_RE = re.compile(r"(?:💾\s*)?save(?: draft)? to kaizen")
+_GAP_CANCEL_BUTTON_RE = re.compile(r"(?:❌\s*)?cancel")
 MISSING_ESSENTIALS_TEXT_MARKER = "before i draft this, i still need"
 
 
 def classify_post_click_draft_state(message) -> str:
     """Classify the message the bot shows right after a form-choice click.
 
-    Current drafts have either a normal Save control or the explicit save-with-
-    gaps control and a closing gap list. The retired ask-first prompt remains
+    Gap drafts have a closing gap list and exactly Save to Kaizen/Cancel controls
+    (the legacy Save draft label is also supported). The retired ask-first prompt remains
     recognisable for diagnostics; the live journey must reject it. Contradictory
     states fail closed; the journey separately verifies the ready controls.
     """
@@ -181,9 +183,14 @@ def classify_post_click_draft_state(message) -> str:
     has_gap_list = "still needed:" in received_lower
     is_missing_essentials = MISSING_ESSENTIALS_TEXT_MARKER in received_lower
 
-    if is_gap_draft and not is_ready and not is_missing_essentials:
-        if not has_gap_list or len(buttons_lower) != 2 or not any("cancel" in b for b in buttons_lower):
-            raise AssertionError("gap draft requires a gap list and exactly Save draft/Cancel controls")
+    if (has_gap_list or is_gap_draft) and not is_missing_essentials:
+        exact_controls = (
+            len(buttons_lower) == 2
+            and sum(bool(_GAP_SAVE_BUTTON_RE.fullmatch(b)) for b in buttons_lower) == 1
+            and sum(bool(_GAP_CANCEL_BUTTON_RE.fullmatch(b)) for b in buttons_lower) == 1
+        )
+        if not has_gap_list or not exact_controls:
+            raise AssertionError("gap draft requires a gap list and exactly Save to Kaizen/Cancel controls")
         return "draft_with_gaps"
 
     if is_ready and not is_gap_draft and not is_missing_essentials and not has_gap_list:

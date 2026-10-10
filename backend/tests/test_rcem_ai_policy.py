@@ -37,6 +37,98 @@ def _callbacks(markup) -> set[str]:
     }
 
 
+# Reviewed against every schema label, including factual fields named reflection.
+_REFLECTION_SCHEMA_KEYS = {
+    **{form: {"reflection"} for form in """
+        CBD DOPS DOPS_ACCS MINI_CEX ACAT LAT ACAF MSF QIAT SDL ESLE_ASSESS
+        TEACH_OBS TEACH_CONFID MGMT_ROTA MGMT_RISK MGMT_RECRUIT MGMT_PROJECT
+        MGMT_RISK_PROC MGMT_TRAINING_EVT MGMT_GUIDELINE MGMT_INFO MGMT_INDUCTION
+        MGMT_EXPERIENCE MGMT_REPORT APPRAISAL BUSINESS_CASE CLIN_GOV MGMT_COMPLAINT
+        COST_IMPROVE CRIT_INCIDENT EQUIP_SERVICE AUDIT RESEARCH EDU_MEETING
+        EDU_MEETING_SUPP PDP HIGHER_PROG
+    """.split()},
+    "PROC_LOG": {"reflective_comments"},
+    "PROCEDURAL_LOG_ACCS": {"reflective_comments"},
+    "US_CASE": {"learning_points"},
+    "COMPLAINT": {"learning_points"},
+    "SERIOUS_INC": {"learning_points"},
+    "EDU_ACT": {"learning_points"},
+    "FORMAL_COURSE": {"reflective_notes", "lessons_learned"},
+    "REFLECT_LOG": {"replay_differently", "why", "different_outcome", "focussing_on", "learned"},
+    **{form: set() for form in ("STAT", "JCF", "TEACH", "ABSENCE", "CCT", "FILE_UPLOAD", "OOP")},
+}
+
+
+@pytest.mark.parametrize("form_type", sorted(bot.FORM_SCHEMAS))
+def test_reflection_provenance_uses_reviewed_schema_labels(form_type):
+    assert set(_REFLECTION_SCHEMA_KEYS) == set(bot.FORM_SCHEMAS)
+    fields = {field["key"]: "Synthetic OCR content." for field in bot.FORM_SCHEMAS[form_type]["fields"]}
+    expected = _REFLECTION_SCHEMA_KEYS[form_type]
+    assert set(bot._find_reflection_keys(fields, form_type)) == expected
+    draft = FormDraft(form_type=form_type, fields=fields)
+    filtered = bot._without_unsupported_reflection(
+        _context("Synthetic OCR content.", source="photo", has_user_context=False),
+        draft,
+    )
+    for key, value in draft.fields.items():
+        assert filtered.fields[key] == ("" if key in expected else value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["photo", "document"])
+@pytest.mark.parametrize("form_type", ["REFLECT_LOG", "TEACH"])
+async def test_media_factual_content_survives_preview_storage_and_filing(source, form_type):
+    sim = BotSimulator()
+    context = sim._make_context()
+    narrative = "Synthetic ED assessment with senior review."
+    outcomes = "Recognise sepsis and practise structured handover."
+    fields = ({"reflection": narrative, **{key: "I learned to escalate earlier."
+               for key in _REFLECTION_SCHEMA_KEYS[form_type]}} if form_type == "REFLECT_LOG" else
+              {"title_of_session": "Synthetic teaching session", "learning_outcomes": outcomes})
+    context.user_data.update(_context(str(fields), source=source, has_user_context=False).user_data)
+    context.user_data["chosen_form"] = form_type
+    draft = FormDraft(form_type=form_type, fields=fields)
+    await bot._show_draft_review(sim._make_text_update("Synthetic media").message,
+                                 context, draft, form_type, edit=False)
+    stored = bot._load_draft(context)
+    factual_key = "reflection" if form_type == "REFLECT_LOG" else "learning_outcomes"
+    assert stored.fields[factual_key] == fields[factual_key]
+    assert fields[factual_key] in sim.get_last_text()
+    assert all(stored.fields[key] == "" for key in _REFLECTION_SCHEMA_KEYS[form_type])
+    assert ("your reflection" in sim.get_last_text()) is (form_type == "REFLECT_LOG")
+    filed = await _capture_approved_fields(sim, context)
+    assert filed[factual_key] == fields[factual_key]
+    assert all(filed[key] == "" for key in _REFLECTION_SCHEMA_KEYS[form_type])
+
+
+@pytest.mark.parametrize("form_type,key,label", [
+    ("REFLECT_LOG", "reflection", "Description / What happened"),
+    ("TEACH", "learning_outcomes", "Learning outcomes used in session"),
+])
+def test_empty_factual_fields_use_their_own_gap_label(form_type, key, label):
+    draft = FormDraft(form_type=form_type, fields={key: ""})
+    gaps = bot._pre_draft_completeness_gaps(_context(""), draft, form_type)
+    assert any(gap["key"] == key and gap["label"] == label for gap in gaps)
+    requirements = bot._form_essential_requirements(form_type)
+    assert any(item["key"] == key and item["label"] == label for item in requirements)
+
+
+@pytest.mark.parametrize("optional_fields", [{}, {"replay_differently": ""}, {"learned": ""}])
+def test_reflective_log_prompt_works_when_optional_learning_keys_are_omitted(optional_fields):
+    narrative = "Synthetic ED assessment with senior review."
+    context = _context(narrative, source="document", has_user_context=False)
+    context.user_data["chosen_form"] = "REFLECT_LOG"
+    draft = FormDraft(form_type="REFLECT_LOG", fields={"reflection": narrative, **optional_fields})
+    bot._store_draft(context, draft)
+    assert "your reflection" in bot._draft_reply_hint(context)
+    assert bot._reflection_reply_requested(context) is True
+    reply = "Next time I will escalate earlier."
+    enriched = bot._without_unsupported_reflection(context, draft, reflection_reply=reply)
+    assert enriched.fields["reflection"] == narrative
+    assert bot._draft_reflection_text(enriched).strip()
+    assert all(enriched.fields[key] == reply for key in bot._find_reflection_keys(enriched.fields, "REFLECT_LOG"))
+
+
 def test_personal_reflection_gate_uses_doctor_words_not_generated_length():
     assert has_personal_reflective_input(
         "I assessed the patient and I learned to call for senior help earlier next time."
@@ -193,11 +285,11 @@ def test_ai_declaration_is_visible_and_accountability_is_explicit():
 
     draft = FormDraft(
         form_type="REFLECT_LOG",
-        fields={"reflection": "I learned to pause and seek a second perspective."},
+        fields={"learned": "I learned to pause and seek a second perspective."},
     )
     declared = _with_rcem_ai_declaration(draft)
     preview = _format_draft_preview(draft)
-    assert declared.fields["reflection"].endswith(AI_USE_DECLARATION)
+    assert declared.fields["learned"].endswith(AI_USE_DECLARATION)
     # The declaration lives once, inline in the reflection field; there is no
     # second "AI assistance" footer repeating it.
     assert AI_USE_DECLARATION in preview
@@ -343,7 +435,7 @@ async def test_quick_improve_cannot_originate_the_doctors_reflection():
         "draft_data": {
             "_type": "FORM",
             "form_type": "REFLECT_LOG",
-            "fields": {"reflection": "AI-created learning point."},
+            "fields": {"learned": "AI-created learning point."},
             "uuid": None,
         },
     })
@@ -376,7 +468,7 @@ async def test_approval_sends_ai_declaration_in_fields_to_filer():
             "form_type": "REFLECT_LOG",
             "fields": {
                 "date_of_encounter": "2026-03-17",
-                "reflection": "I realised I had anchored early and will reopen the differential.",
+                "learned": "I realised I had anchored early and will reopen the differential.",
             },
             "uuid": None,
         },
@@ -398,8 +490,8 @@ async def test_approval_sends_ai_declaration_in_fields_to_filer():
     assert result == AWAIT_APPROVAL
     route.assert_awaited_once()
     filed_fields = route.await_args.kwargs["fields"]
-    assert filed_fields["reflection"].endswith(AI_USE_DECLARATION)
-    assert filed_fields["reflection"].count(AI_USE_DECLARATION) == 1
+    assert filed_fields["learned"].endswith(AI_USE_DECLARATION)
+    assert filed_fields["learned"].count(AI_USE_DECLARATION) == 1
 
 
 @pytest.mark.parametrize("improved_once", [False, True])
@@ -518,12 +610,13 @@ def test_doctor_supplied_reflection_survives_preview_without_a_missing_reflectio
 @pytest.mark.parametrize("form_type", ["CBD", "DOPS", "REFLECT_LOG"])
 async def test_captionless_photo_learning_is_blank_in_preview_and_filing(form_type):
     reflection = "Learning points: check understanding before ending a referral."
+    narrative = "Synthetic ED assessment with senior review."
     sim = BotSimulator()
     context = sim._make_context()
     context.user_data.update(_context(reflection, source="photo", has_user_context=False).user_data)
     context.user_data.update(chosen_form=form_type, rcem_personal_reflection_confirmed=True)
     draft = FormDraft(form_type=form_type, fields={
-        "reflection": reflection, "learned": reflection,
+        "reflection": narrative if form_type == "REFLECT_LOG" else reflection, "learned": reflection,
         "replay_differently": reflection, "why": reflection,
         "different_outcome": reflection, "focussing_on": reflection,
     })
@@ -531,9 +624,10 @@ async def test_captionless_photo_learning_is_blank_in_preview_and_filing(form_ty
                                  context, draft, form_type, edit=False)
     assert reflection not in sim.get_last_text()
     stored = bot._load_draft(context)
-    assert stored.fields["reflection"] == ""
+    assert stored.fields["reflection"] == (narrative if form_type == "REFLECT_LOG" else "")
     if form_type == "REFLECT_LOG":
-        assert all(not value for value in stored.fields.values())
+        assert all(not stored.fields[key] for key in _REFLECTION_SCHEMA_KEYS[form_type])
+        assert narrative in sim.get_last_text()
     if form_type != "DOPS":
         assert "Still needed:" in sim.get_last_text()
         assert "your reflection" in sim.get_last_text()
@@ -547,7 +641,10 @@ async def test_captionless_photo_learning_is_blank_in_preview_and_filing(form_ty
          patch("bot._alert_filing_failure", new=AsyncMock()):
         await bot.handle_approval_approve(sim._make_callback_update("APPROVE|draft"), context)
     route.assert_awaited_once()
-    assert route.await_args.kwargs["fields"]["reflection"] == ""
+    filed = route.await_args.kwargs["fields"]
+    assert filed["reflection"] == (narrative if form_type == "REFLECT_LOG" else "")
+    if form_type == "REFLECT_LOG":
+        assert all(not filed[key] for key in _REFLECTION_SCHEMA_KEYS[form_type])
 
 
 @pytest.mark.parametrize("form_type", ["CBD", "REFLECT_LOG"])
