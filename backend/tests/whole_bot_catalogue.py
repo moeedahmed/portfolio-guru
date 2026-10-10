@@ -94,7 +94,8 @@ def producer_digest():
 # 10 Oct 2026: polite edit and cancel instructions keep their control routes.
 # 10 Oct 2026: reflection sources exclude controls; voice/audio share typed routing;
 # prompted replies fill blank reflections. Existing payloads and ownership unchanged.
-PRODUCER_DIGEST = '047e6d7d390a9f33607391d126d547c549f72808e63000fb93e97188b1d5e154'
+# 10 Oct 2026: an edit verb counts as a control only when it names part of the draft.
+PRODUCER_DIGEST = '96522dc993f31a54335dad903d1d025758e57dd4ada26c17eb665475851da95a'
 CALLBACK_BRANCHES = set("""
 ACTION|connect_passwordless ACTION|passwordless_done ACTION|passwordless_link ACTION|pwl_reconnect ACTION|pwl_reconnected ACTION|setup_password
 ACTION|back_to_menu ACTION|back_to_missing ACTION|cancel ACTION|change_curriculum ACTION|change_level

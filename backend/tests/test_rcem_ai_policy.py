@@ -1433,3 +1433,15 @@ def test_labelled_reflection_excludes_embedded_edit_instruction(reflection):
     filtered = bot._without_unsupported_reflection(context, CBDData(reflection="I learned to escalate earlier."))
     assert all(line in filtered.reflection for line in reflection.splitlines())
     assert "Please rewrite" not in filtered.reflection
+
+
+@pytest.mark.parametrize("reply", [
+    "Make sure I escalate earlier next time", "Add a senior review sooner next time",
+])
+def test_reflection_starting_with_edit_verb_is_kept(reply):
+    context = _context(reply)
+    filtered = bot._without_unsupported_reflection(
+        context, CBDData(reflection="I learned to escalate earlier."), reflection_reply=reply,
+    )
+    assert filtered.reflection == reply
+    assert not bot._is_reflection_control(reply)

@@ -6584,10 +6584,20 @@ def _reflection_reply_requested(context) -> bool:
     )
 
 
+_DRAFT_PART_RE = re.compile(
+    r"\b(?:date|reflection|draft|form|field|title|summary|wording|section|curriculum|"
+    r"slos?|kcs?|key capabilit(?:y|ies)|stage|level|setting|role|supervision|"
+    r"this|that|it)\b",
+    re.IGNORECASE,
+)
+
+
 def _is_reflection_control(text: str) -> bool:
     """Authored workflow instructions never supply reflective source content."""
+    # An edit verb alone is not a control: "Add a senior review sooner next
+    # time" is reflection. It must name part of the draft it changes.
     return bool(
-        _EXPLICIT_EDIT_RE.search(text)
+        (_EXPLICIT_EDIT_RE.search(text) and _DRAFT_PART_RE.search(text))
         or _is_recent_filing_status_question(text)
         or is_reuse_request(text)
         or (extract_explicit_form_type(text, require_intent=False)
